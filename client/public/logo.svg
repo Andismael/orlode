@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- CorpMind Logo — Icon Only (for dark backgrounds) -->
+  <rect width="512" height="512" rx="115" fill="#2B4AFF"/>
+  <!-- Neural arc (brain) -->
+  <path d="M150 290 A120 120 0 1 1 362 290" stroke="#ffffff" stroke-width="18" fill="none" stroke-linecap="round"/>
+  <!-- Intelligence dot (amber) -->
+  <circle cx="256" cy="180" r="26" fill="#FF9B00"/>
+  <!-- Base line (stability) -->
+  <path d="M182 340 L330 340" stroke="#ffffff" stroke-width="14" stroke-linecap="round"/>
+  <!-- Agent dots -->
+  <circle cx="150" cy="248" r="13" fill="rgba(255,255,255,0.35)"/>
+  <circle cx="362" cy="248" r="13" fill="rgba(255,255,255,0.35)"/>
+</svg>

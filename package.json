@@ -1,0 +1,33 @@
+{
+  "name": "corpmind-ai",
+  "version": "1.0.0",
+  "description": "Orlode AI — Corporate AI Agent Platform",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "npm run dev --workspace=client",
+    "dev:server": "npm run dev --workspace=server",
+    "build": "npm run build --workspace=client && npm run build --workspace=server",
+    "install:all": "npm install && npm install --workspace=client && npm install --workspace=server",
+    "lint": "npm run lint --workspace=client && npm run lint --workspace=server",
+    "test": "npm run test --workspace=server && npm run test --workspace=client",
+    "test:backend": "npm run test --workspace=server",
+    "test:frontend": "npm run test --workspace=client",
+    "test:integration": "npm run test:integration --workspace=server",
+    "test:coverage": "npm run test:coverage --workspace=server && npm run test:coverage --workspace=client",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:all": "npm run test && npm run test:integration && npm run test:e2e"
+  },
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

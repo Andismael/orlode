@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Company documents - accessible by authenticated users of that company
+    match /companies/{companyId}/documents/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // User avatars
+    match /users/{userId}/avatar/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Company logos
+    match /companies/{companyId}/logo/{allPaths=**} {
+      allow read: if true; // Public logos
+      allow write: if request.auth != null;
+    }
+
+    // Default: deny all
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

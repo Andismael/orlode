@@ -1,0 +1,14 @@
+{
+  "name": "orlode-slides",
+  "private": true,
+  "scripts": {
+    "dev": "slidev firebase-connect.md --open",
+    "build": "slidev build firebase-connect.md",
+    "export": "slidev export firebase-connect.md --format pdf",
+    "export-pptx": "slidev export firebase-connect.md --format pptx"
+  },
+  "dependencies": {
+    "@slidev/cli": "^0.50.0",
+    "@slidev/theme-default": "^0.25.0"
+  }
+}

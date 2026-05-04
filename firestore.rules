@@ -1,0 +1,278 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getCompanyId() {
+      return getUserData().companyId;
+    }
+
+    function belongsToCompany(companyId) {
+      return isAuthenticated() && getCompanyId() == companyId;
+    }
+
+    function isCompanyAdmin(companyId) {
+      return belongsToCompany(companyId) && getUserData().role in ['admin', 'manager'];
+    }
+
+    function isCompanyOwner(companyId) {
+      return belongsToCompany(companyId) && getUserData().role == 'admin';
+    }
+
+    // ── Users ───────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        isUser(userId) || belongsToCompany(resource.data.companyId)
+      );
+      allow write:  if isUser(userId);
+      allow create: if isAuthenticated();
+      // Admins can update user roles
+      allow update: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+    }
+
+    // ── Companies ───────────────────────────────────────────────────────────
+    match /companies/{companyId} {
+      allow read:   if belongsToCompany(companyId);
+      allow create: if isAuthenticated() && request.auth.uid == companyId;
+      allow update: if isCompanyAdmin(companyId);
+      allow delete: if false; // Never delete via client
+
+      // ── Documents ──────────────────────────────────────────────────────
+      match /documents/{documentId} {
+        allow read:   if belongsToCompany(companyId);
+        allow create: if belongsToCompany(companyId);
+        allow update: if belongsToCompany(companyId);
+        allow delete: if isCompanyAdmin(companyId);
+      }
+
+      // ── Vector chunks (embeddings — read-only for clients) ──────────────
+      match /vectorChunks/{chunkId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if false; // Server-only
+      }
+
+      // ── Meetings ────────────────────────────────────────────────────────
+      match /meetings/{meetingId} {
+        allow read:   if belongsToCompany(companyId);
+        allow create: if belongsToCompany(companyId);
+        allow update: if belongsToCompany(companyId);
+        allow delete: if isCompanyAdmin(companyId);
+      }
+
+      // ── Faces / biometric ────────────────────────────────────────────────
+      match /faces/{faceId} {
+        allow read:   if belongsToCompany(companyId);
+        allow create: if isCompanyAdmin(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if isCompanyAdmin(companyId);
+      }
+
+      // ── IT Assets ───────────────────────────────────────────────────────
+      match /itAssets/{assetId} {
+        allow read:   if belongsToCompany(companyId);
+        allow write:  if isCompanyAdmin(companyId);
+      }
+
+      match /itTickets/{ticketId} {
+        allow read:   if belongsToCompany(companyId);
+        allow create: if belongsToCompany(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if false;
+      }
+
+      // ── Security ─────────────────────────────────────────────────────────
+      match /securityIncidents/{incidentId} {
+        allow read:   if isCompanyAdmin(companyId);
+        allow create: if belongsToCompany(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if false;
+      }
+
+      match /securityScore/{scoreId} {
+        allow read:  if isCompanyAdmin(companyId);
+        allow write: if false; // Server-only
+      }
+
+      // ── Marketing content ─────────────────────────────────────────────────
+      match /marketingContent/{contentId} {
+        allow read:   if belongsToCompany(companyId);
+        allow create: if belongsToCompany(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if isCompanyAdmin(companyId);
+      }
+
+      // ── HR ───────────────────────────────────────────────────────────────
+      match /leaveRequests/{requestId} {
+        allow read: if belongsToCompany(companyId) && (
+          resource.data.userId == request.auth.uid || isCompanyAdmin(companyId)
+        );
+        allow create: if belongsToCompany(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if false;
+      }
+
+      match /leaveBalances/{balanceId} {
+        allow read: if belongsToCompany(companyId) && (
+          balanceId.matches(request.auth.uid + '_.*') || isCompanyAdmin(companyId)
+        );
+        allow write: if false; // Server-only
+      }
+
+      match /hrPolicies/{policyId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      // ── Finance ──────────────────────────────────────────────────────────
+      match /invoices/{invoiceId} {
+        allow read:  if isCompanyAdmin(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      match /expenses/{expenseId} {
+        allow read: if belongsToCompany(companyId) && (
+          resource.data.submittedBy == request.auth.uid || isCompanyAdmin(companyId)
+        );
+        allow create: if belongsToCompany(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if false;
+      }
+
+      // ── Sales ────────────────────────────────────────────────────────────
+      match /leads/{leadId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      match /deals/{dealId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      // ── Support ──────────────────────────────────────────────────────────
+      match /supportTickets/{ticketId} {
+        allow read:   if belongsToCompany(companyId);
+        allow create: if belongsToCompany(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if false;
+      }
+
+      // ── Legal ────────────────────────────────────────────────────────────
+      match /legalDeadlines/{deadlineId} {
+        allow read:  if isCompanyAdmin(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      match /contractTemplates/{templateId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      // ── Training ─────────────────────────────────────────────────────────
+      match /trainingCourses/{courseId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      match /trainingProgress/{progressId} {
+        allow read: if belongsToCompany(companyId);
+        allow write: if belongsToCompany(companyId);
+      }
+
+      // ── News ─────────────────────────────────────────────────────────────
+      match /newsBriefings/{briefingId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if false; // Server-only
+      }
+
+      // ── API Keys (admin only — no plaintext keys stored) ─────────────────
+      match /apiKeys/{keyId} {
+        allow read:  if isCompanyAdmin(companyId);
+        allow write: if false; // Server-only
+      }
+
+      // ── Billing / Usage ───────────────────────────────────────────────────
+      match /usageMetrics/{month} {
+        allow read:  if isCompanyAdmin(companyId);
+        allow write: if false; // Server-only
+      }
+
+      // ── Settings ──────────────────────────────────────────────────────────
+      match /settings/{settingId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+
+      // ── Visitors (Reception) ──────────────────────────────────────────────
+      match /visitors/{visitId} {
+        allow read:  if belongsToCompany(companyId);
+        allow create: if belongsToCompany(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if false;
+      }
+
+      // ── Compliance ────────────────────────────────────────────────────────
+      match /compliance/{frameworkId} {
+        allow read:  if isCompanyAdmin(companyId);
+        allow write: if false; // Server-only
+      }
+
+      // Catch-all for any other company subcollections — admin read/write
+      match /{subcollection}/{docId} {
+        allow read:  if belongsToCompany(companyId);
+        allow write: if isCompanyAdmin(companyId);
+      }
+    }
+
+    // ── Conversations ─────────────────────────────────────────────────────────
+    match /conversations/{conversationId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        belongsToCompany(resource.data.companyId)
+      );
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isCompanyAdmin(resource.data.companyId)
+      );
+
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && (
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid ||
+          belongsToCompany(get(/databases/$(database)/documents/conversations/$(conversationId)).data.companyId)
+        );
+        allow write: if isAuthenticated();
+      }
+    }
+
+    // ── Audit Logs (company admin read-only, server write-only) ──────────────
+    match /auditLogs/{logId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isCompanyAdmin(resource.data.companyId)
+      );
+      allow write: if false; // Server-only via Admin SDK
+    }
+
+    // ── Insights (company-level) ──────────────────────────────────────────────
+    match /insights/{insightId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow write: if false; // Server-only
+    }
+  }
+}

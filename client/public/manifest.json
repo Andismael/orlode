@@ -1,0 +1,19 @@
+{
+  "name": "Orlode AI",
+  "short_name": "Orlode",
+  "description": "The Spirit of Enterprise — Plateforme AI multi-agents pour entreprises",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080C1A",
+  "theme_color": "#0019FF",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"]
+}

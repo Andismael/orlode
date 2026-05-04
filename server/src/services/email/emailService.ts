@@ -1,0 +1,735 @@
+/**
+ * Email Service — Resend
+ * Domain : music.zinakonect.com
+ *
+ * BRANDING: All emails use the COMPANY's name, logo and slogan — not Orlode.
+ * The company data is fetched from Firestore via getBranding(companyId).
+ */
+import { Resend } from 'resend';
+import { logger } from '../../utils/logger';
+import { getGmailConnection, sendViaGmail } from './gmailSendService';
+import { getFirestore } from '../../config/firebase.config';
+
+async function logSentEmail(opts: {
+  companyId?: string; to: string | string[]; subject: string; body: string;
+  cc?: string | string[]; provider: string; from?: string; externalId: string;
+}): Promise<void> {
+  if (!opts.companyId) return;
+  try {
+    const db = getFirestore();
+    await db.collection('emails').add({
+      companyId: opts.companyId,
+      folder: 'sent',
+      to: Array.isArray(opts.to) ? opts.to.join(', ') : opts.to,
+      cc: opts.cc ? (Array.isArray(opts.cc) ? opts.cc.join(', ') : opts.cc) : '',
+      from: opts.from ?? '',
+      subject: opts.subject,
+      body: opts.body,
+      provider: opts.provider,
+      externalId: opts.externalId,
+      sentAt: new Date().toISOString(),
+      read: true,
+    });
+  } catch (err) {
+    logger.warn('[EmailService] Failed to log sent email to Firestore', { err: String(err) });
+  }
+}
+
+const resend = new Resend(process.env['RESEND_API_KEY']);
+
+const FROM_DEFAULT = process.env['RESEND_FROM'] ?? 'Orlode AI <noreply@music.zinakonect.com>';
+
+// ── Branding ─────────────────────────────────────────────────────────────────
+
+export interface CompanyBranding {
+  name: string;
+  logoUrl?: string;
+  slogan?: string;
+  website?: string;
+  email?: string;
+}
+
+const brandingCache = new Map<string, { data: CompanyBranding; at: number }>();
+const CACHE_TTL = 10 * 60 * 1000; // 10 min
+
+/**
+ * Get company branding from Firestore (cached 10 min).
+ * Falls back to "Orlode AI" if company not found.
+ */
+export async function getBranding(companyId?: string): Promise<CompanyBranding> {
+  if (!companyId) return { name: 'Orlode AI', website: 'corpmind.ai' };
+
+  const cached = brandingCache.get(companyId);
+  if (cached && Date.now() - cached.at < CACHE_TTL) return cached.data;
+
+  try {
+    const { getFirestore } = await import('../../config/firebase.config');
+    const doc = await getFirestore().collection('companies').doc(companyId).get();
+    const d = doc.data() ?? {};
+    const branding: CompanyBranding = {
+      name:    (d['name'] as string) || 'Orlode AI',
+      logoUrl: (d['logoUrl'] as string) || undefined,
+      slogan:  (d['slogan'] as string) || undefined,
+      website: (d['website'] as string) || undefined,
+      email:   (d['email'] as string) || undefined,
+    };
+    brandingCache.set(companyId, { data: branding, at: Date.now() });
+    return branding;
+  } catch {
+    return { name: 'Orlode AI', website: 'corpmind.ai' };
+  }
+}
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+export interface SendEmailOptions {
+  to: string | string[];
+  subject: string;
+  html: string;
+  text?: string;
+  from?: string;
+  replyTo?: string;
+  cc?: string | string[];
+  bcc?: string | string[];
+  tags?: { name: string; value: string }[];
+  /** Company ID — if set and company has Gmail connected, sends via Gmail. */
+  companyId?: string;
+  /** Force Resend even if Gmail is connected (for system emails like invites to Orlode itself). */
+  forceResend?: boolean;
+  /** Send-as alias configured in the user's Gmail (e.g., 'commercial@domain.com'). Gmail path only. */
+  sendAsAlias?: string;
+  /** File attachments — supported on both Gmail (multipart/mixed) and Resend. */
+  attachments?: Array<{ filename: string; content: Buffer | string }>;
+}
+
+export interface EmailResult {
+  id: string;
+  success: true;
+  provider: 'gmail' | 'resend';
+  from?: string;
+}
+
+// ── Core send ─────────────────────────────────────────────────────────────────
+
+export async function sendEmail(opts: SendEmailOptions): Promise<EmailResult> {
+  // Anti-spam: respect prior opt-outs. Skip the send entirely (return a fake ID
+  // so callers don't crash) instead of sending mail to someone who unsubscribed.
+  if (opts.companyId) {
+    try {
+      const recipients = Array.isArray(opts.to) ? opts.to : [opts.to];
+      const blocked: string[] = [];
+      for (const email of recipients) {
+        const docId = Buffer.from(email.toLowerCase()).toString('base64url');
+        const doc = await getFirestore().collection(`companies/${opts.companyId}/unsubscribes`).doc(docId).get();
+        if (doc.exists) blocked.push(email);
+      }
+      if (blocked.length === recipients.length) {
+        logger.info('[EmailService] All recipients unsubscribed — send skipped', { to: recipients });
+        return { id: `skipped_unsub_${Date.now()}`, success: true, provider: 'resend', from: 'unsubscribed' };
+      }
+      if (blocked.length > 0) {
+        // Filter out unsubscribed from the recipient list
+        opts.to = recipients.filter(r => !blocked.includes(r));
+        logger.info('[EmailService] Some recipients unsubscribed — partial send', { skipped: blocked, kept: opts.to });
+      }
+    } catch (err) {
+      logger.warn('[EmailService] Unsubscribe check failed (proceeding anyway)', { err: String(err) });
+    }
+  }
+
+  // Try Gmail first if company has a connection
+  if (opts.companyId && !opts.forceResend) {
+    try {
+      const connection = await getGmailConnection(opts.companyId);
+      if (connection) {
+        const result = await sendViaGmail({
+          companyId: opts.companyId,
+          to: opts.to,
+          subject: opts.subject,
+          html: opts.html,
+          cc: opts.cc,
+          bcc: opts.bcc,
+          replyTo: opts.replyTo,
+          sendAsAlias: opts.sendAsAlias,
+          attachments: opts.attachments,
+        });
+        await logSentEmail({
+          companyId: opts.companyId, to: opts.to, subject: opts.subject, body: opts.html,
+          cc: opts.cc, provider: 'gmail', from: result.from, externalId: result.id,
+        });
+        return { id: result.id, success: true, provider: 'gmail', from: result.from };
+      }
+    } catch (err) {
+      logger.warn('[EmailService] Gmail send failed, falling back to Resend', { companyId: opts.companyId, err: String(err) });
+    }
+  }
+
+  // Resend fallback / system emails
+  // If a company is set, brand the "from" with the company name (still uses verified Resend domain)
+  let brandedFrom = opts.from ?? FROM_DEFAULT;
+  if (!opts.from && opts.companyId) {
+    try {
+      const branding = await getBranding(opts.companyId);
+      // Extract email part from FROM_DEFAULT — keep verified Resend address but rebrand the display name
+      const match = FROM_DEFAULT.match(/<([^>]+)>/);
+      const verifiedEmail = match?.[1] ?? FROM_DEFAULT.split(' ').pop() ?? 'noreply@music.zinakonect.com';
+      brandedFrom = `${branding.name} <${verifiedEmail}>`;
+    } catch {
+      // Fall through to default
+    }
+  }
+
+  const resendPayload: Record<string, unknown> = {
+    from:    brandedFrom,
+    to:      Array.isArray(opts.to) ? opts.to : [opts.to],
+    subject: opts.subject,
+    html:    opts.html,
+    text:    opts.text,
+    replyTo: opts.replyTo,
+    cc:      opts.cc ? (Array.isArray(opts.cc) ? opts.cc : [opts.cc]) : undefined,
+    bcc:     opts.bcc ? (Array.isArray(opts.bcc) ? opts.bcc : [opts.bcc]) : undefined,
+    tags:    opts.tags,
+  };
+  if (opts.attachments?.length) {
+    resendPayload['attachments'] = opts.attachments.map(a => ({
+      filename: a.filename,
+      content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
+    }));
+  }
+  const { data, error } = await resend.emails.send(resendPayload as unknown as Parameters<typeof resend.emails.send>[0]);
+
+  if (error) {
+    logger.error('[EmailService] Resend error', { error });
+    throw new Error(`Email send failed: ${error.message}`);
+  }
+
+  logger.info('[EmailService] Email sent via Resend', { id: data!.id, to: opts.to, subject: opts.subject, from: brandedFrom });
+  await logSentEmail({
+    companyId: opts.companyId, to: opts.to, subject: opts.subject, body: opts.html,
+    cc: opts.cc, provider: 'resend', from: brandedFrom, externalId: data!.id,
+  });
+  return { id: data!.id, success: true, provider: 'resend' };
+}
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+
+/** Invitation d'un collaborateur — sent via company Gmail if connected */
+export async function sendInviteEmail(opts: {
+  to: string;
+  inviteeName: string;
+  companyName: string;
+  inviterName: string;
+  inviteUrl: string;
+  companyId?: string;
+}) {
+  const b = await getBranding(opts.companyId);
+  return sendEmail({
+    to: opts.to,
+    subject: `${opts.inviterName} vous invite a rejoindre ${opts.companyName}`,
+    html: inviteTemplate(opts, b),
+    tags: [{ name: 'type', value: 'invite' }],
+    companyId: opts.companyId,
+  });
+}
+
+/** Alerte securite / incident — sent via company Gmail if connected */
+export async function sendSecurityAlertEmail(opts: {
+  to: string;
+  companyName: string;
+  alertType: string;
+  details: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  companyId?: string;
+}) {
+  const b = await getBranding(opts.companyId);
+  const colorMap = { low: '#16a34a', medium: '#d97706', high: '#ea580c', critical: '#dc2626' };
+  return sendEmail({
+    to: opts.to,
+    subject: `[${opts.severity.toUpperCase()}] Alerte securite — ${opts.alertType}`,
+    html: alertTemplate({ ...opts, color: colorMap[opts.severity] }, b),
+    tags: [{ name: 'type', value: 'security-alert' }, { name: 'severity', value: opts.severity }],
+    companyId: opts.companyId,
+  });
+}
+
+/** Rapport hebdomadaire — sent via company Gmail if connected */
+export async function sendWeeklyReportEmail(opts: {
+  to: string;
+  companyName: string;
+  period: string;
+  stats: { label: string; value: string }[];
+  reportUrl: string;
+  companyId?: string;
+}) {
+  const b = await getBranding(opts.companyId);
+  return sendEmail({
+    to: opts.to,
+    subject: `Rapport hebdomadaire ${b.name} — ${opts.period}`,
+    html: reportTemplate(opts, b),
+    tags: [{ name: 'type', value: 'weekly-report' }],
+    companyId: opts.companyId,
+  });
+}
+
+/** Notification contrat WEMAS — sent via company Gmail if connected */
+export async function sendContractEmail(opts: {
+  to: string;
+  contractTitle: string;
+  senderName: string;
+  signUrl: string;
+  expiresAt?: string;
+  companyId?: string;
+}) {
+  const b = await getBranding(opts.companyId);
+  return sendEmail({
+    to: opts.to,
+    subject: `Contrat a signer : ${opts.contractTitle}`,
+    html: contractTemplate(opts, b),
+    tags: [{ name: 'type', value: 'contract' }],
+    companyId: opts.companyId,
+  });
+}
+
+/** Welcome email — sent right after registration */
+export async function sendWelcomeEmail(opts: {
+  to: string;
+  userName: string;
+  companyName: string;
+  plan?: string;
+  dashboardUrl?: string;
+}) {
+  return sendEmail({
+    to: opts.to,
+    subject: `Bienvenue sur Orlode AI, ${opts.userName} !`,
+    html: welcomeTemplate(opts),
+    tags: [{ name: 'type', value: 'welcome' }],
+    forceResend: true,
+  });
+}
+
+/**
+ * Onboarding complete email — sent when user finishes the wizard.
+ * Different from welcomeEmail (sent at signup): this one mentions the
+ * activated pack, the trial countdown, and concrete next-steps.
+ */
+export async function sendOnboardingCompleteEmail(opts: {
+  to: string;
+  userName: string;
+  companyName: string;
+  packName?: string;       // "Pack PME", null if user picked Free
+  trialDays?: number;      // 30 if pack picked
+  agentCount?: number;     // 7 (pack) or 1 (free)
+  dashboardUrl?: string;
+  companyId?: string;
+}) {
+  const b = await getBranding(opts.companyId);
+  const dashUrl = opts.dashboardUrl ?? 'https://mon-assistant-86bbd.web.app/dashboard';
+  const isOnPack = !!opts.packName;
+
+  const heroBlock = isOnPack
+    ? `
+      <div style="background:linear-gradient(135deg,#10B981,#059669);color:#fff;padding:20px 24px;border-radius:14px;margin:0 0 20px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.85;font-weight:700;margin-bottom:6px;">
+          🎁 Essai gratuit activé
+        </div>
+        <div style="font-size:22px;font-weight:800;line-height:1.2;margin-bottom:4px;">${opts.packName}</div>
+        <div style="font-size:13px;opacity:0.92;">${opts.agentCount ?? 7} agents IA · ${opts.trialDays ?? 30} jours offerts · Sans CB</div>
+      </div>`
+    : `
+      <div style="background:#F3F4F6;border:1px solid #E5E7EB;color:#111827;padding:20px 24px;border-radius:14px;margin:0 0 20px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6B7280;font-weight:700;margin-bottom:6px;">
+          Plan Free actif
+        </div>
+        <div style="font-size:18px;font-weight:700;line-height:1.2;margin-bottom:4px;">Agent Knowledge inclus</div>
+        <div style="font-size:13px;color:#6B7280;">Active un pack métier quand tu veux — 30 jours gratuits sans CB.</div>
+      </div>`;
+
+  const nextSteps = isOnPack
+    ? [
+        { num: 1, label: 'Pose ta première question à un agent', desc: 'Tape "Crée un lead pour Marie" dans le chat — l\'agent Sales s\'en occupe.' },
+        { num: 2, label: 'Importe tes documents', desc: 'Glisse-dépose tes PDF, contrats, FAQ → Knowledge brain les indexe.' },
+        { num: 3, label: 'Branche WhatsApp Business', desc: 'Réponds aux clients via tes agents directement sur WhatsApp.' },
+      ]
+    : [
+        { num: 1, label: 'Importe tes premiers documents', desc: 'Knowledge agent peut répondre dès que tu lui donnes du contenu.' },
+        { num: 2, label: 'Découvre les packs métier', desc: '$20/mo · 7 agents par pack · 30 jours gratuits.' },
+        { num: 3, label: 'Configure ton clone', desc: 'Tes visiteurs peuvent te parler 24/7 via le widget chat.' },
+      ];
+
+  const stepsHtml = nextSteps.map(s => `
+    <tr>
+      <td style="padding:12px 0;vertical-align:top;width:36px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#7C3AED;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;">${s.num}</div>
+      </td>
+      <td style="padding:12px 0;vertical-align:top;">
+        <div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:2px;">${s.label}</div>
+        <div style="font-size:12px;color:#6B7280;line-height:1.5;">${s.desc}</div>
+      </td>
+    </tr>`).join('');
+
+  const html = baseWrapper(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:#111827;">${opts.companyName} est prêt 🚀</h2>
+    <p style="margin:0 0 20px;color:#6b7280;font-size:14px;line-height:1.5;">
+      Bonjour <strong>${opts.userName}</strong>, ton onboarding est terminé.
+    </p>
+    ${heroBlock}
+    <h3 style="margin:8px 0 4px;font-size:14px;color:#111827;">Tes 3 prochaines actions</h3>
+    <table cellpadding="0" cellspacing="0" style="width:100%;">
+      ${stepsHtml}
+    </table>
+    <div style="margin:24px 0 0;text-align:center;">
+      <a href="${dashUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        Ouvrir mon tableau de bord
+      </a>
+    </div>
+    <p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">
+      Besoin d'aide ? Réponds à cet email — un humain répond.
+    </p>
+  `, b);
+
+  return sendEmail({
+    to: opts.to,
+    subject: isOnPack
+      ? `🎉 ${opts.packName} activé — voici ta première mission`
+      : `${opts.companyName} est prêt sur Orlode AI`,
+    html,
+    tags: [{ name: 'type', value: 'onboarding-complete' }],
+    forceResend: true,
+    companyId: opts.companyId,
+  });
+}
+
+/** Confirmation de paiement — forced Resend (system email, not from company mailbox) */
+export async function sendPaymentConfirmationEmail(opts: {
+  to: string;
+  planName: string;
+  amount: string;       // e.g. "$49.99" or "29 400 FCFA"
+  method: string;       // "Carte bancaire", "PayPal", "Wave", "Orange Money", etc.
+  reference: string;    // payment ID
+  interval?: 'monthly' | 'yearly';
+  nextBillingDate?: string; // ISO date or null for one-shot
+  dashboardUrl?: string;
+  receiptUrl?: string;  // Stripe receipt URL if available
+  companyId?: string;
+}) {
+  const b = await getBranding(opts.companyId);
+  return sendEmail({
+    to: opts.to,
+    subject: `Paiement confirme — Plan ${opts.planName} active`,
+    html: paymentConfirmationTemplate(opts, b),
+    tags: [{ name: 'type', value: 'payment-confirmation' }, { name: 'plan', value: opts.planName }],
+    forceResend: true, // system confirmation — always from Orlode, not the client's Gmail
+  });
+}
+
+/** Reponse email via Agent Comms — sent via company Gmail if connected */
+export async function sendReplyEmail(opts: {
+  to: string;
+  subject: string;
+  bodyHtml: string;
+  replyTo?: string;
+  companyId?: string;
+}) {
+  const b = await getBranding(opts.companyId);
+  return sendEmail({
+    to: opts.to,
+    subject: opts.subject,
+    html: replyTemplate(opts.bodyHtml, b),
+    replyTo: opts.replyTo,
+    tags: [{ name: 'type', value: 'ai-reply' }],
+    companyId: opts.companyId,
+  });
+}
+
+// ── HTML Templates ────────────────────────────────────────────────────────────
+
+function baseWrapper(content: string, b: CompanyBranding) {
+  const logoHtml = b.logoUrl
+    ? `<img src="${b.logoUrl}" alt="${b.name}" style="height:36px;max-width:180px;object-fit:contain;margin-bottom:6px;" /><br>`
+    : '';
+  const footerSite = b.website ?? 'corpmind.ai';
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:0;background:#f4f6fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#0019FF,#0092FF);padding:28px 36px;text-align:center;">
+            ${logoHtml}
+            <span style="color:#fff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">${b.name}</span>
+            ${b.slogan ? `<br><span style="color:rgba(255,255,255,0.7);font-size:12px;">${b.slogan}</span>` : ''}
+          </td>
+        </tr>
+        <!-- Content -->
+        <tr><td style="padding:36px;">
+          ${content}
+        </td></tr>
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f8f9fc;padding:20px 36px;text-align:center;border-top:1px solid #eef0f5;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;">
+              &copy; ${new Date().getFullYear()} ${b.name}${footerSite ? ` · ${footerSite}` : ''}<br>
+              ${b.slogan ? `${b.slogan}` : `Propulse par Orlode AI`}
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ── Public agent email wrapper ───────────────────────────────────────────────
+// Used by externalTools.sendEmail to wrap agent-generated text/HTML into a
+// proper branded email. Reduces spam-flagging by:
+//   - real DOCTYPE + viewport (mobile-ready)
+//   - branded header (logo or company name)
+//   - body with personalized opening
+//   - clear CTA when applicable (auto-detected from links)
+//   - footer with company info + unsubscribe link (anti-spam compliance)
+
+export interface WrapAgentEmailOpts {
+  body: string;                    // Plain text or HTML (auto-detected)
+  companyId?: string;
+  recipientName?: string;          // First-line "Bonjour {name}" personalization
+  recipientEmail?: string;
+  intent?: 'promo' | 'reminder' | 'confirmation' | 'invoice' | 'generic';
+  ctaLabel?: string;               // "Voir l'offre", "Confirmer", "Payer la facture"
+  ctaUrl?: string;
+}
+
+export async function wrapAgentEmail(opts: WrapAgentEmailOpts): Promise<{ html: string; text: string }> {
+  const b = await getBranding(opts.companyId);
+
+  // If body is already a full HTML doc (DOCTYPE / <html>), return as-is
+  // — power-users / templates have full control.
+  if (/^<!DOCTYPE|<html[\s>]/i.test(opts.body.trim())) {
+    return { html: opts.body, text: stripHtml(opts.body) };
+  }
+
+  // Convert plain-text body to safe HTML.
+  // We DO NOT escape user-provided HTML if it's already there — we trust the LLM
+  // (and external callers) to pass clean content.
+  const isHtml = opts.body.includes('<') && opts.body.includes('>');
+  const bodyHtml = isHtml
+    ? opts.body
+    : opts.body.split(/\n\n+/).map(p => `<p style="margin:0 0 14px;color:#374151;font-size:15px;line-height:1.6;">${p.replace(/\n/g, '<br>')}</p>`).join('');
+
+  const greeting = opts.recipientName
+    ? `<p style="margin:0 0 16px;color:#111827;font-size:16px;font-weight:600;">Bonjour ${opts.recipientName},</p>`
+    : '';
+
+  const ctaHtml = opts.ctaUrl && opts.ctaLabel
+    ? `<div style="margin:24px 0;text-align:center;">
+        <a href="${opts.ctaUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:13px 32px;border-radius:10px;font-size:15px;font-weight:600;letter-spacing:0.2px;">
+          ${opts.ctaLabel}
+        </a>
+      </div>`
+    : '';
+
+  // Anti-spam compliance: unsubscribe link + physical sender info.
+  // The unsubscribe link points to a per-recipient page that records the opt-out.
+  const baseUrl = process.env['BASE_URL'] ?? 'https://orlode.com';
+  const unsubLink = opts.recipientEmail && opts.companyId
+    ? `${baseUrl}/api/public/unsubscribe?cid=${encodeURIComponent(opts.companyId)}&e=${encodeURIComponent(opts.recipientEmail)}`
+    : `${baseUrl}/api/public/unsubscribe`;
+
+  const content = `${greeting}${bodyHtml}${ctaHtml}`;
+
+  const html = baseWrapper(`${content}
+    <hr style="border:none;border-top:1px solid #eef0f5;margin:28px 0 16px;">
+    <p style="margin:0 0 6px;font-size:11px;color:#9ca3af;line-height:1.5;">
+      Cet email vous est envoyé par ${b.name}${b.website ? ` (${b.website})` : ''}.
+      Si vous ne souhaitez plus recevoir ces messages, vous pouvez
+      <a href="${unsubLink}" style="color:#9ca3af;text-decoration:underline;">vous désabonner</a>.
+    </p>`, b);
+
+  // Plain text fallback — many spam filters require it. Use \r\n for CRLF.
+  const textParts = [
+    opts.recipientName ? `Bonjour ${opts.recipientName},` : '',
+    stripHtml(bodyHtml),
+    opts.ctaUrl ? `\n${opts.ctaLabel ?? 'En savoir plus'} : ${opts.ctaUrl}` : '',
+    `\n--\n${b.name}${b.website ? ' · ' + b.website : ''}`,
+    `Désabonnement : ${unsubLink}`,
+  ].filter(Boolean);
+  const text = textParts.join('\n').replace(/\n{3,}/g, '\n\n');
+
+  return { html, text };
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>.*?<\/style>/gis, '')
+    .replace(/<script[^>]*>.*?<\/script>/gis, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/h[1-6]>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function inviteTemplate(opts: { inviteeName: string; companyName: string; inviterName: string; inviteUrl: string }, b: CompanyBranding) {
+  return baseWrapper(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:#111827;">Vous etes invite(e) 🎉</h2>
+    <p style="margin:0 0 20px;color:#6b7280;font-size:15px;line-height:1.6;">
+      <strong>${opts.inviterName}</strong> vous invite a rejoindre l'espace <strong>${opts.companyName}</strong>.
+    </p>
+    <a href="${opts.inviteUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:600;">
+      Accepter l'invitation
+    </a>
+    <p style="margin:24px 0 0;font-size:13px;color:#9ca3af;">Ce lien expire dans 48 heures.</p>
+  `, b);
+}
+
+function alertTemplate(opts: { companyName: string; alertType: string; details: string; severity: string; color: string }, b: CompanyBranding) {
+  return baseWrapper(`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
+      <span style="display:inline-block;background:${opts.color};color:#fff;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;text-transform:uppercase;">${opts.severity}</span>
+      <h2 style="margin:0;font-size:20px;color:#111827;">${opts.alertType}</h2>
+    </div>
+    <p style="margin:0 0 16px;color:#374151;font-size:14px;">Entreprise : <strong>${opts.companyName}</strong></p>
+    <div style="background:#f8f9fc;border-left:4px solid ${opts.color};padding:16px;border-radius:8px;font-size:14px;color:#374151;line-height:1.6;">
+      ${opts.details}
+    </div>
+    <p style="margin:20px 0 0;font-size:13px;color:#9ca3af;">Connectez-vous a votre tableau de bord pour plus de details.</p>
+  `, b);
+}
+
+function reportTemplate(opts: { companyName: string; period: string; stats: { label: string; value: string }[]; reportUrl: string }, b: CompanyBranding) {
+  const statsRows = opts.stats.map(s => `
+    <td style="width:${Math.floor(100/opts.stats.length)}%;text-align:center;padding:16px;background:#f8f9fc;border-radius:10px;">
+      <div style="font-size:22px;font-weight:700;color:#0019FF;">${s.value}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px;">${s.label}</div>
+    </td>
+  `).join('<td style="width:8px;"></td>');
+
+  return baseWrapper(`
+    <h2 style="margin:0 0 4px;font-size:22px;color:#111827;">Rapport hebdomadaire</h2>
+    <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">${opts.companyName} · ${opts.period}</p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+      <tr>${statsRows}</tr>
+    </table>
+    <a href="${opts.reportUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-size:14px;font-weight:600;">
+      Voir le rapport complet
+    </a>
+  `, b);
+}
+
+function contractTemplate(opts: { contractTitle: string; senderName: string; signUrl: string; expiresAt?: string }, b: CompanyBranding) {
+  return baseWrapper(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:#111827;">Contrat a signer 📝</h2>
+    <p style="margin:0 0 8px;color:#6b7280;font-size:15px;line-height:1.6;">
+      <strong>${opts.senderName}</strong> vous envoie le contrat suivant pour signature :
+    </p>
+    <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;padding:16px;margin:16px 0;">
+      <p style="margin:0;font-size:16px;font-weight:600;color:#1e40af;">${opts.contractTitle}</p>
+    </div>
+    ${opts.expiresAt ? `<p style="margin:0 0 20px;font-size:13px;color:#f59e0b;">⏰ Expire le ${opts.expiresAt}</p>` : '<div style="margin-bottom:20px;"></div>'}
+    <a href="${opts.signUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:600;">
+      Signer le contrat
+    </a>
+  `, b);
+}
+
+function welcomeTemplate(opts: { userName: string; companyName: string; plan?: string; dashboardUrl?: string }) {
+  const dashboardUrl = opts.dashboardUrl ?? 'https://orlode.com/dashboard';
+  const b: CompanyBranding = { name: 'Orlode AI', website: 'mon-assistant-86bbd.web.app' };
+  const planLine = opts.plan
+    ? `<p style="margin:0 0 16px;color:#6b7280;font-size:14px;">Votre plan : <strong style="color:#0019FF;text-transform:capitalize;">${opts.plan}</strong></p>`
+    : '';
+
+  return baseWrapper(`
+    <h2 style="margin:0 0 8px;font-size:24px;color:#111827;">Bienvenue ${opts.userName} 🎉</h2>
+    <p style="margin:0 0 16px;color:#6b7280;font-size:15px;line-height:1.6;">
+      Votre espace <strong>${opts.companyName}</strong> sur Orlode AI est prêt. Vous avez accès à 48 agents IA spécialisés prêts à travailler pour vous.
+    </p>
+    ${planLine}
+
+    <div style="background:#f8f9fc;border-radius:12px;padding:20px;margin:20px 0;">
+      <p style="margin:0 0 12px;font-weight:600;color:#111827;font-size:14px;">Vos prochaines étapes :</p>
+      <ul style="margin:0;padding-left:20px;color:#374151;font-size:14px;line-height:1.9;">
+        <li>Connectez votre Gmail pour que les agents envoient depuis votre adresse pro</li>
+        <li>Choisissez vos agents dans Abonnement &amp; Agents</li>
+        <li>Importez vos documents pour la mémoire de l'IA</li>
+        <li>Invitez vos collaborateurs</li>
+      </ul>
+    </div>
+
+    <a href="${dashboardUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:600;">
+      Accéder à mon espace
+    </a>
+
+    <p style="margin:24px 0 0;font-size:13px;color:#9ca3af;">
+      Besoin d'aide ? Répondez simplement à cet email.
+    </p>
+  `, b);
+}
+
+function paymentConfirmationTemplate(opts: {
+  planName: string; amount: string; method: string; reference: string;
+  interval?: 'monthly' | 'yearly'; nextBillingDate?: string;
+  dashboardUrl?: string; receiptUrl?: string;
+}, b: CompanyBranding) {
+  const dashboardUrl = opts.dashboardUrl ?? 'https://orlode.com/admin/billing';
+  const nextLine = opts.nextBillingDate
+    ? `<p style="margin:0;font-size:13px;color:#6b7280;">Prochain prelevement : <strong>${new Date(opts.nextBillingDate).toLocaleDateString('fr-FR')}</strong></p>`
+    : opts.interval === 'monthly'
+      ? '<p style="margin:0;font-size:13px;color:#6b7280;">Renouvellement mensuel — annulable a tout moment depuis votre espace.</p>'
+      : '';
+  const receiptBtn = opts.receiptUrl
+    ? `<a href="${opts.receiptUrl}" style="display:inline-block;margin-left:8px;padding:10px 18px;border:1px solid #e5e7eb;color:#374151;text-decoration:none;border-radius:10px;font-size:14px;font-weight:600;">Recu / Facture</a>`
+    : '';
+
+  return baseWrapper(`
+    <div style="text-align:center;margin-bottom:24px;">
+      <div style="display:inline-block;width:56px;height:56px;background:#16a34a;border-radius:50%;margin-bottom:12px;line-height:56px;font-size:28px;color:#fff;">✓</div>
+      <h2 style="margin:0 0 4px;font-size:22px;color:#111827;">Paiement confirme</h2>
+      <p style="margin:0;color:#6b7280;font-size:14px;">Votre plan <strong>${opts.planName}</strong> est active immediatement.</p>
+    </div>
+
+    <div style="background:#f8f9fc;border-radius:12px;padding:20px;margin-bottom:20px;">
+      <table width="100%" cellpadding="6" style="font-size:14px;">
+        <tr><td style="color:#6b7280;">Plan</td><td style="text-align:right;font-weight:600;color:#111827;">${opts.planName}</td></tr>
+        <tr><td style="color:#6b7280;">Montant</td><td style="text-align:right;font-weight:700;color:#111827;">${opts.amount}</td></tr>
+        <tr><td style="color:#6b7280;">Methode</td><td style="text-align:right;color:#374151;">${opts.method}</td></tr>
+        <tr><td style="color:#6b7280;">Reference</td><td style="text-align:right;font-family:monospace;font-size:12px;color:#374151;">${opts.reference}</td></tr>
+      </table>
+    </div>
+
+    ${nextLine}
+
+    <div style="margin:24px 0 0;">
+      <a href="${dashboardUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-size:14px;font-weight:600;">
+        Acceder a mon espace
+      </a>
+      ${receiptBtn}
+    </div>
+  `, b);
+}
+
+function replyTemplate(bodyHtml: string, b: CompanyBranding) {
+  return baseWrapper(`
+    <div style="font-size:15px;color:#374151;line-height:1.7;">
+      ${bodyHtml}
+    </div>
+    <hr style="border:none;border-top:1px solid #eef0f5;margin:24px 0;">
+    <p style="margin:0;font-size:12px;color:#9ca3af;">
+      Email redige par l'assistant IA de ${b.name}
+    </p>
+  `, b);
+}

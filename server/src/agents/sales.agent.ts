@@ -1,0 +1,1508 @@
+/**
+ * Sales Agent PRO — Agent Commercial Complet
+ * Mission : Transformer un prospect en client, puis en revenu.
+ *
+ * Capabilities:
+ *   1. Leads & Clients — create, qualify, score, track
+ *   2. Pipeline — stages, deal progression
+ *   3. Quotes — generate, update, send, convert to sale
+ *   4. Communication — email follow-up, WhatsApp, sales scripts
+ *   5. Follow-ups — schedule, auto-detect, auto-run
+ *   6. Analytics — stats, forecast, funnel analysis
+ *   7. Accounting bridge — convert accepted quote → invoice
+ */
+import { z } from 'zod';
+import { ai, GEMINI_FLASH } from '../config/genkit.config';
+import { getFirestore } from '../config/firebase.config';
+import { FieldValue } from 'firebase-admin/firestore';
+import { generateId } from '../utils/helpers';
+import { logger } from '../utils/logger';
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 1. LEADS — Create · Qualify · Score · List
+// ══════════════════════════════════════════════════════════════════════════════
+
+const PIPELINE_STAGES = ['nouveau', 'contacte', 'interesse', 'devis_envoye', 'negociation', 'gagne', 'perdu'] as const;
+type PipelineStage = typeof PIPELINE_STAGES[number];
+
+export const createLeadTool = ai.defineTool(
+  {
+    name: 'sales_createLead',
+    description: 'Create a new lead/prospect in the CRM.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      name: z.string(),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      company: z.string().optional(),
+      source: z.enum(['website', 'referral', 'linkedin', 'whatsapp', 'cold_call', 'event', 'ads', 'other']).optional().default('other'),
+      estimatedValue: z.number().optional().default(0),
+      notes: z.string().optional(),
+    }),
+    outputSchema: z.object({ leadId: z.string(), message: z.string() }),
+  },
+  async ({ companyId, name, email, phone, company, source, estimatedValue, notes }) => {
+    const db = getFirestore();
+    const id = generateId();
+    await db.collection(`companies/${companyId}/leads`).doc(id).set({
+      id, name, email: email ?? '', phone: phone ?? '', company: company ?? '',
+      source: source ?? 'other', estimatedValue: estimatedValue ?? 0,
+      notes: notes ?? '', score: 30, stage: 'nouveau' as PipelineStage,
+      interactions: [], createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    logger.info('[Sales] Lead created', { companyId, leadId: id, name });
+    return { leadId: id, message: `Lead "${name}" cree avec succes.` };
+  }
+);
+
+export const createClientTool = ai.defineTool(
+  {
+    name: 'sales_createClient',
+    description: 'Create a client record (converted from lead or new).',
+    inputSchema: z.object({
+      companyId: z.string(),
+      name: z.string(),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      company: z.string().optional(),
+      address: z.string().optional(),
+      leadId: z.string().optional().describe('Original lead ID if converting'),
+    }),
+    outputSchema: z.object({ clientId: z.string(), message: z.string() }),
+  },
+  async ({ companyId, name, email, phone, company, address, leadId }) => {
+    const db = getFirestore();
+    const id = generateId();
+    await db.collection(`companies/${companyId}/clients`).doc(id).set({
+      id, name, email: email ?? '', phone: phone ?? '', company: company ?? '',
+      address: address ?? '', leadId: leadId ?? null, totalRevenue: 0, quotesCount: 0, invoicesCount: 0,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    if (leadId) {
+      await db.collection(`companies/${companyId}/leads`).doc(leadId).update({
+        stage: 'gagne', convertedClientId: id, updatedAt: FieldValue.serverTimestamp(),
+      }).catch(() => {});
+    }
+    logger.info('[Sales] Client created', { companyId, clientId: id, name });
+    return { clientId: id, message: `Client "${name}" cree.` };
+  }
+);
+
+export const getLeadsTool = ai.defineTool(
+  {
+    name: 'sales_getLeads',
+    description: 'List leads, optionally filtered by stage or score threshold.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      stage: z.string().optional(),
+      minScore: z.number().optional(),
+      limit: z.number().optional().default(50),
+    }),
+    outputSchema: z.object({
+      leads: z.array(z.object({
+        id: z.string(), name: z.string(), email: z.string(), company: z.string(),
+        score: z.number(), stage: z.string(), source: z.string(), estimatedValue: z.number(),
+      })),
+      total: z.number(), hotLeads: z.number(),
+    }),
+  },
+  async ({ companyId, stage, minScore, limit }) => {
+    const db = getFirestore();
+    let query = db.collection(`companies/${companyId}/leads`) as FirebaseFirestore.Query;
+    if (stage) query = query.where('stage', '==', stage);
+    const snap = await query.limit(limit ?? 50).get();
+    let leads = snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id, name: (data['name'] as string) ?? '', email: (data['email'] as string) ?? '',
+        company: (data['company'] as string) ?? '', score: (data['score'] as number) ?? 0,
+        stage: (data['stage'] as string) ?? 'nouveau', source: (data['source'] as string) ?? 'other',
+        estimatedValue: (data['estimatedValue'] as number) ?? 0,
+      };
+    });
+    if (minScore) leads = leads.filter(l => l.score >= minScore);
+    leads.sort((a, b) => b.score - a.score);
+    return { leads, total: leads.length, hotLeads: leads.filter(l => l.score >= 70).length };
+  }
+);
+
+export const getClientTool = ai.defineTool(
+  {
+    name: 'sales_getClient',
+    description: 'Get a specific client by ID.',
+    inputSchema: z.object({ companyId: z.string(), clientId: z.string() }),
+    outputSchema: z.object({
+      id: z.string(), name: z.string(), email: z.string(), phone: z.string(),
+      company: z.string(), totalRevenue: z.number(), quotesCount: z.number(), invoicesCount: z.number(),
+    }),
+  },
+  async ({ companyId, clientId }) => {
+    const db = getFirestore();
+    const doc = await db.collection(`companies/${companyId}/clients`).doc(clientId).get();
+    const d = doc.data() ?? {};
+    return {
+      id: clientId, name: (d['name'] as string) ?? '', email: (d['email'] as string) ?? '',
+      phone: (d['phone'] as string) ?? '', company: (d['company'] as string) ?? '',
+      totalRevenue: (d['totalRevenue'] as number) ?? 0, quotesCount: (d['quotesCount'] as number) ?? 0,
+      invoicesCount: (d['invoicesCount'] as number) ?? 0,
+    };
+  }
+);
+
+export const getClientHistoryTool = ai.defineTool(
+  {
+    name: 'sales_getClientHistory',
+    description: 'Get complete history for a client: quotes, invoices, interactions.',
+    inputSchema: z.object({ companyId: z.string(), clientId: z.string() }),
+    outputSchema: z.object({
+      quotes: z.array(z.object({ id: z.string(), reference: z.string(), total: z.number(), status: z.string() })),
+      invoices: z.array(z.object({ id: z.string(), number: z.string(), totalTTC: z.number(), status: z.string() })),
+      interactions: z.array(z.object({ date: z.string(), type: z.string(), summary: z.string() })),
+    }),
+  },
+  async ({ companyId, clientId }) => {
+    const db = getFirestore();
+    const [quotesSnap, invoicesSnap] = await Promise.all([
+      db.collection(`companies/${companyId}/quotes`).where('clientId', '==', clientId).limit(50).get(),
+      db.collection(`companies/${companyId}/invoices`).where('clientId', '==', clientId).limit(50).get(),
+    ]);
+    const clientDoc = await db.collection(`companies/${companyId}/clients`).doc(clientId).get();
+    const clientData = clientDoc.data() ?? {};
+    return {
+      quotes: quotesSnap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, reference: (data['quoteNumber'] as string) ?? '', total: (data['totalTTC'] as number) ?? 0, status: (data['status'] as string) ?? 'draft' };
+      }),
+      invoices: invoicesSnap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, number: (data['number'] as string) ?? '', totalTTC: (data['totalTTC'] as number) ?? 0, status: (data['status'] as string) ?? 'pending' };
+      }),
+      interactions: Array.isArray(clientData['interactions']) ? (clientData['interactions'] as { date: string; type: string; summary: string }[]) : [],
+    };
+  }
+);
+
+export const scoreLeadTool = ai.defineTool(
+  {
+    name: 'sales_scoreLead',
+    description: 'Recalculate and update score for a lead based on engagement signals.',
+    inputSchema: z.object({ companyId: z.string(), leadId: z.string() }),
+    outputSchema: z.object({ leadId: z.string(), newScore: z.number(), recommendation: z.string() }),
+  },
+  async ({ companyId, leadId }) => {
+    const db = getFirestore();
+    const doc = await db.collection(`companies/${companyId}/leads`).doc(leadId).get();
+    const data = doc.data() ?? {};
+    const interactions = Array.isArray(data['interactions']) ? data['interactions'] as unknown[] : [];
+    const value = (data['estimatedValue'] as number) ?? 0;
+    const stage = (data['stage'] as string) ?? 'nouveau';
+
+    let score = 10;
+    // Stage bonus
+    if (stage === 'contacte') score += 15;
+    else if (stage === 'interesse') score += 30;
+    else if (stage === 'devis_envoye') score += 50;
+    else if (stage === 'negociation') score += 65;
+    else if (stage === 'gagne') score = 100;
+    // Engagement bonus
+    score += Math.min(interactions.length * 5, 25);
+    // Value bonus
+    if (value > 50000) score += 15;
+    else if (value > 10000) score += 10;
+    else if (value > 1000) score += 5;
+    score = Math.min(score, 100);
+
+    await db.collection(`companies/${companyId}/leads`).doc(leadId).update({ score, updatedAt: FieldValue.serverTimestamp() });
+    const recommendation = score >= 80 ? 'Lead tres chaud — contacter immediatement avec une offre personnalisee.'
+      : score >= 50 ? 'Lead interesse — envoyer un devis ou planifier un appel.'
+      : score >= 30 ? 'Lead tiede — nourrir avec du contenu de valeur.'
+      : 'Lead froid — maintenir le contact, pas de pression commerciale.';
+    return { leadId, newScore: score, recommendation };
+  }
+);
+
+export const updateLeadStatusTool = ai.defineTool(
+  {
+    name: 'sales_updateLeadStatus',
+    description: 'Move a lead to a new pipeline stage.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      leadId: z.string(),
+      stage: z.enum(PIPELINE_STAGES),
+      notes: z.string().optional(),
+    }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string() }),
+  },
+  async ({ companyId, leadId, stage, notes }) => {
+    const db = getFirestore();
+    const interaction = { date: new Date().toISOString(), type: 'stage_change', summary: `Etape changee vers "${stage}"${notes ? `. ${notes}` : ''}` };
+    await db.collection(`companies/${companyId}/leads`).doc(leadId).update({
+      stage, updatedAt: FieldValue.serverTimestamp(),
+      interactions: FieldValue.arrayUnion(interaction),
+    });
+    return { success: true, message: `Lead deplace vers "${stage}".` };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 2. PIPELINE — Deal Tracking
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const getPipelineTool = ai.defineTool(
+  {
+    name: 'sales_getPipeline',
+    description: 'Get complete sales pipeline overview grouped by stage.',
+    inputSchema: z.object({ companyId: z.string() }),
+    outputSchema: z.object({
+      stages: z.array(z.object({ stage: z.string(), count: z.number(), totalValue: z.number() })),
+      totalPipelineValue: z.number(),
+      totalDeals: z.number(),
+    }),
+  },
+  async ({ companyId }) => {
+    const db = getFirestore();
+    const snap = await db.collection(`companies/${companyId}/leads`).limit(500).get();
+    const stageMap = new Map<string, { count: number; totalValue: number }>();
+    let totalPipelineValue = 0;
+
+    for (const stage of PIPELINE_STAGES) {
+      stageMap.set(stage, { count: 0, totalValue: 0 });
+    }
+
+    snap.docs.forEach(d => {
+      const data = d.data();
+      const stage = (data['stage'] as string) ?? 'nouveau';
+      const value = (data['estimatedValue'] as number) ?? 0;
+      const existing = stageMap.get(stage) ?? { count: 0, totalValue: 0 };
+      stageMap.set(stage, { count: existing.count + 1, totalValue: existing.totalValue + value });
+      if (stage !== 'perdu') totalPipelineValue += value;
+    });
+
+    return {
+      stages: Array.from(stageMap.entries()).map(([stage, s]) => ({ stage, ...s })),
+      totalPipelineValue,
+      totalDeals: snap.size,
+    };
+  }
+);
+
+export const updateDealStageTool = ai.defineTool(
+  {
+    name: 'sales_updateDealStage',
+    description: 'Move a deal from one pipeline stage to another.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      dealId: z.string(),
+      newStage: z.enum(PIPELINE_STAGES),
+      reason: z.string().optional(),
+    }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string() }),
+  },
+  async ({ companyId, dealId, newStage, reason }) => {
+    const db = getFirestore();
+    const ref = db.collection(`companies/${companyId}/leads`).doc(dealId);
+    const doc = await ref.get();
+    const oldStage = doc.data()?.['stage'] ?? 'unknown';
+    const interaction = {
+      date: new Date().toISOString(), type: 'stage_change',
+      summary: `${oldStage} → ${newStage}${reason ? ` (${reason})` : ''}`,
+    };
+    await ref.update({ stage: newStage, updatedAt: FieldValue.serverTimestamp(), interactions: FieldValue.arrayUnion(interaction) });
+    logger.info('[Sales] Deal stage updated', { companyId, dealId, oldStage, newStage });
+    return { success: true, message: `Deal deplace de "${oldStage}" vers "${newStage}".` };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 3. QUOTES — Create · Update · Send · Convert
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Resolve a quote reference (UUID, short UUID prefix like af52808d, OR quoteNumber like DEV-2026-0004) to the Firestore doc ID.
+ */
+async function resolveQuoteDocId(companyId: string, ref: string): Promise<string | null> {
+  const db = getFirestore();
+  const direct = await db.collection(`companies/${companyId}/quotes`).doc(ref).get().catch(() => null);
+  if (direct?.exists) return direct.id;
+  const byNum = await db.collection(`companies/${companyId}/quotes`).where('quoteNumber', '==', ref).limit(1).get().catch(() => null);
+  if (byNum && !byNum.empty) return byNum.docs[0].id;
+  // Fallback: short UUID prefix match (e.g. "af52808d" → "af52808d-...")
+  if (ref.length >= 6 && /^[a-f0-9-]+$/i.test(ref)) {
+    const all = await db.collection(`companies/${companyId}/quotes`).limit(500).get().catch(() => null);
+    const match = all?.docs.find(d => d.id.toLowerCase().startsWith(ref.toLowerCase()));
+    if (match) return match.id;
+  }
+  return null;
+}
+
+/**
+ * Resolve a lead reference (UUID OR exact name) to the Firestore doc ID.
+ */
+async function resolveLeadDocId(companyId: string, ref: string): Promise<string | null> {
+  const db = getFirestore();
+  const direct = await db.collection(`companies/${companyId}/leads`).doc(ref).get().catch(() => null);
+  if (direct?.exists) return direct.id;
+  const byName = await db.collection(`companies/${companyId}/leads`).where('name', '==', ref).limit(1).get().catch(() => null);
+  if (byName && !byName.empty) return byName.docs[0].id;
+  return null;
+}
+
+export const createQuoteTool = ai.defineTool(
+  {
+    name: 'sales_createQuote',
+    description: 'Generate a sales quote/proposal for a client.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      clientName: z.string(),
+      clientId: z.string().optional(),
+      leadId: z.string().optional(),
+      items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })),
+      validDays: z.number().optional().default(30),
+      notes: z.string().optional(),
+      taxRate: z.number().optional().default(20),
+    }),
+    outputSchema: z.object({ quoteId: z.string(), quoteNumber: z.string(), totalHT: z.number(), totalTTC: z.number(), validUntil: z.string(), status: z.string() }),
+  },
+  async ({ companyId, clientName, clientId, leadId, items, validDays, notes, taxRate }) => {
+    const db = getFirestore();
+    const quoteId = generateId();
+    const countSnap = await db.collection(`companies/${companyId}/quotes`).count().get();
+    const count = countSnap.data().count + 1;
+    const quoteNumber = `DEV-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
+    const totalHT = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+    const effectiveTax = taxRate ?? 20;
+    const taxAmount = Math.round(totalHT * (effectiveTax / 100) * 100) / 100;
+    const totalTTC = Math.round((totalHT + taxAmount) * 100) / 100;
+    const validUntil = new Date(Date.now() + (validDays ?? 30) * 86400000).toISOString().split('T')[0];
+
+    await db.collection(`companies/${companyId}/quotes`).doc(quoteId).set({
+      id: quoteId, quoteNumber, clientName, clientId: clientId ?? null, leadId: leadId ?? null,
+      items, notes: notes ?? '', totalHT, taxRate: effectiveTax, taxAmount, totalTTC, validUntil,
+      status: 'draft', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // Update lead stage if linked
+    if (leadId) {
+      await db.collection(`companies/${companyId}/leads`).doc(leadId).update({
+        stage: 'devis_envoye', updatedAt: FieldValue.serverTimestamp(),
+        interactions: FieldValue.arrayUnion({ date: new Date().toISOString(), type: 'quote', summary: `Devis ${quoteNumber} cree (${totalTTC} EUR)` }),
+      }).catch(() => {});
+    }
+
+    logger.info('[Sales] Quote created', { companyId, quoteId, quoteNumber, totalTTC });
+    return { quoteId, quoteNumber, totalHT, totalTTC, validUntil, status: 'draft' };
+  }
+);
+
+export const updateQuoteTool = ai.defineTool(
+  {
+    name: 'sales_updateQuote',
+    description: 'Update a quote status or details. Accepts UUID or quoteNumber (DEV-YYYY-XXXX).',
+    inputSchema: z.object({
+      companyId: z.string(),
+      quoteId: z.string().describe('UUID or quoteNumber like DEV-2026-0004'),
+      status: z.enum(['draft', 'sent', 'accepted', 'rejected', 'expired']).optional(),
+      items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })).optional(),
+      notes: z.string().optional(),
+    }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string() }),
+  },
+  async ({ companyId, quoteId, status, items, notes }) => {
+    const db = getFirestore();
+    const docId = await resolveQuoteDocId(companyId, quoteId);
+    if (!docId) return { success: false, message: `Devis ${quoteId} introuvable.` };
+    const updates: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+    if (status) updates['status'] = status;
+    if (notes !== undefined) updates['notes'] = notes;
+    if (items) {
+      const totalHT = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+      updates['items'] = items;
+      updates['totalHT'] = totalHT;
+      updates['totalTTC'] = Math.round(totalHT * 1.2 * 100) / 100;
+    }
+    await db.collection(`companies/${companyId}/quotes`).doc(docId).update(updates);
+    return { success: true, message: `Devis ${quoteId} mis à jour${status ? ` (statut: ${status})` : ''}.` };
+  }
+);
+
+export const sendQuoteTool = ai.defineTool(
+  {
+    name: 'sales_sendQuote',
+    description: 'Send a quote by email to the client. Accepts UUID or quoteNumber (DEV-YYYY-XXXX).',
+    inputSchema: z.object({
+      companyId: z.string(),
+      quoteId: z.string().describe('UUID or quoteNumber like DEV-2026-0004'),
+      recipientEmail: z.string(), message: z.string().optional(),
+    }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string() }),
+  },
+  async ({ companyId, quoteId, recipientEmail, message }) => {
+    const db = getFirestore();
+    const docId = await resolveQuoteDocId(companyId, quoteId);
+    if (!docId) return { success: false, message: `Devis ${quoteId} introuvable.` };
+    const doc = await db.collection(`companies/${companyId}/quotes`).doc(docId).get();
+    const data = doc.data();
+    if (!data) return { success: false, message: `Devis ${quoteId} introuvable.` };
+
+    // Update status to sent
+    await db.collection(`companies/${companyId}/quotes`).doc(docId).update({
+      status: 'sent', sentAt: FieldValue.serverTimestamp(), sentTo: recipientEmail,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // Generate PDF attachment — real quote document, not just a link
+    let pdfBuffer: Buffer | null = null;
+    try {
+      const { renderInvoicePdf, loadCompanyForInvoice } = await import('../services/invoice/invoicePdfService');
+      const company = await loadCompanyForInvoice(companyId);
+      const items = Array.isArray(data['items'])
+        ? (data['items'] as Array<Record<string, unknown>>).map(i => ({
+            name: String(i['description'] ?? i['name'] ?? 'Article'),
+            quantity: Number(i['quantity'] ?? 1),
+            unitPrice: Number(i['unitPrice'] ?? i['price'] ?? 0),
+          }))
+        : [{
+            name: (data['service'] as string) ?? 'Prestation',
+            quantity: 1,
+            unitPrice: Number(data['totalTTC'] ?? data['amount'] ?? 0),
+          }];
+      pdfBuffer = await renderInvoicePdf(company, {
+        id: (data['quoteNumber'] as string) ?? quoteId.slice(0, 10),
+        clientName: (data['clientName'] as string) ?? 'Client',
+        clientEmail: recipientEmail,
+        clientPhone: data['clientPhone'] as string | undefined,
+        items,
+        subtotal: Number(data['totalTTC'] ?? data['amount'] ?? 0),
+        currency: (data['currency'] as string) ?? 'XOF',
+        status: 'draft',
+        docType: 'quote',
+        validUntil: data['validUntil'] as string | undefined,
+        createdAt: data['createdAt'] as string | Date | null | undefined,
+      });
+    } catch (err) {
+      logger.warn('[Sales] Quote PDF generation failed', { err: String(err) });
+    }
+
+    // Send email with PDF attached
+    try {
+      const { sendEmail } = await import('../services/email/emailService');
+      const subject = `Devis ${data['quoteNumber']} — ${data['clientName']}`;
+      const bodyHtml = `<p>${message ?? 'Bonjour,'}</p>
+<p>Vous trouverez en pièce jointe notre proposition commerciale <strong>${data['quoteNumber']}</strong> d'un montant de <strong>${Number(data['totalTTC'] ?? 0).toLocaleString()} ${(data['currency'] as string) ?? 'XOF'}</strong>, valide jusqu'au <strong>${data['validUntil']}</strong>.</p>
+<p>Cordialement,<br>L'équipe commerciale</p>`;
+      await sendEmail({
+        companyId,
+        to: recipientEmail,
+        subject,
+        html: bodyHtml,
+        attachments: pdfBuffer ? [{
+          filename: `Devis-${data['quoteNumber']}.pdf`,
+          content: pdfBuffer,
+        }] : undefined,
+      });
+    } catch (err) {
+      logger.warn('[Sales] Email send failed, quote still marked as sent', { err });
+      return { success: false, message: `Devis créé mais l'envoi email a échoué: ${(err as Error).message ?? err}` };
+    }
+
+    logger.info('[Sales] Quote sent with PDF', { companyId, quoteId, to: recipientEmail, hasPdf: !!pdfBuffer });
+    return {
+      success: true,
+      message: `Devis ${data['quoteNumber']} envoyé à ${recipientEmail}${pdfBuffer ? ' avec PDF en pièce jointe' : ' (⚠️ sans PDF — génération échouée)'}.`,
+    };
+  }
+);
+
+export const convertQuoteToSaleTool = ai.defineTool(
+  {
+    name: 'sales_convertQuoteToSale',
+    description: 'Convert an accepted quote into a sale and create an invoice. Accepts UUID or quoteNumber.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      quoteId: z.string().describe('UUID or quoteNumber like DEV-2026-0004'),
+    }),
+    outputSchema: z.object({ success: z.boolean(), invoiceId: z.string().optional(), message: z.string() }),
+  },
+  async ({ companyId, quoteId }) => {
+    try {
+      const db = getFirestore();
+      const docId = await resolveQuoteDocId(companyId, quoteId);
+      if (!docId) return { success: false, message: `Devis ${quoteId} introuvable.` };
+      const doc = await db.collection(`companies/${companyId}/quotes`).doc(docId).get();
+      const data = doc.data();
+      if (!data) return { success: false, message: `Devis ${quoteId} introuvable.` };
+
+      // Mark quote as accepted
+      await db.collection(`companies/${companyId}/quotes`).doc(docId).update({
+        status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Create invoice
+      const invoiceId = generateId();
+      const countSnap = await db.collection(`companies/${companyId}/invoices`).count().get();
+      const count = countSnap.data().count + 1;
+      const invoiceNumber = `FAC-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 30);
+      const totalTTC = (data['totalTTC'] as number) ?? 0;
+      const totalHT = (data['totalHT'] as number) ?? totalTTC;
+
+      await db.collection(`companies/${companyId}/invoices`).doc(invoiceId).set({
+        id: invoiceId, number: invoiceNumber,
+        client: data['clientName'] ?? '', clientName: data['clientName'] ?? '',
+        clientId: data['clientId'] ?? null,
+        items: data['items'] ?? [], totalHT, taxRate: data['taxRate'] ?? 20,
+        taxAmount: data['taxAmount'] ?? 0, totalTTC,
+        status: 'pending', paidAmount: 0, dueDate,
+        sourceQuoteId: docId, sourceQuoteNumber: data['quoteNumber'] ?? '',
+        currency: data['currency'] ?? 'XOF',
+        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Update lead if linked (best-effort)
+      if (data['leadId']) {
+        await db.collection(`companies/${companyId}/leads`).doc(data['leadId'] as string).update({
+          stage: 'gagne', updatedAt: FieldValue.serverTimestamp(),
+          interactions: FieldValue.arrayUnion({ date: new Date().toISOString(), type: 'sale', summary: `Vente conclue — Facture ${invoiceNumber}` }),
+        }).catch((e) => logger.warn('[Sales] Lead update failed (non-critical)', { e: String(e) }));
+      }
+
+      // Update client revenue if linked (best-effort)
+      if (data['clientId']) {
+        await db.collection(`companies/${companyId}/clients`).doc(data['clientId'] as string).update({
+          totalRevenue: FieldValue.increment(totalTTC),
+          invoicesCount: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
+        }).catch((e) => logger.warn('[Sales] Client update failed (non-critical)', { e: String(e) }));
+      }
+
+      logger.info('[Sales] Quote converted to sale', { companyId, quoteId, docId, invoiceId, invoiceNumber, totalTTC });
+      return { success: true, invoiceId, message: `Vente conclue. Facture ${invoiceNumber} créée (UUID: ${invoiceId}, montant: ${totalTTC} ${data['currency'] ?? 'XOF'}).` };
+    } catch (err) {
+      logger.error('[Sales] convertQuoteToSale failed', { err: String(err), quoteId, companyId });
+      return { success: false, message: `Échec conversion devis ${quoteId} en facture: ${(err as Error).message ?? String(err)}` };
+    }
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 4. COMMUNICATION — Email · WhatsApp · Sales Scripts
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const sendEmailTool = ai.defineTool(
+  {
+    name: 'sales_sendEmail',
+    description: 'Send a follow-up or commercial email to a prospect/client.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      to: z.string(),
+      subject: z.string(),
+      body: z.string(),
+      leadId: z.string().optional(),
+    }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string() }),
+  },
+  async ({ companyId, to, subject, body, leadId }) => {
+    try {
+      const { sendEmail } = await import('../services/email/emailService');
+      await sendEmail({ companyId, to, subject, html: `<div style="font-family:sans-serif;font-size:14px">${body.replace(/\n/g, '<br>')}</div>` });
+      // Log interaction
+      if (leadId) {
+        const db = getFirestore();
+        await db.collection(`companies/${companyId}/leads`).doc(leadId).update({
+          interactions: FieldValue.arrayUnion({ date: new Date().toISOString(), type: 'email', summary: `Email envoye: "${subject}"` }),
+          updatedAt: FieldValue.serverTimestamp(),
+        }).catch(() => {});
+      }
+      return { success: true, message: `Email envoye a ${to}.` };
+    } catch (err) {
+      logger.error('[Sales] Email failed', { err });
+      return { success: false, message: 'Echec de l\'envoi de l\'email.' };
+    }
+  }
+);
+
+export const sendWhatsAppTool = ai.defineTool(
+  {
+    name: 'sales_sendWhatsApp',
+    description: 'Send a personalized WhatsApp message to a prospect/client.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      to: z.string().describe('Phone number with country code'),
+      message: z.string(),
+      leadId: z.string().optional(),
+    }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string() }),
+  },
+  async ({ companyId, to, message, leadId }) => {
+    try {
+      const { whatsappService } = await import('../services/whatsapp/whatsappService');
+      const config = await whatsappService.getConfig(companyId);
+      if (!config) {
+        return {
+          success: false,
+          message: `WhatsApp non configuré pour cette entreprise. Configurer Meta Cloud API dans /admin/whatsapp pour activer l'envoi.`,
+        };
+      }
+
+      // Try free-form text first (works only inside the 24h conversation window)
+      const messageId = await whatsappService.sendMessage(config, to, message);
+      if (messageId) {
+        if (leadId) {
+          const db = getFirestore();
+          await db.collection(`companies/${companyId}/leads`).doc(leadId).update({
+            interactions: FieldValue.arrayUnion({ date: new Date().toISOString(), type: 'whatsapp', summary: `WhatsApp envoye: "${message.slice(0, 80)}..."` }),
+            updatedAt: FieldValue.serverTimestamp(),
+          }).catch(() => {});
+        }
+        return { success: true, message: `Message WhatsApp envoyé à ${to} (ID: ${messageId}).` };
+      }
+
+      // Fallback: outside 24h window, only Meta-approved templates work.
+      // Try the default "hello_world" template that all WABA accounts have by default.
+      const tmplId = await whatsappService.sendTemplate(config, to, 'hello_world', 'en_US', []);
+      if (tmplId) {
+        return {
+          success: true,
+          message: `Hors fenêtre 24h Meta : message libre refusé. Template "hello_world" envoyé à la place (ID: ${tmplId}). Pour envoyer le contenu personnalisé, faire approuver un template métier ou attendre une réponse du destinataire (ouvre une fenêtre 24h).`,
+        };
+      }
+
+      return {
+        success: false,
+        message: `WhatsApp à ${to} a échoué. Causes probables : (1) hors fenêtre 24h Meta + pas de template approuvé, (2) numéro non WhatsApp, (3) opt-out destinataire. Vérifier les logs Meta pour le détail.`,
+      };
+    } catch (err) {
+      logger.error('[Sales] WhatsApp failed', { err: String(err), to });
+      return { success: false, message: `Échec WhatsApp: ${(err as Error).message ?? String(err)}` };
+    }
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 5. FOLLOW-UPS — Schedule · Detect · Auto-run
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const scheduleFollowUpTool = ai.defineTool(
+  {
+    name: 'sales_scheduleFollowUp',
+    description: 'Schedule a follow-up reminder for a lead/client.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      leadId: z.string(),
+      scheduledAt: z.string().describe('ISO date when to follow up'),
+      type: z.enum(['call', 'email', 'whatsapp', 'meeting']).optional().default('email'),
+      notes: z.string().optional(),
+      assignedTo: z.string().optional(),
+    }),
+    outputSchema: z.object({ followUpId: z.string(), message: z.string() }),
+  },
+  async ({ companyId, leadId, scheduledAt, type, notes, assignedTo }) => {
+    const db = getFirestore();
+    const id = generateId();
+    await db.collection(`companies/${companyId}/followups`).doc(id).set({
+      id, leadId, scheduledAt: new Date(scheduledAt), type: type ?? 'email',
+      notes: notes ?? '', assignedTo: assignedTo ?? '', status: 'pending',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    logger.info('[Sales] Follow-up scheduled', { companyId, leadId, scheduledAt });
+    return { followUpId: id, message: `Relance programmee pour le ${new Date(scheduledAt).toLocaleDateString('fr-FR')}.` };
+  }
+);
+
+export const getPendingFollowUpsTool = ai.defineTool(
+  {
+    name: 'sales_getPendingFollowUps',
+    description: 'Get all pending follow-ups, including overdue ones.',
+    inputSchema: z.object({ companyId: z.string() }),
+    outputSchema: z.object({
+      followups: z.array(z.object({
+        id: z.string(), leadId: z.string(), leadName: z.string(),
+        scheduledAt: z.string(), type: z.string(), notes: z.string(),
+        status: z.string(), overdue: z.boolean(),
+      })),
+      overdueCount: z.number(),
+    }),
+  },
+  async ({ companyId }) => {
+    const db = getFirestore();
+    const snap = await db.collection(`companies/${companyId}/followups`)
+      .where('status', '==', 'pending').limit(100).get();
+    const now = new Date();
+
+    const followups = await Promise.all(snap.docs.map(async d => {
+      const data = d.data();
+      const scheduledAt = (data['scheduledAt'] as FirebaseFirestore.Timestamp)?.toDate?.() ?? new Date(data['scheduledAt'] as string);
+      // Get lead name
+      let leadName = '';
+      try {
+        const leadDoc = await db.collection(`companies/${companyId}/leads`).doc(data['leadId'] as string).get();
+        leadName = (leadDoc.data()?.['name'] as string) ?? '';
+      } catch { /* ignore */ }
+      return {
+        id: d.id, leadId: (data['leadId'] as string) ?? '', leadName,
+        scheduledAt: scheduledAt.toISOString(), type: (data['type'] as string) ?? 'email',
+        notes: (data['notes'] as string) ?? '', status: 'pending',
+        overdue: scheduledAt < now,
+      };
+    }));
+
+    followups.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+    return { followups, overdueCount: followups.filter(f => f.overdue).length };
+  }
+);
+
+export const autoFollowUpTool = ai.defineTool(
+  {
+    name: 'sales_autoFollowUp',
+    description: 'Automatically detect leads without response and create follow-up actions.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      daysSinceLastContact: z.number().optional().default(3),
+    }),
+    outputSchema: z.object({
+      created: z.number(),
+      leads: z.array(z.object({ leadId: z.string(), name: z.string(), daysSilent: z.number() })),
+    }),
+  },
+  async ({ companyId, daysSinceLastContact }) => {
+    const db = getFirestore();
+    const snap = await db.collection(`companies/${companyId}/leads`)
+      .where('stage', 'in', ['contacte', 'interesse', 'devis_envoye', 'negociation']).limit(200).get();
+    const now = Date.now();
+    const threshold = (daysSinceLastContact ?? 3) * 86400000;
+    const needsFollowUp: { leadId: string; name: string; daysSilent: number }[] = [];
+
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const interactions = Array.isArray(data['interactions']) ? data['interactions'] as { date: string }[] : [];
+      const lastContact = interactions.length > 0
+        ? new Date(interactions[interactions.length - 1].date).getTime()
+        : ((data['createdAt'] as FirebaseFirestore.Timestamp)?.toDate?.()?.getTime() ?? now - threshold - 1);
+
+      if (now - lastContact > threshold) {
+        const daysSilent = Math.floor((now - lastContact) / 86400000);
+        needsFollowUp.push({ leadId: doc.id, name: (data['name'] as string) ?? '', daysSilent });
+        // Create follow-up
+        const followUpDate = new Date(now + 86400000); // tomorrow
+        await db.collection(`companies/${companyId}/followups`).doc(generateId()).set({
+          leadId: doc.id, scheduledAt: followUpDate, type: 'email',
+          notes: `Relance auto — ${daysSilent} jours sans reponse`, status: 'pending',
+          auto: true, createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+
+    logger.info('[Sales] Auto follow-up', { companyId, created: needsFollowUp.length });
+    return { created: needsFollowUp.length, leads: needsFollowUp };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 6. ANALYTICS — Stats · Forecast · Funnel
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const getStatsTool = ai.defineTool(
+  {
+    name: 'sales_getStats',
+    description: 'Get comprehensive sales statistics and KPIs.',
+    inputSchema: z.object({ companyId: z.string() }),
+    outputSchema: z.object({
+      totalLeads: z.number(), hotLeads: z.number(), totalClients: z.number(),
+      totalQuotes: z.number(), acceptedQuotes: z.number(), pendingQuotes: z.number(),
+      totalRevenue: z.number(), pipelineValue: z.number(),
+      conversionRate: z.number(), avgDealSize: z.number(),
+      stageBreakdown: z.array(z.object({ stage: z.string(), count: z.number(), value: z.number() })),
+    }),
+  },
+  async ({ companyId }) => {
+    const db = getFirestore();
+    const [leadsSnap, clientsSnap, quotesSnap] = await Promise.all([
+      db.collection(`companies/${companyId}/leads`).limit(500).get(),
+      db.collection(`companies/${companyId}/clients`).count().get(),
+      db.collection(`companies/${companyId}/quotes`).limit(500).get(),
+    ]);
+
+    const leads = leadsSnap.docs.map(d => d.data());
+    const quotes = quotesSnap.docs.map(d => d.data());
+    const won = leads.filter(l => l['stage'] === 'gagne');
+    const lost = leads.filter(l => l['stage'] === 'perdu');
+    const totalCompleted = won.length + lost.length;
+    const pipelineValue = leads.filter(l => !['gagne', 'perdu'].includes(l['stage'] as string))
+      .reduce((s, l) => s + ((l['estimatedValue'] as number) ?? 0), 0);
+    const totalRevenue = won.reduce((s, l) => s + ((l['estimatedValue'] as number) ?? 0), 0);
+    const hotLeads = leads.filter(l => ((l['score'] as number) ?? 0) >= 70).length;
+
+    // Stage breakdown
+    const stageMap = new Map<string, { count: number; value: number }>();
+    for (const stage of PIPELINE_STAGES) stageMap.set(stage, { count: 0, value: 0 });
+    leads.forEach(l => {
+      const stage = (l['stage'] as string) ?? 'nouveau';
+      const existing = stageMap.get(stage) ?? { count: 0, value: 0 };
+      stageMap.set(stage, { count: existing.count + 1, value: existing.value + ((l['estimatedValue'] as number) ?? 0) });
+    });
+
+    return {
+      totalLeads: leads.length, hotLeads, totalClients: clientsSnap.data().count,
+      totalQuotes: quotes.length,
+      acceptedQuotes: quotes.filter(q => q['status'] === 'accepted').length,
+      pendingQuotes: quotes.filter(q => q['status'] === 'draft' || q['status'] === 'sent').length,
+      totalRevenue, pipelineValue,
+      conversionRate: totalCompleted > 0 ? Math.round((won.length / totalCompleted) * 100) : 0,
+      avgDealSize: won.length > 0 ? Math.round(totalRevenue / won.length) : 0,
+      stageBreakdown: Array.from(stageMap.entries()).map(([stage, s]) => ({ stage, ...s })),
+    };
+  }
+);
+
+export const forecastRevenueTool = ai.defineTool(
+  {
+    name: 'sales_forecastRevenue',
+    description: 'Forecast expected revenue based on pipeline probability.',
+    inputSchema: z.object({ companyId: z.string() }),
+    outputSchema: z.object({
+      optimistic: z.number(), realistic: z.number(), conservative: z.number(),
+      byStage: z.array(z.object({ stage: z.string(), expectedRevenue: z.number(), probability: z.number() })),
+    }),
+  },
+  async ({ companyId }) => {
+    const db = getFirestore();
+    const snap = await db.collection(`companies/${companyId}/leads`)
+      .where('stage', 'not-in', ['gagne', 'perdu']).limit(500).get();
+
+    const STAGE_PROBABILITIES: Record<string, number> = {
+      nouveau: 10, contacte: 20, interesse: 40, devis_envoye: 60, negociation: 80,
+    };
+
+    const byStage: { stage: string; expectedRevenue: number; probability: number }[] = [];
+    let optimistic = 0, realistic = 0, conservative = 0;
+
+    const stageGroups = new Map<string, number>();
+    snap.docs.forEach(d => {
+      const data = d.data();
+      const stage = (data['stage'] as string) ?? 'nouveau';
+      const value = (data['estimatedValue'] as number) ?? 0;
+      stageGroups.set(stage, (stageGroups.get(stage) ?? 0) + value);
+      const prob = STAGE_PROBABILITIES[stage] ?? 30;
+      optimistic += value;
+      realistic += value * (prob / 100);
+      conservative += value * (prob / 100) * 0.7;
+    });
+
+    for (const [stage, total] of stageGroups.entries()) {
+      byStage.push({ stage, expectedRevenue: Math.round(total * (STAGE_PROBABILITIES[stage] ?? 30) / 100), probability: STAGE_PROBABILITIES[stage] ?? 30 });
+    }
+
+    return {
+      optimistic: Math.round(optimistic),
+      realistic: Math.round(realistic),
+      conservative: Math.round(conservative),
+      byStage,
+    };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ALL TOOLS — exported array for the flow
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRO: AI LEAD SCORING
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const aiScoreLeadTool = ai.defineTool(
+  {
+    name: 'sales_aiScoreLead',
+    description: 'AI-powered lead scoring — behavioral analysis, engagement patterns, conversion probability.',
+    inputSchema: z.object({ companyId: z.string(), leadId: z.string() }),
+    outputSchema: z.object({ leadId: z.string(), score: z.number(), grade: z.string(), factors: z.array(z.object({ factor: z.string(), impact: z.string(), weight: z.number() })), nextBestAction: z.string(), conversionProbability: z.number() }),
+  },
+  async ({ companyId, leadId }) => {
+    const db = getFirestore();
+    const doc = await db.collection(`companies/${companyId}/leads`).doc(leadId).get();
+    if (!doc.exists) return { leadId, score: 0, grade: 'F', factors: [], nextBestAction: 'Lead introuvable', conversionProbability: 0 };
+    const lead = doc.data()!;
+
+    const { text } = await ai.generate({
+      model: GEMINI_FLASH,
+      prompt: `Score this sales lead using behavioral analysis. Return JSON ONLY.
+
+Lead data:
+- Name: ${lead['name'] ?? lead['contactName']}
+- Company: ${lead['company']}
+- Stage: ${lead['stage']}
+- Source: ${lead['source']}
+- Value: ${lead['amount'] ?? lead['value']}€
+- Interactions: ${((lead['interactions'] as unknown[]) ?? []).length}
+- Days since creation: ${Math.round((Date.now() - ((lead['createdAt'] as { toDate?: () => Date })?.toDate?.()?.getTime() ?? Date.now())) / 86400000)}
+- Last contact: ${lead['lastContactAt'] ?? 'unknown'}
+
+Score 0-100 based on: engagement level, deal size, stage progression speed, source quality.
+Return: {"score":75,"grade":"A|B|C|D|F","factors":[{"factor":"High engagement","impact":"positive","weight":30}],"nextBestAction":"Send proposal","conversionProbability":0.65}`,
+      config: { temperature: 0.2 },
+    });
+    try {
+      const parsed = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, ''));
+      await db.collection(`companies/${companyId}/leads`).doc(leadId).update({ aiScore: parsed.score, aiGrade: parsed.grade, aiScoredAt: new Date(), nextBestAction: parsed.nextBestAction });
+      return { leadId, ...parsed };
+    } catch { return { leadId, score: 50, grade: 'C', factors: [], nextBestAction: 'Relancer le prospect', conversionProbability: 0.3 }; }
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRO: DEAL INSIGHTS (next best action, risk scoring)
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const dealInsightsTool = ai.defineTool(
+  {
+    name: 'sales_getDealInsights',
+    description: 'AI deal intelligence — risk assessment, next best action, competitive analysis for a specific deal.',
+    inputSchema: z.object({ companyId: z.string(), leadId: z.string() }),
+    outputSchema: z.object({ leadId: z.string(), riskLevel: z.string(), riskFactors: z.array(z.string()), opportunities: z.array(z.string()), nextActions: z.array(z.object({ action: z.string(), priority: z.string(), deadline: z.string() })), winProbability: z.number() }),
+  },
+  async ({ companyId, leadId }) => {
+    const db = getFirestore();
+    const doc = await db.collection(`companies/${companyId}/leads`).doc(leadId).get();
+    if (!doc.exists) return { leadId, riskLevel: 'unknown', riskFactors: [], opportunities: [], nextActions: [], winProbability: 0 };
+    const lead = doc.data()!;
+
+    const { text } = await ai.generate({
+      model: GEMINI_FLASH,
+      prompt: `Analyze this deal and provide strategic intelligence. Return JSON ONLY.
+Lead: ${lead['name']} (${lead['company']}), Stage: ${lead['stage']}, Value: ${lead['amount'] ?? lead['value']}€, Score: ${lead['score'] ?? lead['aiScore'] ?? '?'}
+Interactions: ${((lead['interactions'] as unknown[]) ?? []).length}, Days in pipeline: ${Math.round((Date.now() - ((lead['createdAt'] as { toDate?: () => Date })?.toDate?.()?.getTime() ?? Date.now())) / 86400000)}
+
+Return: {"riskLevel":"low|medium|high|critical","riskFactors":["factor1"],"opportunities":["opp1"],"nextActions":[{"action":"...","priority":"high|medium|low","deadline":"this week|next week|this month"}],"winProbability":0.6}`,
+      config: { temperature: 0.2 },
+    });
+    try { return { leadId, ...JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')) }; } catch { return { leadId, riskLevel: 'medium', riskFactors: [], opportunities: [], nextActions: [], winProbability: 0.5 }; }
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRO: WIN/LOSS ANALYSIS
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const winLossAnalysisTool = ai.defineTool(
+  {
+    name: 'sales_winLossAnalysis',
+    description: 'Analyze won and lost deals to identify patterns, success factors, and improvement areas.',
+    inputSchema: z.object({ companyId: z.string(), period: z.enum(['month', 'quarter', 'year']).optional().default('quarter') }),
+    outputSchema: z.object({ totalWon: z.number(), totalLost: z.number(), winRate: z.number(), avgDealSize: z.number(), avgCycleLength: z.number(), winFactors: z.array(z.string()), lossReasons: z.array(z.string()), recommendations: z.array(z.string()) }),
+  },
+  async ({ companyId, period }) => {
+    const db = getFirestore();
+    const days = period === 'month' ? 30 : period === 'quarter' ? 90 : 365;
+    const cutoff = new Date(Date.now() - days * 86400000);
+    const snap = await db.collection(`companies/${companyId}/leads`).where('stage', 'in', ['gagne', 'perdu']).limit(200).get();
+    const deals = snap.docs.map(d => d.data()).filter(d => {
+      const t = (d['updatedAt'] as { toDate?: () => Date })?.toDate?.()?.getTime() ?? 0;
+      return t >= cutoff.getTime();
+    });
+    const won = deals.filter(d => d['stage'] === 'gagne');
+    const lost = deals.filter(d => d['stage'] === 'perdu');
+    const winRate = deals.length > 0 ? Math.round(won.length / deals.length * 100) : 0;
+    const avgDealSize = won.length > 0 ? Math.round(won.reduce((s, d) => s + ((d['amount'] as number) ?? (d['value'] as number) ?? 0), 0) / won.length) : 0;
+
+    const { text } = await ai.generate({
+      model: GEMINI_FLASH,
+      prompt: `Analyze these sales results and provide insights in French. Return JSON ONLY.
+Won: ${won.length} deals (avg ${avgDealSize}€), Lost: ${lost.length} deals, Win rate: ${winRate}%
+Won sources: ${won.map(d => d['source']).join(', ')}
+Lost sources: ${lost.map(d => d['source']).join(', ')}
+Won stages progression: ${won.map(d => d['stage']).join(', ')}
+Return: {"winFactors":["factor1","factor2"],"lossReasons":["reason1","reason2"],"recommendations":["rec1","rec2"]}`,
+      config: { temperature: 0.3 },
+    });
+    let analysis = { winFactors: [] as string[], lossReasons: [] as string[], recommendations: [] as string[] };
+    try { analysis = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')); } catch {}
+
+    return { totalWon: won.length, totalLost: lost.length, winRate, avgDealSize, avgCycleLength: 0, ...analysis };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRO: TEAM PERFORMANCE
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const teamPerformanceTool = ai.defineTool(
+  {
+    name: 'sales_getTeamPerformance',
+    description: 'Get individual sales rep performance — KPIs, quota attainment, leaderboard.',
+    inputSchema: z.object({ companyId: z.string() }),
+    outputSchema: z.object({
+      reps: z.array(z.object({ userId: z.string(), name: z.string(), leadsOwned: z.number(), dealsWon: z.number(), dealsClosed: z.number(), revenue: z.number(), conversionRate: z.number(), avgDealSize: z.number() })),
+      topPerformer: z.string(), totalRevenue: z.number(),
+    }),
+  },
+  async ({ companyId }) => {
+    const db = getFirestore();
+    const [leadsSnap, usersSnap] = await Promise.all([
+      db.collection(`companies/${companyId}/leads`).limit(500).get(),
+      db.collection('users').where('companyId', '==', companyId).limit(50).get(),
+    ]);
+    const leads = leadsSnap.docs.map(d => d.data());
+    const repMap = new Map<string, { name: string; leads: number; won: number; closed: number; revenue: number }>();
+
+    // Init reps
+    usersSnap.docs.forEach(d => {
+      const u = d.data();
+      if (u['role'] === 'admin' || u['role'] === 'manager' || u['department'] === 'Commercial') {
+        repMap.set(d.id, { name: (u['displayName'] as string) ?? (u['email'] as string) ?? '', leads: 0, won: 0, closed: 0, revenue: 0 });
+      }
+    });
+
+    // Aggregate by owner
+    leads.forEach(l => {
+      const owner = (l['ownerId'] as string) ?? (l['createdBy'] as string) ?? '';
+      if (!repMap.has(owner)) return;
+      const rep = repMap.get(owner)!;
+      rep.leads++;
+      if (l['stage'] === 'gagne') { rep.won++; rep.revenue += (l['amount'] as number) ?? (l['value'] as number) ?? 0; }
+      if (l['stage'] === 'gagne' || l['stage'] === 'perdu') rep.closed++;
+    });
+
+    const reps = Array.from(repMap.entries()).map(([userId, data]) => ({
+      userId, ...data,
+      dealsClosed: data.closed, dealsWon: data.won, leadsOwned: data.leads,
+      conversionRate: data.closed > 0 ? Math.round(data.won / data.closed * 100) : 0,
+      avgDealSize: data.won > 0 ? Math.round(data.revenue / data.won) : 0,
+    })).sort((a, b) => b.revenue - a.revenue);
+
+    return { reps, topPerformer: reps[0]?.name ?? '', totalRevenue: reps.reduce((s, r) => s + r.revenue, 0) };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRO: EMAIL SEQUENCES
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const createEmailSequenceTool = ai.defineTool(
+  {
+    name: 'sales_createEmailSequence',
+    description: 'Create an automated email drip sequence for lead nurturing.',
+    inputSchema: z.object({
+      companyId: z.string(), name: z.string(), targetStage: z.string().optional(),
+      steps: z.array(z.object({ dayOffset: z.number(), subject: z.string(), template: z.string() })).optional(),
+      generateWithAI: z.boolean().optional().default(true),
+    }),
+    outputSchema: z.object({ sequenceId: z.string(), name: z.string(), steps: z.array(z.object({ dayOffset: z.number(), subject: z.string(), template: z.string() })), message: z.string() }),
+  },
+  async ({ companyId, name, targetStage, steps, generateWithAI }) => {
+    let sequenceSteps = steps ?? [];
+    if (generateWithAI || sequenceSteps.length === 0) {
+      const { text } = await ai.generate({
+        model: GEMINI_FLASH,
+        prompt: `Create a 5-step email drip sequence for sales lead nurturing in French. Target stage: ${targetStage ?? 'nouveau'}.
+Each step: dayOffset (days after enrollment), subject line, email template body.
+Return JSON: {"steps":[{"dayOffset":0,"subject":"...","template":"..."}]}`,
+        config: { temperature: 0.4 },
+      });
+      try { sequenceSteps = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')).steps; } catch {
+        sequenceSteps = [
+          { dayOffset: 0, subject: 'Bienvenue', template: 'Merci de votre interet...' },
+          { dayOffset: 3, subject: 'Decouvrez nos solutions', template: 'Voici comment nous pouvons vous aider...' },
+          { dayOffset: 7, subject: 'Etude de cas', template: 'Decouvrez comment un client similaire...' },
+          { dayOffset: 14, subject: 'Offre speciale', template: 'Profitez de notre offre...' },
+          { dayOffset: 21, subject: 'Dernier rappel', template: 'Nous aimerions echanger avec vous...' },
+        ];
+      }
+    }
+
+    const db = getFirestore();
+    const id = generateId();
+    await db.collection(`companies/${companyId}/emailSequences`).doc(id).set({
+      id, name, targetStage: targetStage ?? 'nouveau', steps: sequenceSteps,
+      status: 'active', enrolledCount: 0, createdAt: FieldValue.serverTimestamp(),
+    });
+    return { sequenceId: id, name, steps: sequenceSteps, message: `Sequence "${name}" creee avec ${sequenceSteps.length} etapes.` };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRO: SALES AUTOMATION (cross-agent)
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const salesAutomationTool = ai.defineTool(
+  {
+    name: 'sales_runAutomation',
+    description: 'Run sales automation: deal won → invoice, deal lost → training assignment, stale leads → marketing campaign.',
+    inputSchema: z.object({ companyId: z.string(), automationType: z.enum(['deal_won', 'deal_lost', 'stale_leads']) }),
+    outputSchema: z.object({ actions: z.array(z.string()), message: z.string() }),
+  },
+  async ({ companyId, automationType }) => {
+    const db = getFirestore();
+    const actions: string[] = [];
+
+    if (automationType === 'deal_won') {
+      // Find recently won deals without invoice
+      const wonSnap = await db.collection(`companies/${companyId}/leads`).where('stage', '==', 'gagne').limit(20).get();
+      for (const doc of wonSnap.docs) {
+        const lead = doc.data();
+        if (lead['invoiceCreated']) continue;
+        const id = generateId();
+        await db.collection(`companies/${companyId}/invoices`).doc(id).set({
+          id, clientName: (lead['company'] as string) ?? (lead['name'] as string) ?? '',
+          amount: (lead['amount'] as number) ?? (lead['value'] as number) ?? 0,
+          status: 'pending', source: 'sales_automation', leadId: doc.id,
+          createdAt: new Date(),
+        });
+        await doc.ref.update({ invoiceCreated: true, invoiceId: id });
+        actions.push(`Facture creee pour ${lead['company'] ?? lead['name']} (${lead['amount'] ?? lead['value']}€)`);
+      }
+    }
+
+    if (automationType === 'deal_lost') {
+      const lostSnap = await db.collection(`companies/${companyId}/leads`).where('stage', '==', 'perdu').limit(20).get();
+      const ownerIds = [...new Set(lostSnap.docs.map(d => (d.data()['ownerId'] as string) ?? '').filter(Boolean))];
+      if (ownerIds.length > 0) {
+        // Assign sales training
+        const coursesSnap = await db.collection(`companies/${companyId}/trainingCourses`).where('category', '==', 'soft_skills').limit(1).get();
+        if (!coursesSnap.empty) {
+          for (const uid of ownerIds) {
+            await db.collection(`companies/${companyId}/trainingProgress`).doc(generateId()).set({
+              courseId: coursesSnap.docs[0].id, userId: uid, status: 'assigned', completionPct: 0, score: 0,
+              assignedAt: new Date(), autoAssigned: true, assignReason: 'sales_deal_lost',
+            });
+          }
+          actions.push(`Formation assignee a ${ownerIds.length} vendeur(s) apres deals perdus`);
+        }
+      }
+    }
+
+    if (automationType === 'stale_leads') {
+      const cutoff = new Date(Date.now() - 14 * 86400000);
+      const staleSnap = await db.collection(`companies/${companyId}/leads`)
+        .where('stage', 'in', ['nouveau', 'contacte']).limit(50).get();
+      const stale = staleSnap.docs.filter(d => {
+        const t = (d.data()['updatedAt'] as { toDate?: () => Date })?.toDate?.()?.getTime() ?? 0;
+        return t < cutoff.getTime();
+      });
+      if (stale.length > 0) {
+        // Create marketing nurture campaign notification
+        const { createNotification } = await import('../services/notificationService');
+        createNotification({ companyId, type: 'agent_alert', title: `${stale.length} leads inactifs detectes`, message: `Creez une campagne de nurturing pour reactiver ces leads.`, actionUrl: '/comms/campaigns', icon: 'TrendingUp', severity: 'warning' }).catch(() => {});
+        actions.push(`${stale.length} leads inactifs (>14j) detectes — notification marketing envoyee`);
+      }
+    }
+
+    return { actions, message: actions.length > 0 ? `${actions.length} action(s) executee(s).` : 'Aucune action necessaire.' };
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// E-SIGNATURE — send a quote/devis for client signature via Wemas
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const sendQuoteForSignatureTool = ai.defineTool(
+  {
+    name: 'sales_sendQuoteForSignature',
+    description: 'Envoie un devis au client pour signature électronique via Wemas. Récupère le devis (par quoteId), le client + son email, génère le contenu du devis, push vers Wemas, et envoie le lien de signature au client par email. Utilise APRÈS sales_createQuote. Le devis devient "signed" automatiquement quand le client signe.',
+    inputSchema: z.object({
+      companyId: z.string(),
+      quoteId: z.string().describe('Quote UUID returned by sales_createQuote'),
+      senderName: z.string().optional().describe('Salesperson name — defaults to company name'),
+    }),
+    outputSchema: z.object({
+      success: z.boolean(),
+      contractId: z.string().optional(),
+      signingUrl: z.string().optional(),
+      verificationCode: z.string().optional(),
+      message: z.string(),
+    }),
+  },
+  async ({ companyId, quoteId, senderName }) => {
+    const db = getFirestore();
+    const { isWemasConfigured, createAndSendContract } = await import('../services/wemas/wemasBridge');
+
+    if (!isWemasConfigured()) {
+      return {
+        success: false,
+        message: 'Signature électronique non disponible : Wemas n\'est pas configuré. Le devis doit être signé manuellement.',
+      };
+    }
+
+    const quoteDoc = await db.collection(`companies/${companyId}/quotes`).doc(quoteId).get();
+    if (!quoteDoc.exists) {
+      return { success: false, message: `Devis ${quoteId} introuvable. Vérifie l'ID.` };
+    }
+    const quote = quoteDoc.data() ?? {};
+    const clientName = (quote['clientName'] as string) ?? 'Client';
+    const clientEmail = (quote['clientEmail'] as string) ?? '';
+    if (!clientEmail) {
+      return { success: false, message: `Le devis n'a pas d'email client. Mets-le à jour avec sales_updateQuote.` };
+    }
+
+    const companyDoc = await db.collection('companies').doc(companyId).get();
+    const company = companyDoc.data() ?? {};
+    const companyName = (company['name'] as string) ?? 'Notre entreprise';
+
+    // Build a clean text version of the quote for Wemas display
+    const items = Array.isArray(quote['items']) ? quote['items'] as Array<Record<string, unknown>> : [];
+    const itemsLines = items.map(it => {
+      const desc = String(it['description'] ?? it['name'] ?? 'Article');
+      const qty = Number(it['quantity'] ?? 1);
+      const unit = Number(it['unitPrice'] ?? it['price'] ?? 0);
+      return `- ${desc} × ${qty} = ${(qty * unit).toLocaleString()}`;
+    }).join('\n');
+    const total = Number(quote['totalTTC'] ?? quote['total'] ?? 0);
+    const currency = (quote['currency'] as string) ?? 'XOF';
+    const validUntil = (quote['validUntil'] as string) ?? '30 jours';
+    const quoteNumber = (quote['quoteNumber'] as string) ?? quoteId;
+
+    const contractContent = `DEVIS N° ${quoteNumber}
+
+Émis par ${companyName}
+À l'attention de ${clientName}
+
+OBJET
+Proposition commerciale détaillée ci-dessous.
+
+DÉTAIL
+${itemsLines || '(détail à compléter)'}
+
+TOTAL TTC : ${total.toLocaleString()} ${currency}
+
+VALIDITÉ
+${validUntil === '30 jours' ? 'Ce devis est valable 30 jours à compter de sa date d\'émission.' : `Ce devis est valable jusqu'au ${validUntil}.`}
+
+ACCEPTATION
+En signant ce devis électroniquement, le Client accepte les termes et conditions ci-dessus, et autorise ${companyName} à procéder à la prestation/livraison décrite.
+
+CONDITIONS GÉNÉRALES
+Paiement à 30 jours net à réception de la facture, sauf accord contraire.
+Tout retard de paiement entraîne l'application de pénalités au taux légal en vigueur.
+
+Fait à ${(company['city'] as string) ?? '____________'}, le ${new Date().toISOString().slice(0, 10)}.
+
+Le Prestataire                         Le Client
+${companyName}                         ${clientName}`;
+
+    try {
+      const result = await createAndSendContract({
+        companyId,
+        signatoryName:   clientName,
+        signatoryEmail:  clientEmail,
+        contractContent,
+        contractType:    'prestation_services',
+        senderName:      senderName ?? companyName,
+        sendNow:         true,
+      });
+
+      // Cross-link Wemas contract back to the quote
+      await quoteDoc.ref.update({
+        wemasContractId: result.id,
+        wemasSigningUrl: result.signingUrl,
+        wemasVerificationCode: result.verificationCode,
+        status: 'sent_for_signature',
+        sentForSignatureAt: new Date(),
+      }).catch(() => { /* non-fatal */ });
+
+      return {
+        success: true,
+        contractId: result.id,
+        signingUrl: result.signingUrl,
+        verificationCode: result.verificationCode,
+        message: `Devis ${quoteNumber} envoyé à ${clientName} (${clientEmail}) pour signature. Code de vérification : ${result.verificationCode}. URL : ${result.signingUrl}.`,
+      };
+    } catch (err) {
+      logger.error('[Sales] sendQuoteForSignature failed', { err: String(err), quoteId });
+      return {
+        success: false,
+        message: `Échec envoi à Wemas : ${(err as Error).message ?? String(err)}.`,
+      };
+    }
+  }
+);
+
+const ALL_TOOLS = [
+  createLeadTool, createClientTool, getLeadsTool, getClientTool, getClientHistoryTool,
+  scoreLeadTool, updateLeadStatusTool,
+  getPipelineTool, updateDealStageTool,
+  createQuoteTool, updateQuoteTool, sendQuoteTool, convertQuoteToSaleTool,
+  sendEmailTool, sendWhatsAppTool,
+  scheduleFollowUpTool, getPendingFollowUpsTool, autoFollowUpTool,
+  getStatsTool, forecastRevenueTool,
+  // E-signature via Wemas
+  sendQuoteForSignatureTool,
+  // PRO tools
+  aiScoreLeadTool, dealInsightsTool, winLossAnalysisTool, teamPerformanceTool,
+  createEmailSequenceTool, salesAutomationTool,
+];
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AGENT FLOW
+// ══════════════════════════════════════════════════════════════════════════════
+
+const INPUT = z.object({
+  request:   z.string(),
+  companyId: z.string(),
+  userId:    z.string().optional(),
+  language:  z.string().optional().default('auto'),
+  history:   z.array(z.object({ role: z.enum(['user', 'model']), content: z.string() })).optional(),
+});
+
+const OUTPUT = z.object({
+  response:  z.string(),
+  quoteId:   z.string().optional(),
+  hotLeads:  z.number().optional(),
+});
+
+export const salesAgentFlow = ai.defineFlow(
+  { name: 'salesAgent', inputSchema: INPUT, outputSchema: OUTPUT },
+  async ({ request, companyId, userId, language, history }): Promise<z.infer<typeof OUTPUT>> => {
+    try {
+      logger.info(`[SalesAgent] Request: "${request.slice(0, 80)}" (history=${history?.length ?? 0})`);
+      const langInstr = language === 'auto' ? 'Réponds dans la même langue que la demande (français par défaut).' : `Réponds en ${language}.`;
+
+      const dateAnchors = (() => {
+        const now = new Date();
+        const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+        return `AUJOURD'HUI : ${now.toISOString().slice(0, 10)} ${now.toTimeString().slice(0, 5)} (${months[now.getMonth()]} ${now.getFullYear()}).`;
+      })();
+
+      // Read company currency from settings (XOF/EUR/USD/...)
+      let currency = 'EUR';
+      try {
+        const db = getFirestore();
+        const c = await db.collection('companies').doc(companyId).get();
+        currency = (c.data()?.['settings'] as { currency?: string })?.currency ?? (c.data()?.['currency'] as string) ?? 'EUR';
+      } catch { /* fallback EUR */ }
+
+      const executors = new Map<string, (i: unknown) => Promise<unknown>>();
+      for (const tool of ALL_TOOLS) {
+        const name = (tool as unknown as { __action: { name: string } }).__action?.name ?? '';
+        if (name) executors.set(name, (i: unknown) => (tool as (args: unknown) => Promise<unknown>)({ ...(i as Record<string, unknown>), companyId }));
+      }
+
+      const messages: Array<{ role: 'user' | 'model'; content: [{ text: string }] }> = [];
+      if (history && history.length > 0) {
+        for (const h of history.slice(-20)) {
+          messages.push({ role: h.role, content: [{ text: h.content }] });
+        }
+      }
+      messages.push({ role: 'user', content: [{ text: request }] });
+
+      let response = await ai.generate({
+        model: GEMINI_FLASH,
+        system: `Tu es l'Agent Commercial PRO de l'entreprise — directeur des ventes virtuel, du lead à l'encaissement.
+CompanyID: ${companyId}. UserID: ${userId ?? 'unknown'}.
+Devise par défaut : ${currency}.
+
+## 📅 CONTEXTE TEMPOREL
+${dateAnchors}
+Pour les devis valides X jours, relances, prévisions trimestrielles — utilise cette ancre.
+
+## 🧠 MÉMOIRE CONVERSATIONNELLE — DEVIS, LEADS, CLIENTS RÉFÉRENCÉS
+RÈGLE D'OR : conserve TOUJOURS le DERNIER devis / lead / client mentionné dans ta mémoire active.
+Quand l'utilisateur dit :
+• "ce devis" / "celui-là" / "le #1" → utilise le devis de TA DERNIÈRE liste/réponse
+• "Envoie-le à client@example.com" → appelle sales_sendQuote(quoteId=<dernier devis>, recipientEmail=...)
+• "Convertis-le en facture" → appelle sales_convertQuoteToSale(quoteId=<dernier devis>)
+• "Relance ce lead" → appelle sales_sendEmail/sales_sendWhatsApp avec le lead courant
+• Si l'utilisateur répond par un numéro ('1', '2', '3'), références-toi à TA DERNIÈRE liste
+
+Format devis : DEV-YYYY-XXXX. Format facture : FAC-YYYY-XXXX. Les tools acceptent UUID ou ce format.
+
+## TON RÔLE
+Tu pilotes TOUT le cycle commercial : leads, qualification, pipeline, devis, communication, relances, analytics.
+
+CAPACITÉS :
+1. LEADS : créer, qualifier, scorer (sales_createLead, sales_getLeads, sales_scoreLead, sales_aiScoreLead, sales_updateLeadStatus)
+2. CLIENTS : créer/lire fiche client, historique (sales_createClient, sales_getClient, sales_getClientHistory)
+3. PIPELINE : étapes nouveau → contacté → intéressé → devis_envoye → négociation → gagné/perdu (sales_getPipeline, sales_updateDealStage)
+4. DEVIS : créer, envoyer (avec PDF), accepter, convertir en facture (sales_createQuote, sales_sendQuote, sales_updateQuote, sales_convertQuoteToSale)
+5. COMMUNICATION : email (sales_sendEmail), WhatsApp (sales_sendWhatsApp), séquences (sales_createEmailSequence)
+6. RELANCES : programmer, lister, auto-détecter (sales_scheduleFollowUp, sales_getPendingFollowUps, sales_autoFollowUp)
+7. ANALYTICS : stats, prévisions, win/loss, performance équipe (sales_getStats, sales_forecastRevenue, sales_winLossAnalysis, sales_getTeamPerformance, sales_getDealInsights)
+8. AUTOMATIONS : deal_won → facture, deal_lost → formation, stale_leads → marketing (sales_runAutomation)
+
+RÈGLES :
+- Sois proactif : signale leads chauds (score ≥70), relances en retard, opportunités de revenu
+- Quand un devis est accepté, propose la conversion en facture
+- Utilise la devise ${currency} dans tes réponses (jamais "EUR" si la société est en XOF)
+- IDs complets (jamais "abc..." tronqué)
+
+## 🚫 ZÉRO FABRICATION — PROCÉDURE OBLIGATOIRE
+
+**Pour CHAQUE action demandée par l'utilisateur, suis cet algorithme exact :**
+
+### A. Conversion devis → facture
+Action requise : appeler \`sales_convertQuoteToSale(quoteId=<uuid_du_devis>)\`
+- Si la réponse contient \`success: true\` → réponds : "Facture <invoiceNumber> créée (UUID: <invoiceId>, montant: <totalTTC> ${currency})"
+- Si la réponse contient \`success: false\` → réponds : "<message exact du tool>"
+- AUTRE comportement INTERDIT. Ne dis jamais "sync issue", "module séparé", "comptabilité ne reconnaît pas". Le système n'a qu'UNE base Firestore commune.
+
+### B. Création de devis
+Action requise : appeler \`sales_createQuote\`. Réponds avec le \`quoteNumber\` ET le \`quoteId\` UUID retournés.
+
+### C. Envoi devis
+Action requise : appeler \`sales_sendQuote\`. Confirme l'envoi avec \`success: true\`, sinon affiche le message d'erreur.
+
+### D. Liste (leads, devis, factures, clients)
+Affiche EXACTEMENT les éléments retournés par le tool. Ne mentionne JAMAIS un élément absent en disant "en cours d'enregistrement". Si quelque chose manque, dis simplement "X items dans la liste".
+
+### Règle universelle
+Tu n'as PAS LE DROIT d'inventer une explication d'échec sans avoir appelé le tool concerné. Pour TOUTE action demandée, le tool DOIT être appelé en premier. Sa réponse est la vérité — pas tes suppositions.
+2. Pour CHAQUE entité créée (lead, devis, facture, client), affiche systématiquement son identifiant dans ta réponse :
+   - Lead : leadId UUID (ex : "Lead Marie Diallo créé. ID: 46226dcd-4e42...")
+   - Devis : numéro \`DEV-YYYY-XXXX\` ET UUID
+   - Facture : numéro \`FAC-YYYY-XXXX\` ET UUID
+   - Client : clientId UUID
+   L'utilisateur en a besoin pour la suite. **Mémorise tous ces IDs dans ta mémoire active** pour les références ultérieures ("ce devis", "ce lead").
+3. Pour CHAQUE liste (leads, devis, factures, etc.) : affiche EXACTEMENT ce que le tool retourne, ni plus ni moins. N'AJOUTE PAS de narratif sur des items absents ("Marie est en cours d'enregistrement"). Si un item attendu n'est pas dans la liste, dis-le clairement : "Marie Diallo n'apparaît pas dans cette liste (peut-être pas encore indexée — relancez si besoin)".
+4. Si \`sales_convertQuoteToSale\` renvoie "introuvable", NE RECRÉE PAS le devis. Demande à l'utilisateur le numéro DEV-YYYY-XXXX exact, ou utilise le UUID complet de TA mémoire conversationnelle.
+5. Si une action multi-étapes (ex : "crée un devis pour Marie et envoie-le"), exécute les tools dans l'ordre et confirme CHAQUE étape avec son résultat réel — y compris les échecs.
+${langInstr}`,
+        messages,
+        tools: ALL_TOOLS,
+        config: { temperature: 0.3 },
+      });
+
+      let loopCount = 0;
+      while (response.toolRequests.length > 0 && loopCount < 8) {
+        loopCount++;
+        const toolResults = await Promise.all(
+          response.toolRequests.map(async (p) => {
+            const { name, input, ref } = p.toolRequest;
+            const exec = executors.get(name);
+            const inp = { ...(input as Record<string, unknown>), companyId };
+            const output = exec ? await exec(inp) : { error: `Unknown tool: ${name}` };
+            return { name, ref, output };
+          })
+        );
+        response = await ai.generate({
+          model: GEMINI_FLASH,
+          messages: [
+            ...response.messages,
+            { role: 'tool' as const, content: toolResults.map(r => ({ toolResponse: { name: r.name, ref: r.ref, output: r.output } })) },
+          ],
+          tools: ALL_TOOLS,
+          config: { temperature: 0.3 },
+        });
+      }
+
+      const text = response.text;
+      const quoteMatch = text.match(/DEV-\d{4}-\d{4}/);
+      const hotMatch = text.match(/(\d+)\s*(hot|chaud)/i);
+
+      return { response: text, quoteId: quoteMatch?.[0], hotLeads: hotMatch ? parseInt(hotMatch[1]) : undefined };
+    } catch (err) {
+      logger.error('[SalesAgent] Flow error:', err);
+      return { response: 'Une erreur est survenue dans l\'agent commercial. Veuillez réessayer.' };
+    }
+  }
+);
+
+export const salesAgentTool = ai.defineTool(
+  {
+    name: 'callSalesAgent',
+    description: 'Sales CRM PRO: leads, AI scoring, pipeline, quotes, email sequences, WhatsApp, follow-ups, team performance, win/loss analysis, deal insights, revenue forecast, cross-agent automation.',
+    inputSchema: INPUT,
+    outputSchema: OUTPUT,
+  },
+  async (input) => {
+    try { return await salesAgentFlow(input); }
+    catch (err) { logger.error('[callSalesAgent] Error:', err); return { response: 'Erreur agent commercial.' }; }
+  }
+);

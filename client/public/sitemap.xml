@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://orlode.com</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://orlode.com/register</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://orlode.com/login</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://orlode.com/marketplace</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/creator/register</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <!-- SEO Agent Pages -->
+  <url><loc>https://orlode.com/ai/marketing-ai</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/rh-ai</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/comptabilite-ai</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/commercial-ai</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/support-ai</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/website-builder</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <!-- SEO Industry Pages -->
+  <url><loc>https://orlode.com/ai/ai-restaurant</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/ai-immobilier</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/ai-garage</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/ai-salon-beaute</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/ai-afrique</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://orlode.com/ai/ai-agriculture</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/ai-education</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://orlode.com/ai/ai-finance</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+</urlset>

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /superadmin
+Disallow: /api/
+Disallow: /settings
+Sitemap: https://orlode.com/sitemap.xml

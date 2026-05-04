@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.asyncHandler = asyncHandler;
+/**
+ * Wraps an async Express handler to automatically catch and forward errors
+ * to the next() error handler.
+ */
+function asyncHandler(fn) {
+    return (req, res, next) => {
+        Promise.resolve(fn(req, res, next)).catch(next);
+    };
+}
+//# sourceMappingURL=asyncHandler.js.map

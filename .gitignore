@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build outputs
+client/dist/
+server/dist/
+
+# Environment variables — NEVER commit these (real secrets inside)
+.env
+.env.local
+.env.production
+.env.cloud
+.env.cloud.yaml
+env.yaml
+env.cloud.yaml
+**/.env
+**/.env.local
+**/.env.production
+**/.env.cloud
+**/.env.cloud.yaml
+**/env.yaml
+*.env
+
+# Templates (placeholder values only) — DO commit these
+!.env.example
+!**/.env.example
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Upload temp
+server/uploads/
+server/temp/
+
+# Service account keys
+*serviceAccount*.json
+*service-account*.json
+firebase-admin-key.json

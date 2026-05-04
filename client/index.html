@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Orlode AI — 48 Agents IA pour votre Entreprise</title>
+    <meta name="description" content="Orlode AI — Plateforme multi-agents IA pour entreprises africaines. 48 agents, 13 connecteurs, marketplace, equipe, site web auto, WhatsApp, RH, finance et plus. BYOK." />
+    <meta name="keywords" content="Orlode, AI, IA, agents, entreprise, Afrique, marketplace, CRM, RH, comptabilite, support, chatbot, WhatsApp, automatisation, SaaS" />
+    <meta name="author" content="Orlode AI" />
+    <meta name="theme-color" content="#6c3ce0" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Orlode" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Canonical -->
+    <link rel="canonical" href="https://orlode.com" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://orlode.com" />
+    <meta property="og:title" content="Orlode AI — 48 Agents IA pour votre Entreprise" />
+    <meta property="og:description" content="48 agents IA specialises, 13 connecteurs, marketplace, collaboration equipe, site web auto-genere. La plateforme IA #1 pour les entreprises africaines." />
+    <meta property="og:image" content="https://orlode.com/logo.png" />
+    <meta property="og:site_name" content="Orlode AI" />
+    <meta property="og:locale" content="fr_FR" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Orlode AI — 48 Agents IA pour votre Entreprise" />
+    <meta name="twitter:description" content="48 agents IA, 13 connecteurs, marketplace, site web auto. Pour les entreprises africaines." />
+    <meta name="twitter:image" content="https://orlode.com/logo.png" />
+
+    <!-- Structured Data / JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Orlode AI",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "Plateforme multi-agents IA pour entreprises. 48 agents specialises, marketplace, collaboration equipe, site web auto-genere, 13 connecteurs.",
+      "url": "https://orlode.com",
+      "author": { "@type": "Organization", "name": "Orlode AI" },
+      "offers": [
+        { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD", "description": "1 agent, pour tester" },
+        { "@type": "Offer", "name": "Starter", "price": "19.99", "priceCurrency": "USD", "description": "4 agents au choix" },
+        { "@type": "Offer", "name": "Pro", "price": "49.99", "priceCurrency": "USD", "description": "8 agents au choix" },
+        { "@type": "Offer", "name": "Premium", "price": "99.99", "priceCurrency": "USD", "description": "12 agents au choix" }
+      ],
+      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "156" },
+      "featureList": ["48 AI Agents", "13 Connectors", "Team Collaboration", "Website Builder", "WhatsApp Integration", "Marketplace", "BYOK Multi-LLM"]
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+    <style>
+      input:not([type=radio]):not([type=checkbox]):not([type=range]):not([type=color]):not([type=file]),
+      textarea, select {
+        background-color: #ffffff !important;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.07) !important;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50 text-gray-900 antialiased">
+    <div id="root"></div>
+    <div id="modal-root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+
+      // Auto-recover from stale cached chunks after a deploy.
+      // When React Router lazy-loads a chunk that no longer exists on the server
+      // (Firebase SPA rewrite returns index.html with MIME text/html), we force
+      // a hard reload once so the new index.html + new chunk manifest is used.
+      (function () {
+        var reloaded = false;
+        function tryReload(e) {
+          var msg = (e && (e.message || (e.reason && e.reason.message))) || '';
+          if (!reloaded && /Failed to fetch dynamically imported module|Loading chunk .* failed|Expected a JavaScript.*module script/i.test(msg)) {
+            reloaded = true;
+            // Unregister SWs + clear caches before reload to ensure freshness
+            if ('caches' in window) caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k);});});
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister();});});
+            }
+            setTimeout(function(){ window.location.reload(); }, 100);
+          }
+        }
+        window.addEventListener('error', tryReload, true);
+        window.addEventListener('unhandledrejection', tryReload);
+      })();
+    </script>
+  </body>
+</html>
