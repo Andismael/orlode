@@ -3,6 +3,7 @@ import api from '@/services/api';
 import { useCurrency } from '@/hooks/useCurrency';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, Users, Building2, Bot, DollarSign, Star, Download, Loader2 } from 'lucide-react';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface Analytics {
   totalCompanies: number; totalUsers: number; totalAgents: number; totalReviews: number;
@@ -21,16 +22,27 @@ export default function PlatformAnalyticsPage() {
     api.get('/superadmin/analytics').then(r => setData(r.data as Analytics)).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>;
-  if (!data) return <p className="p-6 text-gray-500">Erreur de chargement</p>;
+  if (loading) return (
+    <SuperAdminPage title="Analytics Plateforme" icon={<TrendingUp size={20} />}>
+      <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>
+    </SuperAdminPage>
+  );
+  if (!data) return (
+    <SuperAdminPage title="Analytics Plateforme" icon={<TrendingUp size={20} />}>
+      <p className="text-gray-500">Erreur de chargement</p>
+    </SuperAdminPage>
+  );
 
   const revenueChart = Object.entries(data.revenueByMonth).sort(([a], [b]) => a.localeCompare(b)).map(([month, amount]) => ({ month: month.slice(5), amount }));
   const companiesChart = Object.entries(data.companiesByMonth).sort(([a], [b]) => a.localeCompare(b)).map(([month, count]) => ({ month: month.slice(5), count }));
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
-      <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><TrendingUp size={22} className="text-violet-500" /> Analytics Plateforme</h1>
-
+    <SuperAdminPage
+      title="Analytics Plateforme"
+      subtitle="Revenu, croissance, distribution des plans"
+      icon={<TrendingUp size={20} />}
+    >
+      <div className="space-y-6">
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KPI icon={<Building2 size={18} />} label="Entreprises" value={data.totalCompanies} color="text-blue-600" />
@@ -116,7 +128,8 @@ export default function PlatformAnalyticsPage() {
           <p className="text-xs text-gray-500">Installations agents</p>
         </div>
       </div>
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }
 

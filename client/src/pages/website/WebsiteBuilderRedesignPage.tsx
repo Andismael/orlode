@@ -124,6 +124,12 @@ const GLOBAL_STYLES = `
     50% { transform: scale(1.6); opacity: 0; }
   }
 
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  .spin { animation: spin 0.9s linear infinite; }
+
   /* Big mode card hover effect */
   .mode-card {
     background: ${C.cream};
@@ -401,34 +407,366 @@ function PageHeader({ title, italic, subtitle, badge, actions, onBack }) {
   );
 }
 
-// ============ ENTRY: 2 MODES CHOICE ============
+// ============ IMPORT HTML PANEL — paste site from Claude/Gemini/Bolt ============
+function ImportHtmlPanel({ onBack, onImported }) {
+  const { company } = useAuthStore();
+  type Source = 'claude' | 'gemini' | 'bolt' | 'v0' | 'cursor' | 'autre';
+  const [source, setSource] = useState<Source>('claude');
+  const [rawHtml, setRawHtml] = useState('');
+  const [publishNow, setPublishNow] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const SOURCES: { id: Source; label: string; emoji: string; color: string; tag: string }[] = [
+    { id: 'claude', label: 'Claude',  emoji: '✶', color: '#D97757', tag: 'claude.ai/artifacts' },
+    { id: 'gemini', label: 'Gemini',  emoji: '✦', color: '#4285F4', tag: 'gemini.google.com' },
+    { id: 'bolt',   label: 'Bolt',    emoji: '⚡', color: '#1E1E1E', tag: 'bolt.new' },
+    { id: 'v0',     label: 'v0',      emoji: '◆', color: '#000000', tag: 'v0.dev' },
+    { id: 'cursor', label: 'Cursor',  emoji: '◈', color: '#7C3AED', tag: 'cursor.com' },
+    { id: 'autre',  label: 'Autre',   emoji: '◯', color: '#5A6B62', tag: 'site fait main' },
+  ];
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Fichier trop lourd', 'Max 5 MB. Compresse ou colle directement le HTML.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const txt = String(reader.result ?? '');
+      setRawHtml(txt);
+      toast.success('Fichier chargé', `${file.name} · ${Math.round(file.size / 1024)} KB`);
+    };
+    reader.onerror = () => toast.error('Lecture impossible', 'Le fichier ne peut pas être lu.');
+    reader.readAsText(file);
+  };
+
+  const looksLikeHtml = (s: string) => /<\/?(html|body|head|div|section|main|header|footer|h1|nav|article|p)\b/i.test(s);
+
+  const handleSubmit = async () => {
+    const trimmed = rawHtml.trim();
+    if (trimmed.length < 100) {
+      toast.error('HTML trop court', 'Colle au moins 100 caractères de HTML.');
+      return;
+    }
+    if (!looksLikeHtml(trimmed)) {
+      toast.error('HTML invalide', "Le contenu ne ressemble pas à du HTML. Vérifie que tu colles bien le code source.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const r: any = await api.post('/website/import', {
+        rawHtml: trimmed,
+        importedFrom: source,
+        companyName: company?.name,
+        color: (company as any)?.primaryColor ?? '#0A4F3C',
+        publish: publishNow,
+      });
+      const data = r?.data?.data ?? r?.data;
+      toast.success(
+        publishNow ? 'Site importé et publié' : 'Site importé',
+        `${Math.round((data?.sizeBytes ?? trimmed.length) / 1024)} KB · widget chat injecté`,
+      );
+      onImported(data);
+    } catch (e: any) {
+      const msg = e?.response?.data?.message ?? "Import impossible. Réessaie ou contacte le support.";
+      toast.error('Échec import', msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Import HTML,"
+        italic="hébergez votre site Claude/Gemini/Bolt."
+        subtitle="Collez le HTML ou uploadez un fichier .html · Widget chat injecté automatiquement"
+        badge="MODE IMPORT · CLAUDE · GEMINI · BOLT"
+        onBack={onBack}
+      />
+
+      <div style={{ padding: '32px 32px 32px', maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{
+          background: C.cream, borderRadius: 24,
+          padding: 32, border: '1px solid rgba(10,42,32,0.06)',
+        }}>
+          {/* Source picker */}
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              D'où vient votre HTML ?
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+              {SOURCES.map(s => {
+                const active = source === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setSource(s.id)}
+                    style={{
+                      padding: '12px 14px', borderRadius: 12,
+                      background: active ? s.color : C.creamDeep,
+                      color: active ? C.cream : C.ink,
+                      border: active ? `2px solid ${s.color}` : `2px solid transparent`,
+                      cursor: 'pointer', textAlign: 'left',
+                      transition: 'all 0.2s ease',
+                      display: 'flex', flexDirection: 'column', gap: 2,
+                    }}
+                  >
+                    <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 16 }}>{s.emoji}</span> {s.label}
+                    </span>
+                    <span style={{ fontSize: 10, opacity: 0.7, fontFamily: 'JetBrains Mono, monospace' }}>{s.tag}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Paste textarea */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: C.ink, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Collez votre HTML
+              </label>
+              <span style={{ fontSize: 11, color: C.inkSoft, fontFamily: 'JetBrains Mono, monospace' }}>
+                {rawHtml.length.toLocaleString()} caractères {rawHtml.length > 100 && '· ✓'}
+              </span>
+            </div>
+            <textarea
+              value={rawHtml}
+              onChange={e => setRawHtml(e.target.value)}
+              placeholder={`<!DOCTYPE html>\n<html lang="fr">\n  <head>...</head>\n  <body>\n    ...\n  </body>\n</html>`}
+              spellCheck={false}
+              style={{
+                width: '100%', minHeight: 320,
+                padding: 14, borderRadius: 12,
+                background: '#0A2A20', color: '#E0F2F1',
+                border: `1.5px solid ${C.emerald}30`,
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 12, lineHeight: 1.5,
+                resize: 'vertical', outline: 'none',
+              }}
+            />
+          </div>
+
+          {/* OR upload file */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '14px 18px', borderRadius: 12,
+            background: C.creamDeep, marginBottom: 20,
+            border: `1px dashed ${C.emerald}50`,
+          }}>
+            <Upload size={18} color={C.emeraldDeep} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>Ou uploadez un fichier .html</div>
+              <div style={{ fontSize: 11, color: C.inkSoft }}>Max 5 MB · Le contenu remplit la zone ci-dessus</div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".html,.htm,text/html"
+              onChange={handleFileUpload}
+              style={{ display: 'none' }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: '8px 14px', borderRadius: 8,
+                background: C.emerald, color: C.cream,
+                border: 'none', cursor: 'pointer',
+                fontSize: 12, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <FileText size={13} /> Choisir un fichier
+            </button>
+          </div>
+
+          {/* Publish toggle */}
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '14px 18px', borderRadius: 12,
+            background: publishNow ? C.emeraldSoft : C.creamDeep,
+            border: `1.5px solid ${publishNow ? C.emerald : 'transparent'}`,
+            cursor: 'pointer', marginBottom: 20,
+            transition: 'all 0.2s ease',
+          }}>
+            <input
+              type="checkbox"
+              checked={publishNow}
+              onChange={e => setPublishNow(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: C.emerald, cursor: 'pointer' }}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
+                Publier immédiatement
+              </div>
+              <div style={{ fontSize: 11, color: C.inkSoft }}>
+                Sinon, sauvegardé en brouillon — tu pourras prévisualiser avant publication
+              </div>
+            </div>
+            {publishNow && <Rocket size={18} color={C.emeraldDeep} />}
+          </label>
+
+          {/* Helper note */}
+          <div style={{
+            padding: '12px 14px', borderRadius: 10,
+            background: `${C.cyan}10`, border: `1px solid ${C.cyan}30`,
+            fontSize: 12, color: C.ink, marginBottom: 20,
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+          }}>
+            <Lightbulb size={16} color={C.cyanDeep} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <strong style={{ color: C.cyanDeep }}>Astuce :</strong> sur Claude, demande "donne-moi le HTML complet du site dans un seul fichier". Sur Gemini ou Bolt, copie le code généré. Orlode injecte automatiquement le widget chat avant <code style={{ background: C.creamDeep, padding: '1px 4px', borderRadius: 3 }}>&lt;/body&gt;</code>.
+            </div>
+          </div>
+
+          {/* Submit */}
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={submitting}
+              style={{
+                padding: '12px 20px', borderRadius: 12,
+                background: 'transparent', color: C.ink,
+                border: `1.5px solid ${C.inkLight}`,
+                cursor: 'pointer', fontWeight: 600, fontSize: 14,
+              }}
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || rawHtml.trim().length < 100}
+              style={{
+                padding: '12px 24px', borderRadius: 12,
+                background: `linear-gradient(135deg, ${C.emerald}, ${C.emeraldDeep})`,
+                color: C.cream, border: 'none',
+                cursor: submitting ? 'wait' : 'pointer',
+                fontWeight: 700, fontSize: 14,
+                display: 'flex', alignItems: 'center', gap: 8,
+                opacity: (submitting || rawHtml.trim().length < 100) ? 0.5 : 1,
+                boxShadow: `0 8px 20px -6px ${C.emerald}`,
+              }}
+            >
+              {submitting
+                ? <><Loader2 size={16} className="spin" /> Import en cours…</>
+                : <><Upload size={16} /> {publishNow ? 'Importer et publier' : 'Importer (brouillon)'} <ArrowRight size={16} /></>
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ============ ENTRY: 3 MODES CHOICE ============
 function EntryChoice({ onSelectMode, onImportUrl }) {
   const [importUrl, setImportUrl] = useState('orlode.com');
 
   return (
     <>
       <PageHeader
-        title="Website Builder,"
-        italic="construisez en 2 minutes."
-        subtitle="Site pro avec widget chat IA intégré · Multi-paiements · Templates pro"
-        badge="OPERATIONS · BUILDER + IA"
+        title="AI Business Website,"
+        italic="votre site travaille pour vous."
+        subtitle="Pas un Wix de plus. Un site qui répond sur WhatsApp, prend des RDV, vend, et envoie les emails — tout seul."
+        badge="ORLODE · LE SITE QUI BOSSE"
       />
 
-      {/* 2 MODES CARDS */}
-      <div style={{ padding: '40px 32px 0' }}>
+      {/* "Votre site travaille pour vous" — 4 promesses business */}
+      <div style={{ padding: '32px 32px 0' }}>
+        <div style={{
+          maxWidth: 1100, margin: '0 auto',
+          background: `linear-gradient(135deg, rgba(255,250,240,0.04), rgba(255,250,240,0.08))`,
+          border: '1px solid rgba(255,250,240,0.10)',
+          backdropFilter: 'blur(12px)',
+          borderRadius: 20, padding: '20px 24px',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 8, marginBottom: 14,
+          }}>
+            <div className="live-dot" style={{ background: C.emerald }}></div>
+            <span style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+              color: C.onGreenSoft, textTransform: 'uppercase',
+            }}>
+              Connecté à vos agents IA · 24/7
+            </span>
+          </div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: 12,
+          }}>
+            {[
+              { icon: MessageCircle, agent: 'Comms',     color: C.emerald, label: 'Répond sur WhatsApp',   tag: 'sans toi' },
+              { icon: Calendar,      agent: 'Reception', color: C.cyan,    label: 'Prend les RDV',          tag: 'agenda auto' },
+              { icon: ShoppingBag,   agent: 'Sales',     color: C.violet,  label: 'Vend tes produits',      tag: 'Mobile Money' },
+              { icon: Mail,          agent: 'Marketing', color: C.pink,    label: 'Envoie les emails',      tag: 'campagnes auto' },
+            ].map((p, i) => {
+              const Icon = p.icon;
+              return (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 14px', borderRadius: 12,
+                  background: 'rgba(255,250,240,0.04)',
+                  border: '1px solid rgba(255,250,240,0.08)',
+                }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 10,
+                    background: `linear-gradient(135deg, ${p.color}, ${p.color}cc)`,
+                    color: C.cream,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                    boxShadow: `0 6px 14px -4px ${p.color}`,
+                  }}>
+                    <Icon size={17} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 13, fontWeight: 700, color: C.cream,
+                      lineHeight: 1.2, marginBottom: 2,
+                    }}>
+                      {p.label}
+                    </div>
+                    <div style={{
+                      fontSize: 10, color: p.color, fontWeight: 700,
+                      letterSpacing: '0.04em', textTransform: 'uppercase',
+                      display: 'flex', alignItems: 'center', gap: 5,
+                    }}>
+                      <Sparkles size={9} fill={p.color} /> Agent {p.agent} · {p.tag}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 3 MODES CARDS */}
+      <div style={{ padding: '32px 32px 0' }}>
         <h3 className="display-font" style={{
           fontSize: 26, fontWeight: 700, color: C.cream,
           margin: '0 0 8px', letterSpacing: '-0.02em', textAlign: 'center',
         }}>
-          Comment souhaitez-vous <em style={{ fontStyle: 'italic', fontWeight: 500, color: C.cyanSoft }}>commencer ?</em>
+          Comment <em style={{ fontStyle: 'italic', fontWeight: 500, color: C.cyanSoft }}>démarrer ?</em>
         </h3>
         <p style={{ fontSize: 14, color: C.onGreenSoft, textAlign: 'center', margin: '0 0 32px' }}>
-          Choisissez le mode qui correspond à votre besoin
+          Trois façons de mettre votre site en ligne — les agents s'y branchent automatiquement
         </p>
 
         <div className="modes-grid stagger" style={{
-          display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 24,
-          maxWidth: 1100, margin: '0 auto',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24,
+          maxWidth: 1280, margin: '0 auto',
         }}>
           {/* MODE 1 — IA Generator */}
           <div onClick={() => onSelectMode('ai')} className="mode-card" style={{
@@ -587,6 +925,88 @@ function EntryChoice({ onSelectMode, onImportUrl }) {
 
             <button className="btn-cyan" style={{ width: '100%', justifyContent: 'center', padding: '14px 22px', fontSize: 15 }}>
               <LayoutGrid size={16} /> Ouvrir le builder
+              <ArrowRight size={16} />
+            </button>
+          </div>
+
+          {/* MODE 3 — Import HTML (Claude / Gemini / Bolt / v0) */}
+          <div onClick={() => onSelectMode('import')} className="mode-card" style={{
+            borderColor: 'transparent',
+          }}
+          onMouseOver={e => { e.currentTarget.style.borderColor = C.emerald; e.currentTarget.style.boxShadow = `0 30px 60px -20px ${C.emerald}50`; }}
+          onMouseOut={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.boxShadow = 'none'; }}
+          >
+            <svg style={{ position: 'absolute', right: -30, top: -30, opacity: 0.06 }} width="200" height="200" viewBox="0 0 200 200" fill={C.emerald}>
+              <path d="M60 50 L100 30 L140 50 L140 130 L100 150 L60 130 Z" />
+              <path d="M85 80 L115 80 L100 110 Z" fill={C.cream} />
+            </svg>
+
+            {/* Badge */}
+            <div style={{
+              position: 'absolute', top: 20, right: 20,
+              background: `${C.emerald}20`,
+              color: C.emeraldDeep,
+              padding: '5px 12px', borderRadius: 100,
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
+              border: `1px solid ${C.emerald}40`,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              <Upload size={10} /> CLAUDE · GEMINI · BOLT
+            </div>
+
+            <div style={{
+              width: 80, height: 80, borderRadius: 22,
+              background: `linear-gradient(135deg, ${C.emerald} 0%, ${C.emeraldDeep} 100%)`,
+              color: C.cream,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 20,
+              boxShadow: `0 16px 32px -8px ${C.emerald}`,
+            }}>
+              <Code size={36} />
+            </div>
+
+            <h4 className="display-font" style={{
+              fontSize: 28, fontWeight: 800, color: C.ink,
+              margin: '0 0 8px', letterSpacing: '-0.02em',
+            }}>
+              Import <em style={{ fontStyle: 'italic', fontWeight: 500, color: C.emeraldDeep }}>HTML</em>
+            </h4>
+            <p style={{ fontSize: 14, color: C.inkSoft, lineHeight: 1.5, margin: '0 0 20px' }}>
+              Créez votre site sur <strong style={{ color: C.emeraldDeep }}>Claude, Gemini ou Bolt</strong>, collez le HTML ici. Orlode l'héberge et y injecte le widget chat.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+              {[
+                { icon: Code2, text: 'Coller HTML ou .html' },
+                { icon: MessageCircle, text: 'Widget chat auto-injecté' },
+                { icon: Globe, text: 'Hébergement Orlode' },
+                { icon: Rocket, text: 'En ligne en 10 secondes' },
+              ].map((f, i) => {
+                const Icon = f.icon;
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{
+                      width: 24, height: 24, borderRadius: 6,
+                      background: C.emeraldSoft, color: C.emeraldDeep,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Icon size={12} />
+                    </div>
+                    <span style={{ fontSize: 13, color: C.ink, fontWeight: 500 }}>{f.text}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button style={{
+              width: '100%', justifyContent: 'center', padding: '14px 22px', fontSize: 15,
+              background: `linear-gradient(135deg, ${C.emerald}, ${C.emeraldDeep})`,
+              color: C.cream, border: 'none', borderRadius: 12,
+              fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 8,
+              boxShadow: `0 8px 20px -6px ${C.emerald}`,
+            }}>
+              <Upload size={16} /> Importer mon HTML
               <ArrowRight size={16} />
             </button>
           </div>
@@ -1279,52 +1699,299 @@ function AIWizard({ onBack, onComplete, prefilledUrl }) {
               )}
 
               {generating && (
-                <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <div>
+                  {/* Header with live indicator */}
                   <div style={{
-                    width: 100, height: 100, borderRadius: 28,
-                    background: `linear-gradient(135deg, ${aiMeta[aiProvider].color}, ${C.pink})`,
-                    color: C.cream,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    margin: '0 auto 24px',
-                    boxShadow: `0 20px 40px -10px ${aiMeta[aiProvider].color}`,
-                    animation: 'stepPulse 2s ease-in-out infinite',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    marginBottom: 16, gap: 12, flexWrap: 'wrap',
                   }}>
-                    <Sparkles size={44} fill={C.cream} />
-                  </div>
-                  <h3 className="display-font" style={{ fontSize: 24, fontWeight: 700, color: C.ink, margin: '0 0 8px' }}>
-                    {aiMeta[aiProvider].short} construit votre site…
-                  </h3>
-                  <p style={{ fontSize: 13, color: C.inkSoft, margin: '0 0 32px' }}>
-                    Quelques secondes seulement
-                  </p>
-
-                  <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {[
-                      { text: 'Analyse de la marque', delay: 0 },
-                      { text: 'Génération du contenu', delay: 0.6 },
-                      { text: 'Création du Hero', delay: 1.2 },
-                      { text: 'Sections personnalisées', delay: 1.8 },
-                      { text: 'Optimisation SEO', delay: 2.4 },
-                      { text: 'Connexion widget chat IA', delay: 3.0 },
-                    ].map((line, i) => (
-                      <div key={i} style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '10px 14px',
-                        background: C.creamDeep,
-                        borderRadius: 10,
-                        opacity: 0,
-                        animation: `slideIn 0.4s ease-out ${line.delay}s forwards`,
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{
+                        width: 44, height: 44, borderRadius: 12,
+                        background: `linear-gradient(135deg, ${aiMeta[aiProvider].color}, ${C.pink})`,
+                        color: C.cream,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: `0 10px 24px -6px ${aiMeta[aiProvider].color}`,
+                        flexShrink: 0,
                       }}>
-                        <CheckCircle2 size={16} color={C.emerald} />
-                        <span style={{ fontSize: 13, color: C.ink, fontWeight: 600, flex: 1, textAlign: 'left' }}>
-                          {line.text}
-                        </span>
-                        <Loader2 size={14} color={C.violet} style={{ animation: 'spin 1s linear infinite' }} />
+                        <Sparkles size={22} fill={C.cream} />
                       </div>
-                    ))}
+                      <div>
+                        <div className="display-font" style={{ fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>
+                          {aiMeta[aiProvider].short} construit votre site…
+                        </div>
+                        <div style={{ fontSize: 11, color: C.inkSoft, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <span className="live-dot" style={{ width: 6, height: 6, background: C.emerald }}></span>
+                          Live · construction en direct
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{
+                      fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                      color: aiMeta[aiProvider].color, textTransform: 'uppercase',
+                      padding: '6px 12px', borderRadius: 100,
+                      background: `${aiMeta[aiProvider].color}15`,
+                      border: `1px solid ${aiMeta[aiProvider].color}30`,
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <span style={{ fontSize: 14 }}>{aiMeta[aiProvider].emoji}</span>
+                      {aiMeta[aiProvider].label}
+                    </div>
                   </div>
 
-                  <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                  {/* SPLIT-SCREEN: chat (left) ↔ preview (right) */}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 16,
+                    alignItems: 'stretch',
+                  }}>
+                    {/* LEFT — Chat IA (terminal-style) */}
+                    <div style={{
+                      background: '#0A2A20',
+                      borderRadius: 14,
+                      padding: 14,
+                      border: `1px solid ${aiMeta[aiProvider].color}40`,
+                      minHeight: 420,
+                      display: 'flex', flexDirection: 'column', gap: 10,
+                      overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        paddingBottom: 8, borderBottom: '1px solid rgba(255,250,240,0.08)',
+                      }}>
+                        <div style={{ display: 'flex', gap: 5 }}>
+                          <div style={{ width: 9, height: 9, borderRadius: 50, background: '#FF5F57' }}></div>
+                          <div style={{ width: 9, height: 9, borderRadius: 50, background: '#FFBD2E' }}></div>
+                          <div style={{ width: 9, height: 9, borderRadius: 50, background: '#28CA42' }}></div>
+                        </div>
+                        <span className="mono-font" style={{ fontSize: 10, color: 'rgba(255,250,240,0.5)', marginLeft: 6 }}>
+                          {aiMeta[aiProvider].short.toLowerCase()}.chat · {siteData.url}
+                        </span>
+                      </div>
+
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
+                        {[
+                          { agent: false, text: `Construis-moi un site pour ${siteData.name} (${siteData.type})`, delay: 0 },
+                          { agent: true,  text: `OK, j'analyse ta marque… Couleur primaire ${siteData.primaryColor}, ton ${siteData.tone}, public ${siteData.audience}.`, delay: 0.5 },
+                          { agent: true,  text: `🎨 Je crée le Hero avec ton CTA "${siteData.cta === 'rdv' ? 'Prendre RDV' : siteData.cta === 'devis' ? 'Demander devis' : siteData.cta === 'achat' ? 'Acheter' : 'Contact'}"…`, delay: 1.1 },
+                          { agent: true,  text: `📦 ${siteData.sections.length} sections personnalisées : ${siteData.sections.slice(0, 3).join(', ')}…`, delay: 1.7 },
+                          { agent: true,  text: `🔌 Je branche les agents Comms, Reception, Sales, Marketing au site.`, delay: 2.3 },
+                          { agent: true,  text: `✨ SEO + widget chat IA injectés. Site prêt.`, delay: 2.9 },
+                        ].map((m, i) => (
+                          <div key={i} style={{
+                            opacity: 0,
+                            animation: `slideIn 0.35s ease-out ${m.delay}s forwards`,
+                            display: 'flex', gap: 8, alignItems: 'flex-start',
+                            flexDirection: m.agent ? 'row' : 'row-reverse',
+                          }}>
+                            <div style={{
+                              width: 24, height: 24, borderRadius: 7,
+                              background: m.agent
+                                ? `linear-gradient(135deg, ${aiMeta[aiProvider].color}, ${C.pink})`
+                                : 'rgba(255,250,240,0.12)',
+                              color: C.cream,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: 11, fontWeight: 800,
+                              flexShrink: 0,
+                            }}>
+                              {m.agent ? aiMeta[aiProvider].emoji : 'V'}
+                            </div>
+                            <div style={{
+                              padding: '7px 11px', borderRadius: 10,
+                              background: m.agent ? 'rgba(255,250,240,0.08)' : `${aiMeta[aiProvider].color}30`,
+                              color: m.agent ? '#E0F2F1' : C.cream,
+                              fontSize: 11.5, lineHeight: 1.45,
+                              maxWidth: '85%',
+                              border: m.agent ? '1px solid rgba(255,250,240,0.06)' : `1px solid ${aiMeta[aiProvider].color}50`,
+                            }}>
+                              {m.text}
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Typing dots — visible at the end while waiting */}
+                        <div style={{
+                          opacity: 0, animation: `slideIn 0.35s ease-out 3.4s forwards`,
+                          display: 'flex', gap: 8, alignItems: 'center', marginTop: 4,
+                        }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: 7,
+                            background: `linear-gradient(135deg, ${aiMeta[aiProvider].color}, ${C.pink})`,
+                            color: C.cream, fontSize: 11, fontWeight: 800,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>{aiMeta[aiProvider].emoji}</div>
+                          <div style={{
+                            padding: '8px 12px', borderRadius: 10,
+                            background: 'rgba(255,250,240,0.08)',
+                            display: 'flex', gap: 4, alignItems: 'center',
+                          }}>
+                            <span className="typing-dot" style={{ background: aiMeta[aiProvider].color }}></span>
+                            <span className="typing-dot" style={{ background: aiMeta[aiProvider].color }}></span>
+                            <span className="typing-dot" style={{ background: aiMeta[aiProvider].color }}></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RIGHT — Live preview that progressively builds */}
+                    <div style={{
+                      background: '#fff',
+                      borderRadius: 14,
+                      overflow: 'hidden',
+                      boxShadow: '0 16px 40px -12px rgba(10,42,32,0.25)',
+                      minHeight: 420,
+                      display: 'flex', flexDirection: 'column',
+                    }}>
+                      {/* Browser bar — appears t=0 */}
+                      <div style={{
+                        background: '#F5F5F5', padding: '7px 12px',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        borderBottom: '1px solid #E5E5E5',
+                        opacity: 0,
+                        animation: `slideIn 0.35s ease-out 0s forwards`,
+                      }}>
+                        <div style={{ display: 'flex', gap: 5 }}>
+                          <div style={{ width: 9, height: 9, borderRadius: 50, background: '#FF5F57' }}></div>
+                          <div style={{ width: 9, height: 9, borderRadius: 50, background: '#FFBD2E' }}></div>
+                          <div style={{ width: 9, height: 9, borderRadius: 50, background: '#28CA42' }}></div>
+                        </div>
+                        <div className="mono-font" style={{
+                          flex: 1, background: '#fff', padding: '3px 10px',
+                          borderRadius: 5, fontSize: 10, color: C.inkSoft,
+                          textAlign: 'center',
+                        }}>{siteData.url}</div>
+                      </div>
+
+                      {/* Hero — appears t=1.1 */}
+                      <div style={{
+                        opacity: 0,
+                        animation: `slideIn 0.4s ease-out 1.1s forwards`,
+                        background: `linear-gradient(135deg, ${siteData.primaryColor}, ${siteData.primaryColor}dd)`,
+                        padding: '24px 18px',
+                        color: C.cream,
+                        textAlign: 'center',
+                      }}>
+                        <div style={{
+                          display: 'inline-block',
+                          background: `${siteData.secondaryColor}30`,
+                          padding: '3px 9px', borderRadius: 100,
+                          fontSize: 8, fontWeight: 700, marginBottom: 8,
+                          color: siteData.secondaryColor, letterSpacing: '0.05em',
+                        }}>NOUVEAU</div>
+                        <div className="display-font" style={{ fontSize: 18, fontWeight: 800, marginBottom: 5, lineHeight: 1.1, letterSpacing: '-0.02em' }}>
+                          {siteData.name}
+                        </div>
+                        <div style={{ fontSize: 10, opacity: 0.85, marginBottom: 10 }}>
+                          {(siteData.services || siteData.tagline || 'IA pour votre entreprise').slice(0, 60)}
+                        </div>
+                        <button style={{
+                          background: siteData.secondaryColor,
+                          color: siteData.primaryColor,
+                          padding: '6px 12px', borderRadius: 6,
+                          border: 'none', fontWeight: 700, fontSize: 10,
+                        }}>
+                          {siteData.cta === 'rdv' ? '📅 RDV' : siteData.cta === 'devis' ? '📄 Devis' : siteData.cta === 'achat' ? '🛍️ Acheter' : '💬 Contact'}
+                        </button>
+                      </div>
+
+                      {/* Features grid — appears t=1.7 */}
+                      <div style={{
+                        padding: '14px 14px 10px',
+                        opacity: 0,
+                        animation: `slideIn 0.4s ease-out 1.7s forwards`,
+                      }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                          {[
+                            { e: '⚡', l: 'Rapide' },
+                            { e: '🛡️', l: 'Sécurisé' },
+                            { e: '🤖', l: 'IA' },
+                          ].map((f, i) => (
+                            <div key={i} style={{
+                              background: C.creamDeep, padding: '8px 4px',
+                              borderRadius: 6, textAlign: 'center',
+                            }}>
+                              <div style={{ fontSize: 14 }}>{f.e}</div>
+                              <div style={{ fontSize: 8, fontWeight: 700, color: C.ink, marginTop: 2 }}>{f.l}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Sections list — appears t=2.3 */}
+                      <div style={{
+                        padding: '0 14px 10px',
+                        opacity: 0,
+                        animation: `slideIn 0.4s ease-out 2.3s forwards`,
+                      }}>
+                        {siteData.sections.slice(0, 3).map((s, i) => (
+                          <div key={i} style={{
+                            background: C.creamDeep, borderRadius: 5,
+                            padding: '6px 8px', marginBottom: 4,
+                            fontSize: 9, color: C.inkSoft,
+                            display: 'flex', alignItems: 'center', gap: 5,
+                          }}>
+                            <CheckCircle2 size={9} color={C.emerald} />
+                            <span style={{ fontWeight: 600, color: C.ink }}>{s}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Chat widget bubble — appears t=2.9 with pulse */}
+                      <div style={{
+                        flex: 1, position: 'relative',
+                        background: C.creamDeep, minHeight: 50,
+                        opacity: 0,
+                        animation: `slideIn 0.4s ease-out 2.9s forwards`,
+                      }}>
+                        <div style={{
+                          position: 'absolute', right: 10, bottom: 10,
+                          background: `linear-gradient(135deg, ${C.violet}, ${C.pink})`,
+                          color: C.cream,
+                          padding: '6px 10px', borderRadius: 100,
+                          fontSize: 9, fontWeight: 700,
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          boxShadow: `0 8px 16px -4px ${C.violet}`,
+                          animation: 'stepPulse 2s ease-in-out infinite 3s',
+                        }}>
+                          <MessageCircle size={9} /> Chat IA
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer progress with agent badges */}
+                  <div style={{
+                    marginTop: 16, padding: '12px 16px', borderRadius: 12,
+                    background: C.creamDeep,
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 12, flexWrap: 'wrap',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Loader2 size={14} className="spin" color={aiMeta[aiProvider].color} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.ink }}>
+                        Branchement des agents en cours…
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {[
+                        { name: 'Comms',     color: C.emerald, delay: 0 },
+                        { name: 'Reception', color: C.cyan,    delay: 0.4 },
+                        { name: 'Sales',     color: C.violet,  delay: 0.8 },
+                        { name: 'Marketing', color: C.pink,    delay: 1.2 },
+                      ].map((a, i) => (
+                        <div key={i} style={{
+                          padding: '4px 10px', borderRadius: 100,
+                          background: `${a.color}15`, color: a.color,
+                          fontSize: 10, fontWeight: 700,
+                          border: `1px solid ${a.color}30`,
+                          opacity: 0,
+                          animation: `slideIn 0.3s ease-out ${a.delay}s forwards`,
+                          display: 'flex', alignItems: 'center', gap: 4,
+                        }}>
+                          <CheckCircle2 size={9} /> {a.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1499,21 +2166,38 @@ function AIWizard({ onBack, onComplete, prefilledUrl }) {
 }
 // ============ MANUAL BUILDER — 3 PANNEAUX ============
 function ManualBuilder({ onBack, generatedSite }) {
+  const { company } = useAuthStore();
   const [device, setDevice] = useState('desktop');
   const [rightTab, setRightTab] = useState('manual'); // 'manual' or 'ai'
   const [aiInput, setAiInput] = useState('');
 
-  // Site data from IA generation OR defaults
-  const isFromAI = !!generatedSite;
-  const siteName = generatedSite?.name || 'Orlode AI';
-  const siteTagline = generatedSite?.tagline || 'Multi-agent enterprise platform';
-  const siteServices = generatedSite?.services || '25 agents IA · 34 connecteurs MCP · WhatsApp natif';
-  const sitePrimary = generatedSite?.primaryColor || '#0A4F3C';
-  const siteAccent = generatedSite?.secondaryColor || '#D4A017';
-  const siteCTA = generatedSite?.cta || 'rdv';
-  const siteUrl = generatedSite?.url || 'orlode.com';
-  const siteAudience = generatedSite?.audience || 'b2b';
-  const siteTone = generatedSite?.tone || 'pro';
+  // ── Server-side state ────────────────────────────────────────────────────
+  // We store the *current* site config as state, fetched once on mount and
+  // refreshed after every AI modification. Without this, AI updates persist
+  // server-side but the UI keeps showing the wizard's stale generatedSite.
+  const [serverConfig, setServerConfig] = useState<any>(null);
+  const [refreshTick, setRefreshTick] = useState(0); // bump to force re-fetch
+  const refresh = () => setRefreshTick(t => t + 1);
+
+  React.useEffect(() => {
+    api.get('/website/config').then((r: any) => {
+      const data = r?.data?.data ?? r?.data;
+      if (data) setServerConfig(data);
+    }).catch(() => { /* config doesn't exist yet — that's OK */ });
+  }, [refreshTick]);
+
+  // Merge order: server config wins (it's the source of truth), wizard data
+  // is fallback for the brand-new flow before first save, defaults are last.
+  const isFromAI = !!generatedSite || !!serverConfig?.aiContent;
+  const siteName     = serverConfig?.companyName ?? serverConfig?.name ?? generatedSite?.name ?? 'Orlode AI';
+  const siteTagline  = serverConfig?.tagline ?? generatedSite?.tagline ?? 'Multi-agent enterprise platform';
+  const siteServices = serverConfig?.services ?? generatedSite?.services ?? '25 agents IA · 34 connecteurs MCP · WhatsApp natif';
+  const sitePrimary  = serverConfig?.primaryColor ?? serverConfig?.color ?? generatedSite?.primaryColor ?? '#0A4F3C';
+  const siteAccent   = serverConfig?.secondaryColor ?? generatedSite?.secondaryColor ?? '#D4A017';
+  const siteCTA      = serverConfig?.cta ?? generatedSite?.cta ?? 'rdv';
+  const siteUrl      = serverConfig?.sourceUrl ?? generatedSite?.url ?? 'orlode.com';
+  const siteAudience = serverConfig?.audience ?? generatedSite?.audience ?? 'b2b';
+  const siteTone     = serverConfig?.tone ?? generatedSite?.tone ?? 'pro';
 
   // Map section ids → display objects (filtered by what user picked in wizard)
   const allSections = {
@@ -1574,6 +2258,28 @@ function ManualBuilder({ onBack, generatedSite }) {
     { label: 'Plus friendly', icon: Smile, color: C.pink },
   ];
 
+  // Snapshot of the full editable site state — this is what handleSave/handlePublish persist.
+  // We assemble it from the merged values above so any AI-driven change shows up here too.
+  const buildPersistPayload = (status: 'draft' | 'published') => ({
+    status,
+    enabled: true,
+    companyName: siteName,
+    name: siteName,
+    tagline: siteTagline,
+    services: siteServices,
+    color: sitePrimary,
+    primaryColor: sitePrimary,
+    secondaryColor: siteAccent,
+    template: serverConfig?.template ?? generatedSite?.type ?? 'vitrine',
+    type: serverConfig?.type ?? generatedSite?.type ?? 'vitrine',
+    audience: siteAudience,
+    tone: siteTone,
+    cta: siteCTA,
+    sections: serverConfig?.sections ?? generatedSite?.sections ?? sections.map(s => s.id),
+    sourceUrl: siteUrl,
+    generatedBy: serverConfig?.generatedBy ?? (generatedSite ? 'ai-wizard' : 'manual'),
+  });
+
   const callAiUpdate = async (instruction: string) => {
     // Optimistic: show user message + spinner placeholder right away
     setAiMessages(prev => [
@@ -1586,19 +2292,21 @@ function ManualBuilder({ onBack, generatedSite }) {
       const data = r?.data?.data ?? r?.data;
       const ok = !!data?.success;
       const msg = data?.message ?? 'Modification appliquée.';
-      const sections = (data?.updatedSections ?? []).join(', ');
+      const updatedSections = (data?.updatedSections ?? []).join(', ');
       setAiMessages(prev => {
         // Replace the spinner placeholder (last entry) with the real reply
         const next = [...prev];
         next[next.length - 1] = {
           role: 'agent',
           text: ok
-            ? `✨ ${msg}${sections ? ` Sections: ${sections}.` : ''}`
+            ? `✨ ${msg}${updatedSections ? ` Sections: ${updatedSections}.` : ''}`
             : `⚠️ ${msg}`,
           time: 'maintenant',
         };
         return next;
       });
+      // Refresh the displayed site state from server so the user actually sees the change
+      if (ok) refresh();
     } catch (e: any) {
       const msg = e?.response?.data?.message ?? 'Le serveur n\'a pas pu appliquer la modification.';
       setAiMessages(prev => {
@@ -1622,13 +2330,9 @@ function ManualBuilder({ onBack, generatedSite }) {
 
   const handleSave = async () => {
     try {
-      await api.put('/website/config', {
-        status: 'draft',
-        companyName: siteName,
-        color: sitePrimary,
-        template: 'vitrine',
-      });
-      toast.success('Site sauvegardé', 'Brouillon enregistré.');
+      await api.put('/website/config', buildPersistPayload('draft'));
+      toast.success('Site sauvegardé', 'Brouillon enregistré — toutes les sections persistées.');
+      refresh();
     } catch (e: any) {
       toast.error('Échec sauvegarde', e?.response?.data?.message ?? 'Réessaie.');
     }
@@ -1636,25 +2340,42 @@ function ManualBuilder({ onBack, generatedSite }) {
 
   const handlePublish = async () => {
     try {
-      await api.put('/website/config', {
-        status: 'published',
-        companyName: siteName,
-        color: sitePrimary,
-        template: 'vitrine',
-      });
-      toast.success('Site publié', 'Ton site est en ligne.');
+      await api.put('/website/config', buildPersistPayload('published'));
+      const previewUrl = `/api/website/preview/${company?.id ?? ''}`;
+      toast.success('Site publié 🚀', `Aperçu : ${previewUrl}`);
+      refresh();
     } catch (e: any) {
       toast.error('Échec publication', e?.response?.data?.message ?? 'Réessaie.');
     }
   };
 
-  const handlePreview = () => {
-    // Open a preview tab — backend exposes GET /api/website/preview/:companyId for published sites
-    const userCompanyId = (typeof window !== 'undefined' && (window as any).__ORLODE_COMPANY_ID__) || '';
-    if (userCompanyId) {
-      window.open(`/api/website/preview/${userCompanyId}`, '_blank');
-    } else {
-      toast.info('Aperçu', 'Sauvegarde d\'abord, puis publie pour activer l\'aperçu public.');
+  const handlePreview = async () => {
+    const cid = company?.id;
+    if (!cid) {
+      toast.error('Aperçu indisponible', 'Connexion à l\'entreprise non détectée.');
+      return;
+    }
+    // Always save the current editable state as draft first so the preview reflects
+    // exactly what's in the UI. If already published we save as published.
+    const targetStatus = serverConfig?.status === 'published' ? 'published' : 'draft';
+    try {
+      await api.put('/website/config', buildPersistPayload(targetStatus));
+      refresh();
+    } catch {
+      // Non-fatal: preview the previous saved version
+    }
+    // For drafts the server requires the caller's Bearer token. Easiest way:
+    // fetch the HTML via api (which auto-adds the token), then open as a blob URL.
+    try {
+      const r = await api.get(`/website/preview/${cid}`, { responseType: 'text', headers: { Accept: 'text/html' } });
+      const html = (r?.data ?? '') as string;
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // Free the blob URL after a few seconds so memory doesn't leak
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) {
+      toast.error('Aperçu impossible', e?.response?.data?.message ?? 'Réessaie après avoir sauvegardé.');
     }
   };
 
@@ -2413,7 +3134,7 @@ function ManualBuilder({ onBack, generatedSite }) {
 
 // ============ MAIN APP — orchestrator ============
 export default function WebsiteBuilderRedesignPage() {
-  const [view, setView] = useState('entry'); // 'entry' | 'ai-wizard' | 'manual-builder'
+  const [view, setView] = useState('entry'); // 'entry' | 'ai-wizard' | 'manual-builder' | 'import-html'
   const [prefilledUrl, setPrefilledUrl] = useState('');
   const [generatedSite, setGeneratedSite] = useState(null);
 
@@ -2443,12 +3164,28 @@ export default function WebsiteBuilderRedesignPage() {
     );
   }
 
+  if (view === 'import-html') {
+    return (
+      <Chrome>
+        <ImportHtmlPanel
+          onBack={() => setView('entry')}
+          onImported={(data) => {
+            setGeneratedSite(data ?? null);
+            setView('manual-builder');
+          }}
+        />
+      </Chrome>
+    );
+  }
+
   return (
     <Chrome>
       <EntryChoice
         onSelectMode={(mode) => {
-          setGeneratedSite(null); // reset if switching to manual
-          setView(mode === 'ai' ? 'ai-wizard' : 'manual-builder');
+          setGeneratedSite(null); // reset if switching mode
+          if (mode === 'ai') setView('ai-wizard');
+          else if (mode === 'import') setView('import-html');
+          else setView('manual-builder');
         }}
         onImportUrl={(url) => {
           setPrefilledUrl(url);

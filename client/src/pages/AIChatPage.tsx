@@ -9,7 +9,8 @@ import {
   CheckCircle2, Clock, Zap, Code,
   PhoneCall, Users2, UserCircle, BookOpen, DollarSign, Target,
   BarChart3, Activity, Globe, Mail, Megaphone,
-  Bookmark, Save, Calendar, FileText, Inbox
+  Bookmark, Save, Calendar, FileText, Inbox,
+  History, Eraser, Loader2,
 } from 'lucide-react';
 
 const C = {
@@ -248,31 +249,141 @@ function AgentsList({ activeAgent, onSelect, isOpen, onClose, conversations }: a
 }
 
 // ============ MESSAGE BUBBLE ============
+// Robust time formatter — handles ISO string, Date object, numeric timestamp,
+// pre-formatted strings ("14:32"), Firestore-style { seconds, nanoseconds }.
+// Returns empty string instead of "Invalid Date" so the UI stays clean.
+function formatMsgTime(t: any): string {
+  if (!t) return '';
+  if (typeof t === 'string') {
+    // Already formatted "HH:mm" — pass through
+    if (/^\d{1,2}:\d{2}/.test(t)) return t;
+    const d = new Date(t);
+    if (!isNaN(d.getTime())) return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    return '';
+  }
+  if (typeof t === 'number') {
+    const d = new Date(t);
+    if (!isNaN(d.getTime())) return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    return '';
+  }
+  if (t instanceof Date) {
+    return isNaN(t.getTime()) ? '' : t.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+  // Firestore Timestamp shape
+  if (typeof t === 'object' && typeof t.seconds === 'number') {
+    return new Date(t.seconds * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+  return '';
+}
+
 function MessageBubble({ msg, agent }: any) {
   const isUser = msg.role === 'user';
+  const time = formatMsgTime(msg.time ?? msg.createdAt ?? msg.timestamp);
+
+  // Two-color floating bubble palette:
+  // - User → emerald gradient (always cohérent, marque)
+  // - Agent → agent.color gradient soft + cream surface for legibility
+  const userColorA = C.emeraldDeep;
+  const userColorB = C.greenDeep;
+
   return (
-    <div className="bubble-wrap bubble-in" style={{ display: 'flex', gap: 12, flexDirection: isUser ? 'row-reverse' : 'row', alignItems: 'flex-end', marginBottom: 4 }}>
-      <div className="avatar-grad" style={{ width: 34, height: 34, background: isUser ? `linear-gradient(135deg, ${C.greenDeep} 0%, ${C.greenDark} 100%)` : `linear-gradient(135deg, ${agent.color} 0%, ${agent.color}cc 100%)`, fontSize: 16, flexShrink: 0, boxShadow: `0 4px 10px -4px ${isUser ? C.greenDeep : agent.color}` }}>
+    <div className="msg-row" style={{
+      display: 'flex', gap: 12,
+      flexDirection: isUser ? 'row-reverse' : 'row',
+      alignItems: 'flex-end', marginBottom: 8,
+      animation: 'msgFloatIn 0.45s cubic-bezier(.2,.8,.2,1) backwards',
+    }}>
+      {/* Avatar with floating glow */}
+      <div style={{
+        width: 38, height: 38, borderRadius: '50%',
+        background: isUser
+          ? `linear-gradient(135deg, ${userColorA} 0%, ${userColorB} 100%)`
+          : `linear-gradient(135deg, ${agent.color} 0%, ${agent.color}aa 100%)`,
+        fontSize: 17, flexShrink: 0, color: '#fff', fontWeight: 700,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: isUser
+          ? `0 6px 22px -6px ${userColorA}, 0 0 0 3px ${userColorA}15`
+          : `0 6px 22px -6px ${agent.color}, 0 0 0 3px ${agent.color}15`,
+        position: 'relative',
+      }}>
         {isUser ? 'A' : agent.emoji}
       </div>
-      <div className="bubble-content" style={{ maxWidth: '70%', display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 4 }}>
-        {!isUser && (<div style={{ fontSize: 11, fontWeight: 700, color: agent.color, letterSpacing: '0.02em', paddingLeft: 4 }}>{agent.name}</div>)}
-        <div style={{ background: isUser ? `linear-gradient(135deg, ${agent.color} 0%, ${agent.color}dd 100%)` : C.cream, color: isUser ? C.cream : C.ink, padding: '12px 16px', borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px', boxShadow: isUser ? `0 8px 20px -8px ${agent.color}80` : '0 4px 12px -4px rgba(10,42,32,0.1)', border: isUser ? 'none' : `1px solid rgba(10,42,32,0.06)`, fontSize: 14, lineHeight: 1.55 }}>
+
+      <div style={{
+        maxWidth: '72%',
+        display: 'flex', flexDirection: 'column',
+        alignItems: isUser ? 'flex-end' : 'flex-start', gap: 4,
+      }}>
+        {!isUser && (
+          <div style={{
+            fontSize: 11, fontWeight: 800, color: agent.color,
+            letterSpacing: '0.04em', paddingLeft: 4, textTransform: 'uppercase',
+          }}>{agent.name}</div>
+        )}
+
+        {/* Floating bubble — pure white for agent (distinct from cream input area)
+            with a soft agent-color glow inside + colored gradient border. */}
+        <div className="msg-bubble" style={{
+          background: isUser
+            ? `linear-gradient(135deg, ${userColorA} 0%, ${userColorB} 100%)`
+            : `linear-gradient(135deg, #ffffff 0%, #ffffff 60%, ${agent.color}0c 100%)`,
+          color: isUser ? '#fff' : C.ink,
+          padding: '13px 17px',
+          borderRadius: isUser ? '20px 20px 6px 20px' : '20px 20px 20px 6px',
+          boxShadow: isUser
+            ? `0 14px 30px -10px ${userColorA}66, 0 4px 12px -2px ${userColorB}40, inset 0 1px 0 rgba(255,255,255,0.18)`
+            : `0 14px 32px -8px ${agent.color}40, 0 6px 16px -4px rgba(10,42,32,0.10), inset 0 1px 0 rgba(255,255,255,0.9)`,
+          border: isUser
+            ? `1px solid ${userColorA}80`
+            : `1px solid ${agent.color}40`,
+          fontSize: 14.5, lineHeight: 1.6,
+          position: 'relative',
+          transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+        }}
+          onMouseOver={e => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = isUser
+              ? `0 20px 40px -10px ${userColorA}88, 0 6px 16px -2px ${userColorB}55, inset 0 1px 0 rgba(255,255,255,0.2)`
+              : `0 22px 44px -10px ${agent.color}66, 0 8px 20px -6px rgba(10,42,32,0.14), inset 0 1px 0 rgba(255,255,255,0.95)`;
+          }}
+          onMouseOut={e => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = isUser
+              ? `0 14px 30px -10px ${userColorA}66, 0 4px 12px -2px ${userColorB}40, inset 0 1px 0 rgba(255,255,255,0.18)`
+              : `0 14px 32px -8px ${agent.color}40, 0 6px 16px -4px rgba(10,42,32,0.10), inset 0 1px 0 rgba(255,255,255,0.9)`;
+          }}
+        >
           <div style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.inkLight, fontWeight: 500, flexDirection: isUser ? 'row-reverse' : 'row', paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0 }}>
-          <span>{msg.time}</span>
-          {isUser && <CheckCircle2 size={11} color={C.emerald} />}
-          <div className="bubble-actions" style={{ display: 'flex', gap: 4 }}>
-            <button className="bubble-action-btn" title="Copier" onClick={() => navigator.clipboard?.writeText(msg.text)}><Copy size={11} /></button>
-            {!isUser && (<>
-              <button className="bubble-action-btn" title="Bonne réponse"><ThumbsUp size={11} /></button>
-              <button className="bubble-action-btn" title="Mauvaise réponse"><ThumbsDown size={11} /></button>
-              <button className="bubble-action-btn" title="Régénérer"><RotateCw size={11} /></button>
-            </>)}
+
+        {(time || !isUser) && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
+            color: C.inkLight, fontWeight: 500,
+            flexDirection: isUser ? 'row-reverse' : 'row',
+            paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0,
+          }}>
+            {time && <span>{time}</span>}
+            {isUser && time && <CheckCircle2 size={11} color={C.emerald} />}
+            <div className="bubble-actions" style={{ display: 'flex', gap: 4 }}>
+              <button className="bubble-action-btn" title="Copier" onClick={() => navigator.clipboard?.writeText(msg.text)}><Copy size={11} /></button>
+              {!isUser && (<>
+                <button className="bubble-action-btn" title="Bonne réponse"><ThumbsUp size={11} /></button>
+                <button className="bubble-action-btn" title="Mauvaise réponse"><ThumbsDown size={11} /></button>
+                <button className="bubble-action-btn" title="Régénérer"><RotateCw size={11} /></button>
+              </>)}
+            </div>
           </div>
-        </div>
+        )}
       </div>
+
+      <style>{`
+        @keyframes msgFloatIn {
+          0%   { opacity: 0; transform: translateY(12px) scale(0.96); }
+          60%  { opacity: 1; transform: translateY(-2px) scale(1.005); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
     </div>
   );
 }
@@ -301,7 +412,178 @@ function TypingIndicator({ agent }: any) {
 }
 
 // ============ CHAT HEADER ============
-function ChatHeader({ agent, onToggleAgents, onNewConversation, conversationId, ttsEnabled, onToggleTTS }: any) {
+// ── Conversation history drawer (right side panel) ────────────────────────
+function ConversationHistoryDrawer({ agentId, currentConversationId, onClose, onSelect }: {
+  agentId: string;
+  currentConversationId: string | null;
+  onClose: () => void;
+  onSelect: (id: string) => void;
+}) {
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    api.get('/chat/conversations', { params: { limit: 100 } })
+      .then((r: any) => {
+        const all = (r?.data?.conversations ?? r?.data?.data ?? r?.data ?? []) as any[];
+        // Most recent first
+        all.sort((a, b) => {
+          const ta = new Date(a.updatedAt ?? a.createdAt ?? 0).getTime();
+          const tb = new Date(b.updatedAt ?? b.createdAt ?? 0).getTime();
+          return tb - ta;
+        });
+        setConversations(all);
+      })
+      .catch(() => setConversations([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = conversations.filter(c => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (c.title ?? '').toLowerCase().includes(q)
+        || (c.lastMessage ?? '').toLowerCase().includes(q)
+        || (c.agentId ?? '').toLowerCase().includes(q);
+  });
+
+  // Group by agent for visual structure (current agent first)
+  const byAgent = filtered.reduce<Record<string, any[]>>((acc, c) => {
+    const aid = c.agentId ?? 'orch';
+    (acc[aid] ||= []).push(c);
+    return acc;
+  }, {});
+  const agentOrder = Object.keys(byAgent).sort((a, b) => (a === agentId ? -1 : b === agentId ? 1 : 0));
+
+  const formatTime = (iso: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    const isYesterday = d.toDateString() === yesterday.toDateString();
+    if (sameDay) return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    if (isYesterday) return 'Hier';
+    const diff = (now.getTime() - d.getTime()) / 86400000;
+    if (diff < 7) return d.toLocaleDateString('fr-FR', { weekday: 'short' });
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(10,42,32,0.45)', backdropFilter: 'blur(6px)',
+      display: 'flex', justifyContent: 'flex-end',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 'min(420px, 100%)', height: '100%',
+        background: C.cream, color: C.ink,
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '-20px 0 60px -12px rgba(10,42,32,0.30)',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '20px 22px', background: `linear-gradient(135deg, ${C.purpleDeep}, ${C.purple})`,
+          color: C.cream, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <History size={20} />
+            <h3 className="display-font" style={{ fontSize: 19, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
+              Historique
+            </h3>
+          </div>
+          <button onClick={onClose} style={{
+            width: 34, height: 34, borderRadius: 10,
+            background: 'rgba(255,255,255,0.18)', color: C.cream,
+            border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div style={{ padding: '12px 18px', borderBottom: `1px solid rgba(10,42,32,0.06)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.creamDeep, borderRadius: 10, padding: '8px 12px' }}>
+            <Filter size={14} color={C.inkSoft} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher…"
+              style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 13, fontFamily: 'inherit', color: C.ink }} />
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: C.inkSoft }}>
+              <Loader2 size={24} className="spin" />
+              <div style={{ marginTop: 10, fontSize: 13 }}>Chargement…</div>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: C.inkSoft }}>
+              <MessageSquare size={28} color={C.inkLight} style={{ marginBottom: 10 }} />
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                {search ? 'Aucun résultat' : 'Aucune conversation'}
+              </div>
+              <div style={{ fontSize: 12 }}>
+                {search ? `Pas de match pour "${search}"` : 'Vos conversations s\'afficheront ici.'}
+              </div>
+            </div>
+          ) : (
+            agentOrder.map(aid => (
+              <div key={aid} style={{ marginBottom: 6 }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  color: C.inkSoft, padding: '10px 18px 4px',
+                }}>
+                  {aid === agentId ? `★ ${aid}` : aid}
+                </div>
+                {byAgent[aid].map(c => {
+                  const isCurrent = c.id === currentConversationId;
+                  return (
+                    <button key={c.id} onClick={() => onSelect(c.id)}
+                      style={{
+                        width: '100%', padding: '10px 18px',
+                        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3,
+                        background: isCurrent ? `${C.purple}10` : 'transparent',
+                        borderLeft: isCurrent ? `3px solid ${C.purple}` : '3px solid transparent',
+                        border: 'none', cursor: 'pointer', textAlign: 'left',
+                        fontFamily: 'inherit',
+                      }}
+                      onMouseOver={ev => { if (!isCurrent) ev.currentTarget.style.background = C.creamDeep; }}
+                      onMouseOut={ev => { if (!isCurrent) ev.currentTarget.style.background = 'transparent'; }}>
+                      <div style={{
+                        fontSize: 13, fontWeight: 700, color: C.ink,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        maxWidth: '100%',
+                      }}>
+                        {c.title || c.lastMessage?.slice(0, 60) || 'Conversation'}
+                      </div>
+                      {c.lastMessage && c.title && c.lastMessage !== c.title && (
+                        <div style={{
+                          fontSize: 11, color: C.inkSoft,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          maxWidth: '100%',
+                        }}>
+                          {c.lastMessage.slice(0, 70)}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: C.inkLight, fontWeight: 600 }}>
+                        {formatTime(c.updatedAt ?? c.createdAt)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatHeader({ agent, onToggleAgents, onNewConversation, conversationId, ttsEnabled, onToggleTTS, onShowHistory, onClearInput, hasInput }: any) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
 
@@ -340,6 +622,14 @@ function ChatHeader({ agent, onToggleAgents, onNewConversation, conversationId, 
           <PhoneCall size={16} />
         </button>
         <button className="toolbar-btn" title="Voir profil agent" onClick={() => setProfileOpen(true)}><UserCircle size={16} /></button>
+        <button className="toolbar-btn" title="Historique des conversations" onClick={onShowHistory}><History size={16} /></button>
+        <button
+          className="toolbar-btn"
+          title={hasInput ? 'Effacer ce que je tape' : 'Aucun texte à effacer'}
+          onClick={onClearInput}
+          disabled={!hasInput}
+          style={!hasInput ? { opacity: 0.4, cursor: 'not-allowed' } : {}}
+        ><Eraser size={16} /></button>
         <button className="toolbar-btn" title="Nouvelle conversation" onClick={onNewConversation}><Plus size={16} /></button>
         <button className="toolbar-btn" title="Plus d'options" onClick={() => setMenuOpen(o => !o)}><MoreHorizontal size={16} /></button>
         {menuOpen && (
@@ -405,6 +695,7 @@ function ChatArea({ agent, onToggleAgents, conversationId, onConversationCreated
   const [attachments, setAttachments] = useState<File[]>([]);
   const [listening, setListening] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -766,6 +1057,13 @@ function ChatArea({ agent, onToggleAgents, conversationId, onConversationCreated
         onToggleAgents={onToggleAgents}
         conversationId={conversationId}
         ttsEnabled={ttsEnabled}
+        hasInput={input.trim().length > 0}
+        onClearInput={() => {
+          setInput('');
+          if (textareaRef.current) textareaRef.current.style.height = 'auto';
+          textareaRef.current?.focus();
+        }}
+        onShowHistory={() => setHistoryOpen(true)}
         onToggleTTS={() => {
           if (ttsEnabled) {
             window.speechSynthesis.cancel();
@@ -781,6 +1079,21 @@ function ChatArea({ agent, onToggleAgents, conversationId, onConversationCreated
           onConversationCreated?.(null, agent.id);
         }}
       />
+
+      {historyOpen && (
+        <ConversationHistoryDrawer
+          agentId={agent.id}
+          currentConversationId={conversationId}
+          onClose={() => setHistoryOpen(false)}
+          onSelect={(cid: string) => {
+            setHistoryOpen(false);
+            loadedConvIdRef.current = null;
+            setMessages([]);
+            setShowQuickActions(false);
+            onConversationCreated?.(cid, agent.id);
+          }}
+        />
+      )}
 
       <div className="chat-area nice-scroll" style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', background: C.creamDeep, position: 'relative', display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div className="oui-watermark">

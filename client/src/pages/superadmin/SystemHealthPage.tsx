@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Activity, CheckCircle, AlertTriangle, Server, Database, Cpu, Mail, Send } from 'lucide-react';
+import { Loader2, Activity, CheckCircle, AlertTriangle, Server, Database, Cpu, Mail, Send, RefreshCw } from 'lucide-react';
 import api from '@/services/api';
 import { toast } from '@/components/common/Toast';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface HealthData {
   status: string;
@@ -24,7 +25,11 @@ export default function SystemHealthPage() {
 
   useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, []);
 
-  if (loading && !health) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>;
+  if (loading && !health) return (
+    <SuperAdminPage title="Système" icon={<Activity size={20} />}>
+      <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>
+    </SuperAdminPage>
+  );
 
   const formatUptime = (seconds: number) => {
     const d = Math.floor(seconds / 86400);
@@ -34,12 +39,17 @@ export default function SystemHealthPage() {
   };
 
   return (
-    <div className="p-6 space-y-5 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Activity size={22} className="text-green-500" /> Systeme</h1>
-        <button onClick={load} className="text-sm text-violet-600 hover:text-violet-700">Rafraichir</button>
-      </div>
-
+    <SuperAdminPage
+      title="Système"
+      subtitle="Status de la plateforme + tests opérationnels"
+      icon={<Activity size={20} />}
+      actions={
+        <button onClick={load} className="text-xs md:text-sm text-violet-600 hover:text-violet-700 flex items-center gap-1">
+          <RefreshCw size={14} /> Rafraîchir
+        </button>
+      }
+    >
+      <div className="space-y-5">
       {/* Email test panel */}
       <EmailTestPanel />
 
@@ -85,7 +95,8 @@ export default function SystemHealthPage() {
           </div>
         </>
       )}
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }
 

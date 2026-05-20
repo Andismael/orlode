@@ -2,7 +2,7 @@
  * Sales Leads Page — Premium edition (green/orange palette + Fraunces)
  */
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Flame, Snowflake, Thermometer, Trash2, X, Eye, Mail,
   Filter, ArrowLeft, AlertTriangle, Zap, LayoutGrid, List, Phone,
@@ -68,7 +68,7 @@ export default function SalesLeadsPage() {
   const [stageFilter, setStageFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [showHotOnly, setShowHotOnly] = useState(searchParams.get('hot') === 'true');
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState(searchParams.get('new') === '1');
   const [form, setForm] = useState({ name: '', email: '', phone: '', company: '', source: 'other', estimatedValue: 0, notes: '' });
   const [submitting, setSubmitting] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(() => (localStorage.getItem('sales-leads-view') as 'list' | 'grid') ?? 'list');
@@ -90,7 +90,8 @@ export default function SalesLeadsPage() {
     if (!form.name) return;
     setSubmitting(true);
     try {
-      await api.post('/sales/leads', form);
+      const stageParam = searchParams.get('stage');
+      await api.post('/sales/leads', stageParam ? { ...form, stage: stageParam } : form);
       setShowCreate(false);
       setForm({ name: '', email: '', phone: '', company: '', source: 'other', estimatedValue: 0, notes: '' });
       load();
@@ -196,7 +197,13 @@ export default function SalesLeadsPage() {
               </p>
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
-              <button className="lp-btn-secondary"><Filter size={14} /> Filtres</button>
+              <button
+                className="lp-btn-secondary"
+                onClick={() => {
+                  const el = document.querySelector<HTMLInputElement>('.lp-root input[placeholder^="Rechercher"]');
+                  el?.focus();
+                }}
+              ><Filter size={14} /> Filtres</button>
               <button className="lp-btn-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> Nouveau lead</button>
             </div>
           </div>
@@ -312,8 +319,12 @@ export default function SalesLeadsPage() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTop: `1px solid ${C.greenSoft}` }}>
                       <span className="lp-mono" style={{ fontSize: 11, color: C.inkSoft }}>{lead.source}</span>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <button className="lp-icon-btn" title="Voir"><Eye size={14} /></button>
-                        <button className="lp-icon-btn" title="Email"><Mail size={14} /></button>
+                        <Link to={`/sales/leads/${lead.id}`} className="lp-icon-btn" title="Voir"><Eye size={14} /></Link>
+                        {lead.email ? (
+                          <a href={`mailto:${lead.email}`} className="lp-icon-btn" title="Email"><Mail size={14} /></a>
+                        ) : (
+                          <button className="lp-icon-btn" title="Email" disabled><Mail size={14} /></button>
+                        )}
                         <button className="lp-icon-btn danger" onClick={() => handleDelete(lead.id)}><Trash2 size={14} /></button>
                       </div>
                     </div>
@@ -370,8 +381,12 @@ export default function SalesLeadsPage() {
                     </span>
 
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="lp-icon-btn" title="Voir"><Eye size={14} /></button>
-                      <button className="lp-icon-btn" title="Email"><Mail size={14} /></button>
+                      <Link to={`/sales/leads/${lead.id}`} className="lp-icon-btn" title="Voir"><Eye size={14} /></Link>
+                      {lead.email ? (
+                        <a href={`mailto:${lead.email}`} className="lp-icon-btn" title="Email"><Mail size={14} /></a>
+                      ) : (
+                        <button className="lp-icon-btn" title="Email" disabled><Mail size={14} /></button>
+                      )}
                       <button className="lp-icon-btn danger" onClick={() => handleDelete(lead.id)} title="Supprimer"><Trash2 size={14} /></button>
                     </div>
                   </div>

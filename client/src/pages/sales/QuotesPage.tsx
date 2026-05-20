@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus, Trash2, Download, FileText, Send, CheckCircle2, AlertTriangle, CalendarClock,
-  List, LayoutGrid,
+  List, LayoutGrid, X,
 } from 'lucide-react';
 import api from '@/services/api';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -42,6 +42,20 @@ const fmt = (n: number) => {
   return String(n);
 };
 
+const downloadCsv = (rows: Record<string, unknown>[], filename: string) => {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(',')),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+};
+
 const TABS = [
   { id: 'all', label: 'Tous' },
   { id: 'draft', label: 'Brouillons' },
@@ -57,8 +71,43 @@ export default function QuotesPage() {
   const [tab, setTab] = useState('all');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(() =>
     (localStorage.getItem('sales-quotes-view') as 'list' | 'grid') ?? 'list');
+  const [showCreate, setShowCreate] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const tomorrow30 = new Date(); tomorrow30.setDate(tomorrow30.getDate() + 30);
+  const [form, setForm] = useState({
+    clientName: '', clientEmail: '',
+    description: '', quantity: 1, unitPrice: 0,
+    validUntil: tomorrow30.toISOString().slice(0, 10),
+    notes: '',
+  });
 
   useEffect(() => { localStorage.setItem('sales-quotes-view', viewMode); }, [viewMode]);
+
+  const handleCreate = async () => {
+    if (!form.clientName.trim() || form.unitPrice <= 0) return;
+    setSubmitting(true);
+    try {
+      await api.post('/sales/quotes', {
+        clientName: form.clientName.trim(),
+        clientEmail: form.clientEmail.trim() || undefined,
+        items: [{
+          description: form.description.trim() || 'Prestation',
+          quantity: form.quantity,
+          unitPrice: form.unitPrice,
+        }],
+        validUntil: form.validUntil,
+        notes: form.notes.trim() || undefined,
+      });
+      setShowCreate(false);
+      setForm({
+        clientName: '', clientEmail: '',
+        description: '', quantity: 1, unitPrice: 0,
+        validUntil: tomorrow30.toISOString().slice(0, 10),
+        notes: '',
+      });
+      load();
+    } catch { /* ignore */ } finally { setSubmitting(false); }
+  };
 
   const load = () => {
     setLoading(true);
@@ -130,8 +179,8 @@ export default function QuotesPage() {
           }
           actions={
             <>
-              <button className="qp-btn-secondary"><Download size={14} /> Export</button>
-              <Link to="/sales/leads" className="qp-btn-primary"><Plus size={16} /> Nouveau devis</Link>
+              <button className="qp-btn-secondary" onClick={() => downloadCsv(quotes as unknown as Record<string, unknown>[], 'devis.csv')}><Download size={14} /> Export</button>
+              <button className="qp-btn-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> Nouveau devis</button>
             </>
           }
         />
@@ -168,7 +217,9 @@ export default function QuotesPage() {
               <p style={{ fontSize: 13, color: C.inkSoft, marginBottom: 24 }}>
                 {quotes.length === 0 ? "Créez votre premier devis depuis un lead." : "Changez de filtre pour voir d'autres devis."}
               </p>
-              {quotes.length === 0 && <Link to="/sales/leads" className="qp-btn-primary"><Plus size={15} /> Aller aux leads</Link>}
+              {quotes.length === 0 && (
+                <button className="qp-btn-primary" onClick={() => setShowCreate(true)}><Plus size={15} /> Créer un devis</button>
+              )}
             </div>
           ) : viewMode === 'grid' ? (
             <div className="qp-grid">
@@ -257,7 +308,7 @@ export default function QuotesPage() {
                           <Send size={13} /> Envoyer
                         </button>
                       )}
-                      <button className="qp-icon-btn" title="Télécharger"><Download size={14} /></button>
+                      <button className="qp-icon-btn" title="Télécharger" onClick={() => window.open(`/api/sales/quotes/${q.id}/pdf`, '_blank')}><Download size={14} /></button>
                       <button className="qp-icon-btn danger" onClick={() => handleDelete(q.id)} title="Supprimer"><Trash2 size={14} /></button>
                     </div>
                   </div>
@@ -266,6 +317,84 @@ export default function QuotesPage() {
             </div>
           )}
         </div>
+
+        {/* Create Quote Modal */}
+        {showCreate && (
+          <div onClick={() => setShowCreate(false)} style={{
+            position: 'fixed', inset: 0, background: 'rgba(10,42,32,.7)', backdropFilter: 'blur(8px)',
+            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: C.cream, borderRadius: 22, maxWidth: 540, width: '100%',
+              padding: 28, maxHeight: '92vh', overflowY: 'auto',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                <h2 className="qp-display" style={{ fontSize: 22, fontWeight: 700, color: C.ink, margin: 0 }}>
+                  Nouveau devis
+                </h2>
+                <button onClick={() => setShowCreate(false)} style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer', color: C.inkSoft,
+                  width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}><X size={18} /></button>
+              </div>
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Client</label>
+                  <input value={form.clientName} onChange={e => setForm(f => ({ ...f, clientName: e.target.value }))}
+                    placeholder="Nom du client" autoFocus
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${C.creamDeep}`, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Email (optionnel)</label>
+                  <input type="email" value={form.clientEmail} onChange={e => setForm(f => ({ ...f, clientEmail: e.target.value }))}
+                    placeholder="client@email.com"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${C.creamDeep}`, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Description</label>
+                  <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                    placeholder="Ex: Création site web, formation 5 jours…"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${C.creamDeep}`, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr', gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Qté</label>
+                    <input type="number" min={1} value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: Math.max(1, parseInt(e.target.value) || 1) }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${C.creamDeep}`, fontSize: 13, fontFamily: 'JetBrains Mono, monospace', outline: 'none', textAlign: 'center' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Prix unitaire ({symbol})</label>
+                    <input type="number" min={0} value={form.unitPrice} onChange={e => setForm(f => ({ ...f, unitPrice: Math.max(0, parseInt(e.target.value) || 0) }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${C.creamDeep}`, fontSize: 13, fontFamily: 'JetBrains Mono, monospace', outline: 'none' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Total</label>
+                    <div style={{ padding: '10px 12px', borderRadius: 10, background: C.greenSoft, fontSize: 13, fontWeight: 800, color: C.greenDeep, fontFamily: 'JetBrains Mono, monospace', textAlign: 'center' }}>
+                      {(form.quantity * form.unitPrice).toLocaleString('fr-FR')}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Valable jusqu'au</label>
+                  <input type="date" value={form.validUntil} onChange={e => setForm(f => ({ ...f, validUntil: e.target.value }))}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${C.creamDeep}`, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 5 }}>Notes (optionnel)</label>
+                  <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                    rows={2} placeholder="Conditions de paiement, validité, etc."
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${C.creamDeep}`, fontSize: 13, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+                <button className="qp-btn-secondary" onClick={() => setShowCreate(false)}>Annuler</button>
+                <button className="qp-btn-primary" onClick={handleCreate} disabled={submitting || !form.clientName.trim() || form.unitPrice <= 0}>
+                  {submitting ? '...' : (<><Plus size={15} /> Créer le devis</>)}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

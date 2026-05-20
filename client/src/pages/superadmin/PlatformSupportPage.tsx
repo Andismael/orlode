@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '@/services/api';
-import { MessageSquare, AlertCircle, Clock, Loader2 } from 'lucide-react';
+import { MessageSquare, AlertCircle, Clock, Loader2, HeadphonesIcon } from 'lucide-react';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface Ticket { id: string; company: string; subject: string; status: 'open' | 'pending' | 'resolved'; priority: 'P1' | 'P2' | 'P3'; createdAt: string; }
 
@@ -40,15 +41,20 @@ export default function PlatformSupportPage() {
     setTickets(prev => prev.map(tk => tk.id === reply.id ? { ...tk, status: 'resolved' as const } : tk));
   };
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>;
+  if (loading) return (
+    <SuperAdminPage title="Support Plateforme" icon={<HeadphonesIcon size={20} />}>
+      <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>
+    </SuperAdminPage>
+  );
 
   return (
-    <div className="p-6 space-y-5 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Support Plateforme</h1>
-        <span className="text-sm text-gray-400">{tickets.filter(t => t.status === 'open').length} ouvert(s)</span>
-      </div>
-
+    <SuperAdminPage
+      title="Support Plateforme"
+      subtitle="Tickets clients par priorité"
+      icon={<HeadphonesIcon size={20} />}
+      actions={<span className="text-xs md:text-sm text-gray-400">{tickets.filter(t => t.status === 'open').length} ouvert(s)</span>}
+    >
+      <div className="space-y-4">
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
         {[
@@ -98,6 +104,7 @@ export default function PlatformSupportPage() {
         ))}
         {tickets.length === 0 && <p className="text-center text-gray-400 py-8 text-sm">Aucun ticket</p>}
       </div>
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }

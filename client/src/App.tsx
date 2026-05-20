@@ -43,6 +43,7 @@ const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
 const ChatPage = lazy(() => import('@/pages/AIChatPage'));
 // DataManagementPage: accessed via /agents/knowledge dashboard
 const FaceDirectoryPage = lazy(() => import('@/pages/FaceDirectoryPage'));
+const VisionSettingsPage = lazy(() => import('@/pages/VisionSettingsPage'));
 const AnalyticsPage = lazy(() => import('@/pages/AnalyticsPage'));
 const ConnectorsPage = lazy(() => import('@/pages/ConnectorsPage'));
 const AgentMonitorPage = lazy(() => import('@/pages/AgentMonitorPage'));
@@ -68,6 +69,13 @@ const MeetingProPage = lazy(() => import('@/pages/meetings/MeetingProPage'));
 // ── Reception ──
 const ReceptionRedesignPage = lazy(() => import('@/pages/reception/ReceptionRedesignPage'));
 const BookVisitPage = lazy(() => import('@/pages/public/BookVisitPage'));
+const PublicShopPage = lazy(() => import('@/pages/public/PublicShopPage'));
+const PublicMenuPage = lazy(() => import('@/pages/public/PublicMenuPage'));
+const PublicHotelPage = lazy(() => import('@/pages/public/PublicHotelPage'));
+const PublicSalonPage = lazy(() => import('@/pages/public/PublicSalonPage'));
+const PublicHealthPage = lazy(() => import('@/pages/public/PublicHealthPage'));
+const PublicRealEstatePage = lazy(() => import('@/pages/public/PublicRealEstatePage'));
+const PublicResidencePage = lazy(() => import('@/pages/public/PublicResidencePage'));
 const CloneChatPage = lazy(() => import('@/pages/public/CloneChatPage'));
 const CloneVoicePage = lazy(() => import('@/pages/public/CloneVoicePage'));
 const MyStatusPage = lazy(() => import('@/pages/public/MyStatusPage'));
@@ -78,9 +86,23 @@ const CloneInboxPage = lazy(() => import('@/pages/admin/CloneInboxPage'));
 // ── HR ──
 const HRRedesignPage = lazy(() => import('@/pages/hr/HRRedesignPage'));
 const WorkflowRedesignPage = lazy(() => import('@/pages/workflow/WorkflowRedesignPage'));
+const DataScientistRedesignPage = lazy(() => import('@/pages/datascientist/DataScientistRedesignPage'));
+const KoraPage = lazy(() => import('@/pages/kora/KoraPage'));
 
 // ── Finance ──
 const FinanceRedesignPage = lazy(() => import('@/pages/finance/FinanceRedesignPage'));
+
+// ── Commerce / Boutique WhatsApp ──
+const BoutiqueRedesignPage = lazy(() => import('@/pages/commerce/BoutiqueRedesignPage'));
+const RestaurantRedesignPage = lazy(() => import('@/pages/restaurant/RestaurantRedesignPage'));
+const HotelRedesignPage = lazy(() => import('@/pages/hotel/HotelRedesignPage'));
+const ServiceRedesignPage = lazy(() => import('@/pages/service/ServiceRedesignPage'));
+const CabinetRedesignPage = lazy(() => import('@/pages/cabinet/CabinetRedesignPage'));
+const RealEstateRedesignPage = lazy(() => import('@/pages/realestate/RealEstateRedesignPage'));
+const ResidenceRedesignPage = lazy(() => import('@/pages/residence/ResidenceRedesignPage'));
+const PMEHubPage = lazy(() => import('@/pages/pme/PMEHubPage'));
+const EnterpriseHubPage = lazy(() => import('@/pages/enterprise/EnterpriseHubPage'));
+const MultiPackHomePage = lazy(() => import('@/pages/MultiPackHomePage'));
 
 // ── Sales ──
 const SalesDashboardPage = lazy(() => import('@/pages/sales/SalesDashboardPage'));
@@ -167,6 +189,9 @@ const NewsDashboardPage = lazy(() => import('@/pages/news/NewsDashboardPage'));
 const CompetitorTrackerPage = lazy(() => import('@/pages/news/CompetitorTrackerPage'));
 const RGPDCenterPage = lazy(() => import('@/pages/admin/RGPDCenterPage'));
 const BillingPage = lazy(() => import('@/pages/admin/BillingPage'));
+const BrainPage = lazy(() => import('@/pages/admin/BrainPage'));
+const DomainPage = lazy(() => import('@/pages/admin/DomainPage'));
+const StudioPage = lazy(() => import('@/pages/studio/StudioPage'));
 const ContractsPage = lazy(() => import('@/pages/admin/ContractsPage'));
 const ByoeSetupPage = lazy(() => import('@/pages/admin/ByoeSetupPage'));
 const PlansPage = lazy(() => import('@/pages/admin/PlansPage'));
@@ -187,12 +212,14 @@ const APIDocsPage = lazy(() => import('@/pages/admin/APIDocsPage'));
 const WebhooksPage = lazy(() => import('@/pages/admin/WebhooksPage'));
 const DangerZonePage = lazy(() => import('@/pages/admin/DangerZonePage'));
 const WhatsAppPage = lazy(() => import('@/pages/admin/WhatsAppConfigPage'));
+const InboxPage = lazy(() => import('@/pages/admin/InboxPage'));
 const WhatsAppLeadsPage = lazy(() => import('@/pages/admin/WhatsAppLeadsPage'));
 const WhatsAppTemplatesPage = lazy(() => import('@/pages/admin/WhatsAppTemplatesPage'));
 const WhatsAppBroadcastsPage = lazy(() => import('@/pages/admin/WhatsAppBroadcastsPage'));
 const WhatsAppAutoBroadcastsPage = lazy(() => import('@/pages/admin/WhatsAppAutoBroadcastsPage'));
 const WhatsAppCatalogPage = lazy(() => import('@/pages/admin/WhatsAppCatalogPage'));
 const WhatsAppAdsPage = lazy(() => import('@/pages/admin/WhatsAppAdsPage'));
+const MetaAdsConfigPage = lazy(() => import('@/pages/admin/MetaAdsConfigPage'));
 const TelegramPage = lazy(() => import('@/pages/admin/TelegramConfigPage'));
 const AppointmentsAdminPage = lazy(() => import('@/pages/admin/AppointmentsAdminPage'));
 const ReservationsAdminPage = lazy(() => import('@/pages/admin/ReservationsAdminPage'));
@@ -241,6 +268,7 @@ const SAMarketplaceStudioPage = lazy(() => import('@/pages/superadmin/Marketplac
 const SALandingEditorPage = lazy(() => import('@/pages/superadmin/LandingEditorPage'));
 const SAHealthPage = lazy(() => import('@/pages/superadmin/SystemHealthPage'));
 const SAPlatformMCPCatalogPage = lazy(() => import('@/pages/superadmin/PlatformMCPCatalogPage'));
+const SAPacksPage = lazy(() => import('@/pages/superadmin/PacksPage'));
 
 // ── Other ──
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
@@ -334,6 +362,15 @@ export default function App() {
         <Route path="/clone/:companyId/voice" element={<CloneVoicePage />} />
         <Route path="/my/:token" element={<MyStatusPage />} />
         <Route path="/book/:companyId" element={<BookVisitPage />} />
+        <Route path="/shop/:slug" element={<PublicShopPage />} />
+        <Route path="/menu/:slug" element={<PublicMenuPage />} />
+        <Route path="/hotel/:slug" element={<PublicHotelPage />} />
+        <Route path="/salon/:slug" element={<PublicSalonPage />} />
+        <Route path="/cabinet/:slug" element={<PublicHealthPage />} />
+        <Route path="/biens/:slug" element={<PublicRealEstatePage />} />
+        <Route path="/residence/:slug" element={<PublicResidencePage />} />
+        <Route path="/residences/:slug" element={<PublicResidencePage />} />
+        <Route path="/shop/:companyId/:storeId" element={<PublicShopPage />} />
 
         {/* ── Public / Auth ─────────────────────────────────────────── */}
         <Route element={<PublicLayout />}>
@@ -408,6 +445,10 @@ export default function App() {
             <Route path="meetings/:id/summary" element={<MeetingSummaryPage />} />
             <Route path="meetings/pro" element={<MeetingProPage />} />
 
+            {/* Orlode Studio — 5-step onboarding wizard (template → theme → identity → domain → launch) */}
+            <Route path="studio" element={<StudioPage />} />
+            <Route path="studio/*" element={<StudioPage />} />
+
             {/* Business */}
             <Route path="insights" element={<InsightsPage />} />
             {/* Communications — toutes les sous-pages dans CommunicationsRedesignPage */}
@@ -419,7 +460,9 @@ export default function App() {
             <Route path="reception" element={<ReceptionRedesignPage />} />
             <Route path="reception/*" element={<ReceptionRedesignPage />} />
             <Route path="admin/employee-codes" element={<ReceptionRedesignPage />} />
-            <Route path="admin/subscription" element={<PlanAgentPickerPage />} />
+            {/* Old plan-based subscription page is gone since the pricing pivot
+                ($20/mo per pack). Redirect to /marketplace where packs live. */}
+            <Route path="admin/subscription" element={<Navigate to="/marketplace" replace />} />
             <Route path="marketplace" element={<AgentMarketplacePage />} />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="agent/:agentId" element={<AgentWorkspacePage />} />
@@ -440,7 +483,89 @@ export default function App() {
             <Route path="finance" element={<FinanceRedesignPage />} />
             <Route path="finance/*" element={<FinanceRedesignPage />} />
 
-            {/* Sales */}
+            {/* Pack admin URLs — canonical is /agents/<pack> (plural, matches
+                the orlode.com domain convention). Old /agent/<pack> singular
+                paths redirect for backward compat. Note: explicit static paths
+                like "agents/restaurant" beat the dynamic "agents/:agentId" route. */}
+            <Route path="agents/commerce" element={<BoutiqueRedesignPage />} />
+            <Route path="agents/boutique" element={<BoutiqueRedesignPage />} />
+            <Route path="agent/commerce" element={<Navigate to="/agents/commerce" replace />} />
+            <Route path="agent/boutique" element={<Navigate to="/agents/commerce" replace />} />
+            <Route path="boutique" element={<Navigate to="/agents/commerce" replace />} />
+            <Route path="commerce" element={<Navigate to="/agents/commerce" replace />} />
+
+            <Route path="agents/restaurant" element={<RestaurantRedesignPage />} />
+            <Route path="agent/restaurant" element={<Navigate to="/agents/restaurant" replace />} />
+            <Route path="restaurant" element={<Navigate to="/agents/restaurant" replace />} />
+
+            <Route path="agents/hotel" element={<HotelRedesignPage />} />
+            <Route path="agent/hotel" element={<Navigate to="/agents/hotel" replace />} />
+            <Route path="hotel" element={<Navigate to="/agents/hotel" replace />} />
+
+            <Route path="agents/service" element={<ServiceRedesignPage />} />
+            <Route path="agents/salon" element={<ServiceRedesignPage />} />
+            <Route path="agent/service" element={<Navigate to="/agents/service" replace />} />
+            <Route path="agent/salon" element={<Navigate to="/agents/service" replace />} />
+            <Route path="service" element={<Navigate to="/agents/service" replace />} />
+            <Route path="salon" element={<Navigate to="/agents/service" replace />} />
+
+            {/* Cabinet — page multi-profil (méd/dent/avo/not/comptable/véto).
+                /agents/health et /agents/sante redirigent désormais ici (ancien Health pack). */}
+            <Route path="agents/cabinet" element={<CabinetRedesignPage />} />
+            <Route path="agents/health" element={<CabinetRedesignPage />} />
+            <Route path="agents/sante" element={<CabinetRedesignPage />} />
+            <Route path="agents/medecin" element={<CabinetRedesignPage />} />
+            <Route path="agents/dentiste" element={<CabinetRedesignPage />} />
+            <Route path="agents/avocat" element={<CabinetRedesignPage />} />
+            <Route path="agents/notaire" element={<CabinetRedesignPage />} />
+            <Route path="agents/comptable" element={<CabinetRedesignPage />} />
+            <Route path="agents/veto" element={<CabinetRedesignPage />} />
+            <Route path="agent/cabinet" element={<Navigate to="/agents/cabinet" replace />} />
+            <Route path="agent/health" element={<Navigate to="/agents/cabinet" replace />} />
+            <Route path="agent/sante" element={<Navigate to="/agents/cabinet" replace />} />
+            <Route path="cabinet" element={<Navigate to="/agents/cabinet" replace />} />
+            <Route path="health" element={<Navigate to="/agents/cabinet" replace />} />
+            <Route path="sante" element={<Navigate to="/agents/cabinet" replace />} />
+
+            <Route path="agents/realestate" element={<RealEstateRedesignPage />} />
+            <Route path="agents/immobilier" element={<RealEstateRedesignPage />} />
+            <Route path="agents/residence" element={<ResidenceRedesignPage />} />
+            <Route path="agents/residences" element={<ResidenceRedesignPage />} />
+            <Route path="agent/residence" element={<Navigate to="/agents/residences" replace />} />
+            <Route path="agent/residences" element={<Navigate to="/agents/residences" replace />} />
+            <Route path="residences" element={<Navigate to="/agents/residences" replace />} />
+            <Route path="agent/realestate" element={<Navigate to="/agents/realestate" replace />} />
+            <Route path="agent/immobilier" element={<Navigate to="/agents/realestate" replace />} />
+            <Route path="realestate" element={<Navigate to="/agents/realestate" replace />} />
+            <Route path="immobilier" element={<Navigate to="/agents/realestate" replace />} />
+
+            <Route path="agents/pme" element={<PMEHubPage />} />
+            <Route path="agent/pme" element={<Navigate to="/agents/pme" replace />} />
+            <Route path="pme" element={<Navigate to="/agents/pme" replace />} />
+
+            <Route path="agents/datascientist" element={<DataScientistRedesignPage />} />
+            <Route path="agents/kora" element={<KoraPage />} />
+            <Route path="kora" element={<Navigate to="/agents/kora" replace />} />
+            <Route path="agents/datascience" element={<Navigate to="/agents/datascientist" replace />} />
+            <Route path="agents/data-scientist" element={<Navigate to="/agents/datascientist" replace />} />
+            <Route path="agent/datascientist" element={<Navigate to="/agents/datascientist" replace />} />
+            <Route path="datascientist" element={<Navigate to="/agents/datascientist" replace />} />
+
+            <Route path="agents/enterprise" element={<EnterpriseHubPage />} />
+            <Route path="agents/entreprise" element={<EnterpriseHubPage />} />
+            <Route path="agent/enterprise" element={<Navigate to="/agents/enterprise" replace />} />
+            <Route path="agent/entreprise" element={<Navigate to="/agents/enterprise" replace />} />
+            <Route path="entreprise" element={<Navigate to="/agents/enterprise" replace />} />
+
+            {/* Multi-Pack Home — auto-detects activated packs, shows quick switcher */}
+            <Route path="agent" element={<MultiPackHomePage />} />
+            <Route path="packs" element={<Navigate to="/agent" replace />} />
+            <Route path="home" element={<Navigate to="/agent" replace />} />
+
+            {/* Sales — canonical hub at /sales; /agents/sales redirects */}
+            <Route path="agents/sales" element={<SalesDashboardPage />} />
+            <Route path="agents/commercial" element={<Navigate to="/agents/sales" replace />} />
+            <Route path="agent/sales" element={<Navigate to="/agents/sales" replace />} />
             <Route path="sales" element={<SalesDashboardPage />} />
             <Route path="sales/pipeline" element={<SalesPipelinePage />} />
             <Route path="sales/leads" element={<SalesLeadsPage />} />
@@ -505,6 +630,8 @@ export default function App() {
             {/* Faces */}
             <Route path="faces" element={<FaceDirectoryPage />} />
             <Route path="faces/register" element={<FaceRegisterPage />} />
+            <Route path="vision/settings" element={<VisionSettingsPage />} />
+            <Route path="faces/settings" element={<Navigate to="/vision/settings" replace />} />
           </Route>
         </Route>
 
@@ -532,6 +659,14 @@ export default function App() {
             <Route path="news/competitors" element={<CompetitorTrackerPage />} />
             <Route path="admin/rgpd" element={<RGPDCenterPage />} />
             <Route path="admin/billing" element={<BillingPage />} />
+
+            {/* 🧠 Cerveau de l'entreprise — page unique pour nourrir l'IA */}
+            <Route path="admin/brain" element={<BrainPage />} />
+            <Route path="admin/cerveau" element={<BrainPage />} />
+            <Route path="setup/brain" element={<BrainPage />} />
+            <Route path="admin/domain" element={<DomainPage />} />
+            <Route path="admin/domains" element={<Navigate to="/admin/domain" replace />} />
+            <Route path="admin/domaine" element={<Navigate to="/admin/domain" replace />} />
             <Route path="admin/contracts" element={<ContractsPage />} />
             <Route path="admin/byoe" element={<ByoeSetupPage />} />
             <Route path="admin/usage" element={<UsageStatsPage />} />
@@ -539,6 +674,8 @@ export default function App() {
             <Route path="admin/api-docs" element={<APIDocsPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/danger" element={<DangerZonePage />} />
+            <Route path="admin/inbox" element={<InboxPage />} />
+            <Route path="admin/messages" element={<Navigate to="/admin/inbox" replace />} />
             <Route path="admin/whatsapp" element={<WhatsAppPage />} />
             <Route path="admin/whatsapp/leads" element={<WhatsAppLeadsPage />} />
             <Route path="admin/whatsapp/templates" element={<WhatsAppTemplatesPage />} />
@@ -546,6 +683,7 @@ export default function App() {
             <Route path="admin/whatsapp/auto-broadcasts" element={<WhatsAppAutoBroadcastsPage />} />
             <Route path="admin/whatsapp/catalog" element={<WhatsAppCatalogPage />} />
             <Route path="admin/whatsapp/ads" element={<WhatsAppAdsPage />} />
+            <Route path="admin/meta-ads" element={<MetaAdsConfigPage />} />
             <Route path="admin/telegram" element={<TelegramPage />} />
             <Route path="admin/appointments" element={<AppointmentsAdminPage />} />
             <Route path="admin/reservations" element={<ReservationsAdminPage />} />
@@ -576,6 +714,7 @@ export default function App() {
             <Route path="superadmin/analytics" element={<PlatformAnalyticsPage />} />
             <Route path="superadmin/payments" element={<SAPaymentsPage />} />
             <Route path="superadmin/platform-settings" element={<SAPlatformSettingsPage />} />
+            <Route path="superadmin/packs" element={<SAPacksPage />} />
             <Route path="superadmin/marketplace" element={<SAMarketplacePage />} />
             <Route path="superadmin/marketplace-studio" element={<SAMarketplaceStudioPage />} />
             <Route path="superadmin/landing" element={<SALandingEditorPage />} />

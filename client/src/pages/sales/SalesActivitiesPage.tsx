@@ -39,6 +39,25 @@ const fmtDate = (d?: string) => {
   catch { return d; }
 };
 
+const downloadCsv = (rows: Record<string, unknown>[], filename: string) => {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(',')),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+};
+
+const focusFirstInput = () => {
+  const el = document.querySelector<HTMLInputElement>('.sa-root input');
+  el?.focus();
+};
+
 export default function SalesActivitiesPage() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,8 +94,8 @@ export default function SalesActivitiesPage() {
           }
           actions={
             <>
-              <button className="sa-btn-secondary"><Filter size={14} /> Filtres</button>
-              <button className="sa-btn-secondary"><Download size={14} /> Export</button>
+              <button className="sa-btn-secondary" onClick={focusFirstInput}><Filter size={14} /> Filtres</button>
+              <button className="sa-btn-secondary" onClick={() => downloadCsv(activities as unknown as Record<string, unknown>[], 'activites.csv')}><Download size={14} /> Export</button>
             </>
           }
         />

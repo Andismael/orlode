@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import api from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
 import { useLangStore } from '@/store/langStore';
+import MyPacksStrip from '@/components/dashboard/MyPacksStrip';
+import InboxPreview from '@/components/dashboard/InboxPreview';
+import QuickWins from '@/components/dashboard/QuickWins';
 import {
   Search, Bell, ChevronDown, ChevronRight, ChevronLeft, ArrowRight, ArrowUpRight, ArrowDownRight,
   LayoutDashboard, MessageSquare, MessageCircle, Bot, UsersRound, Briefcase, Calendar,
@@ -1727,19 +1730,30 @@ function DashboardContent() {
   return (
     <div className="dashboard-content" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 110 }}>
       <div className="fade-in"><HeroSection /></div>
+      {/* Front-and-center strip of the user's active packs — what they came
+          here to look at: their boutique / restaurant / cabinet / etc., the
+          public URL they can share, and a 1-click button into each pack. */}
+      <div className="fade-in" style={{ animationDelay: '0.05s' }}><MyPacksStrip /></div>
+      {/* Onboarding nudge: shows the next 1-4 actions to finish setup (channels
+          / branding / first content / contact info). Auto-hides when complete
+          (replaced by a "ready to share" celebration card). */}
+      <div className="fade-in" style={{ animationDelay: '0.08s' }}><QuickWins /></div>
       <div className="fade-in" style={{ animationDelay: '0.1s' }}><KPICards /></div>
       {data.isPrivileged && (
         <div className="fade-in" style={{ animationDelay: '0.2s' }}><AISuggestions /></div>
       )}
 
-      {/* 3-col: Activity feed + Agenda + Tasks */}
+      {/* InboxPreview + Agenda side-by-side — the two things a merchant
+          actually checks at every login. Tasks moves below since it's lower
+          frequency. ActivityFeed stays admin-only. */}
       <div className="responsive-charts" style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14,
+        display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 14,
       }}>
-        {data.isPrivileged && <ActivityFeed />}
+        <InboxPreview />
         <AgendaToday />
         <Tasks />
       </div>
+      {data.isPrivileged && <ActivityFeed />}
 
       {/* 2-col: Chart + Top agents — admin only */}
       {data.isPrivileged && (

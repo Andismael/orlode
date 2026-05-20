@@ -54,8 +54,8 @@ export default function ContractsPage() {
     setLoading(true);
     try {
       const [statusR, listR] = await Promise.all([
-        api.get<{ data: { configured: boolean; frontendUrl: string } }>('/contracts/status'),
-        api.get<{ data: Contract[]; wemasConfigured: boolean }>('/contracts'),
+        api.get<{ data: { configured: boolean; frontendUrl: string } }>('/wemas/status'),
+        api.get<{ data: Contract[]; wemasConfigured: boolean }>('/wemas'),
       ]);
       const status = statusR.data as any;
       const list = listR.data as any;
@@ -72,7 +72,7 @@ export default function ContractsPage() {
   const handleResend = async (id: string) => {
     setResending(id);
     try {
-      await api.post(`/contracts/${id}/resend`, {});
+      await api.post(`/wemas/${id}/resend`, {});
       toast.success('Email de signature renvoyé');
       load();
     } catch (e: any) {

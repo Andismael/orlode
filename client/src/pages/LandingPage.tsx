@@ -84,11 +84,13 @@ const MARKETPLACE_AGENTS = [
   { icon: '🏦', name: 'Agent Assurance', desc: 'Polices, sinistres, risk scoring', color: '#1D4ED8', industry: 'Assurance' },
 ];
 
+// Pricing model April 2026: $20/pack métier · 30 jours gratuits sans CB.
+// Old Starter/Pro/Premium tiers retired — packs are picked in onboarding wizard
+// or marketplace and contain 7 agents each (4 spécialisés + 3 core).
 const PLANS_M = [
-  { name: 'Free', price: '$0', sub: '', desc: 'Pour tester', features: ['1 agent (Knowledge)', '3 documents', '1 utilisateur'], cta: 'Essayer gratuitement', featured: false },
-  { name: 'Starter', price: '$19.99', sub: '/mois', desc: '14 jours gratuits', features: ['4 agents au choix', '40 skills', '5 utilisateurs', 'Support email', '13 connecteurs'], cta: 'Commencer l\'essai', featured: false },
-  { name: 'Pro', price: '$49.99', sub: '/mois', desc: 'Le plus populaire', features: ['8 agents au choix', '80 skills', '25 utilisateurs', 'Email + Telegram + Slack', 'Marketplace', 'Équipe & canaux'], cta: 'Commencer', featured: true },
-  { name: 'Premium', price: '$99.99', sub: '/mois', desc: 'Puissance maximale', features: ['12 agents au choix', '120 skills', 'Utilisateurs illimités', 'WhatsApp Business', 'API publique', 'Support dédié 24/7', 'Tous connecteurs'], cta: 'Commencer', featured: false },
+  { name: 'Free', price: '$0', sub: '', desc: 'Pour tester la plateforme', features: ['1 agent Knowledge', '10 documents', '1 utilisateur', 'Aucun engagement'], cta: 'Essayer gratuitement', featured: false },
+  { name: 'Pack métier', price: '$20', sub: '/mois', desc: '🎁 30 jours gratuits sans CB', features: ['4 agents spécialisés (RH, Sales, Resto...)', '+ 3 agents core (Knowledge, Workflow, Wildcard)', 'Orchestrateur IA inclus', 'BYOE : ta clé OpenAI/Claude/Gemini', 'WhatsApp Business + signature électronique'], cta: 'Démarrer mon essai', featured: true },
+  { name: 'Super Pack', price: '$45', sub: '/mois', desc: '11 agents flagship · -25%', features: ['8 agents spécialisés (Sales, Marketing, Comms, Support, Compta, RH, Réception, Cyber)', '+ 3 agents core', 'Orchestrateur IA inclus', 'Knowledge brain unifié', 'Économise vs 3 packs séparés'], cta: 'Activer le Super Pack', featured: false },
 ];
 
 const TESTIMONIALS = [

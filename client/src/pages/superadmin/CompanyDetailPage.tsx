@@ -21,7 +21,10 @@ export default function CompanyDetailPage() {
 
   const load = () => {
     api.get(`/superadmin/companies/${companyId}`)
-      .then(r => setCompany(r.data as CompanyDetail))
+      .then((r: any) => {
+        const raw = r?.data?.data ?? r?.data;
+        setCompany(raw as CompanyDetail);
+      })
       .catch(() => {}).finally(() => setLoading(false));
   };
 

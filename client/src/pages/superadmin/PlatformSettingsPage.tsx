@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Save, Phone, MessageCircle, Mail, CheckCircle2 } from 'lucide-react';
+import { Loader2, Save, Phone, MessageCircle, Mail, CheckCircle2, Settings } from 'lucide-react';
 import api from '@/services/api';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface Settings {
   manualPaymentPhone: string;
@@ -50,15 +51,19 @@ export default function PlatformSettingsPage() {
     setSaving(false);
   };
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>;
+  if (loading) return (
+    <SuperAdminPage title="Paramètres plateforme" icon={<Settings size={20} />}>
+      <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>
+    </SuperAdminPage>
+  );
 
   return (
-    <div className="p-6 max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Paramètres plateforme</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Réglages globaux de Orlode — édités ici prennent effet immédiatement, sans redeploy.</p>
-      </div>
-
+    <SuperAdminPage
+      title="Paramètres plateforme"
+      subtitle="Réglages globaux Orlode — effet immédiat, sans redeploy"
+      icon={<Settings size={20} />}
+    >
+      <div className="space-y-6">
       {/* ── Paiement manuel ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 space-y-4">
         <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
@@ -134,6 +139,7 @@ export default function PlatformSettingsPage() {
           </span>
         )}
       </div>
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }

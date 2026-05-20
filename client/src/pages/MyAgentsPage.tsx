@@ -39,39 +39,41 @@ export default function MyAgentsPage() {
       const raw = instRes.data;
       const marketplaceInstalled = (Array.isArray(raw) ? raw : []) as InstalledAgent[];
 
-      // Fetch built-in agents: user's plan selection + the 3 core agents (always free/active).
-      const builtInList: InstalledAgent[] = [];
-      // Core agents are ALWAYS available to every plan — even Free.
+      // Core agents are ALWAYS available to every plan — even Free / no subscription.
       const CORE_AGENTS = ['orchestrator', 'knowledge', 'wildcard'];
+
+      // Plan-selected agents (best-effort — never blocks the core display).
+      let selectedAgents: string[] = [];
       try {
-        const subRes = await api.get('/subscription/me');
-        const subData = subRes.data as { selectedAgents?: string[] } | null;
-        const selectedAgents = subData?.selectedAgents ?? [];
+        const subRes: any = await api.get('/subscription/my-agents');
+        const subPayload = subRes?.data?.data ?? subRes?.data ?? {};
+        selectedAgents = Array.isArray(subPayload.selectedAgents) ? subPayload.selectedAgents : [];
+      } catch { /* fall through — core agents still rendered */ }
 
-        // Fetch the catalog of built-in agents to resolve names/icons
-        const availRes = await api.get('/subscription/available/free');
-        const availData = availRes.data as { agents?: Array<{ id: string; name: string; icon: string; description: string; category?: string }> } | null;
-        const catalog = availData?.agents ?? [];
-        const catalogMap = new Map(catalog.map(a => [a.id, a]));
+      // Free catalog used to resolve names/icons (best-effort).
+      const catalogMap = new Map<string, { id: string; name: string; icon: string; description: string; category?: string }>();
+      try {
+        const availRes: any = await api.get('/subscription/available/free');
+        const availPayload = availRes?.data?.data ?? availRes?.data ?? {};
+        const catalog = Array.isArray(availPayload.agents) ? availPayload.agents : [];
+        catalog.forEach((a: { id: string; name: string; icon: string; description: string; category?: string }) => catalogMap.set(a.id, a));
+      } catch { /* fall through */ }
 
-        // Union: core agents + user's selected agents
-        const idsToShow = new Set<string>([...CORE_AGENTS, ...selectedAgents]);
-
-        for (const agentId of idsToShow) {
-          // Skip if already in marketplace list (avoid duplicates)
-          if (marketplaceInstalled.some(m => (m.agentId ?? m.id) === agentId)) continue;
-          const info = catalogMap.get(agentId);
-          const isCore = CORE_AGENTS.includes(agentId);
-          builtInList.push({
-            agentId,
-            id: agentId,
-            status: 'active',
-            pricingModel: isCore ? 'core' : 'included',
-            installedAt: new Date().toISOString(),
-            cachedConfig: info ? { name: info.name, icon: info.icon } : undefined,
-          } as unknown as InstalledAgent);
-        }
-      } catch { /* ignore if endpoint unavailable */ }
+      const builtInList: InstalledAgent[] = [];
+      const idsToShow = new Set<string>([...CORE_AGENTS, ...selectedAgents]);
+      for (const agentId of idsToShow) {
+        if (marketplaceInstalled.some(m => (m.agentId ?? m.id) === agentId)) continue;
+        const info = catalogMap.get(agentId);
+        const isCore = CORE_AGENTS.includes(agentId);
+        builtInList.push({
+          agentId,
+          id: agentId,
+          status: 'active',
+          pricingModel: isCore ? 'core' : 'included',
+          installedAt: new Date().toISOString(),
+          cachedConfig: info ? { name: info.name, icon: info.icon } : undefined,
+        } as unknown as InstalledAgent);
+      }
 
       setInstalled([...marketplaceInstalled, ...builtInList]);
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/services/api';
 import { Search, Building2, ChevronRight, Loader2 } from 'lucide-react';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface Company {
   id: string; name: string; email: string; plan: string; status: string;
@@ -19,21 +20,25 @@ export default function CompaniesListPage() {
 
   useEffect(() => {
     api.get('/superadmin/companies')
-      .then(r => { const raw = r.data; setCompanies(Array.isArray(raw) ? raw : []); })
+      .then((r: any) => {
+        const raw = r?.data?.data ?? r?.data;
+        setCompanies(Array.isArray(raw) ? raw : []);
+      })
       .catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const filtered = companies.filter(c => !search || c.name?.toLowerCase().includes(search.toLowerCase()) || c.email?.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="p-6 space-y-5 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Entreprises</h1>
-        <span className="text-sm text-gray-400">{companies.length} total</span>
-      </div>
-
+    <SuperAdminPage
+      title="Entreprises"
+      subtitle="Tous les clients connectés à la plateforme"
+      icon={<Building2 size={20} />}
+      actions={<span className="text-xs md:text-sm text-gray-400">{companies.length} total</span>}
+    >
+      <div className="space-y-4">
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'Total', value: companies.length, color: 'text-blue-600' },
           { label: 'Actives', value: companies.filter(c => c.status === 'active').length, color: 'text-green-600' },
@@ -79,6 +84,7 @@ export default function CompaniesListPage() {
           {filtered.length === 0 && <p className="text-center text-gray-400 py-8 text-sm">Aucune entreprise trouvee</p>}
         </div>
       )}
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }

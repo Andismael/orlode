@@ -2,6 +2,7 @@
  * Sales Reports — Premium analytics with real data + charts
  */
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, AreaChart, Area } from 'recharts';
 import { Download, Sparkles, TrendingUp, Users, Target, Activity, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import api from '@/services/api';
@@ -41,6 +42,20 @@ const fmt = (n: number) => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
+};
+
+const downloadCsv = (rows: Record<string, unknown>[], filename: string) => {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(',')),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 };
 
 interface TooltipProps { active?: boolean; payload?: Array<{ value: number; name?: string; color?: string; dataKey?: string }>; label?: string }
@@ -126,8 +141,31 @@ export default function SalesReportsPage() {
           pills={<span className="sr-pill" style={{ background: C.greenDeep, color: C.cream }}>● ANALYTICS</span>}
           actions={
             <>
-              <button className="sr-btn-secondary"><Download size={14} /> Export PDF</button>
-              <button className="sr-btn-primary"><Sparkles size={16} /> Insight IA</button>
+              <button
+                className="sr-btn-secondary"
+                onClick={() => {
+                  const rows: Record<string, unknown>[] = [];
+                  if (stats) {
+                    rows.push({
+                      metric: 'Pipeline value', value: stats.pipelineValue,
+                    });
+                    rows.push({ metric: 'Total revenue', value: stats.totalRevenue });
+                    rows.push({ metric: 'Conversion rate (%)', value: stats.conversionRate });
+                    rows.push({ metric: 'Avg deal size', value: stats.avgDealSize });
+                    rows.push({ metric: 'Total leads', value: stats.totalLeads });
+                    rows.push({ metric: 'Hot leads', value: stats.hotLeads });
+                    rows.push({ metric: 'Total clients', value: stats.totalClients });
+                    rows.push({ metric: 'Total quotes', value: stats.totalQuotes });
+                    rows.push({ metric: 'Accepted quotes', value: stats.acceptedQuotes });
+                    Object.entries(stats.stages || {}).forEach(([stage, d]) => {
+                      rows.push({ metric: `Stage ${stage} count`, value: d.count });
+                      rows.push({ metric: `Stage ${stage} value`, value: d.value });
+                    });
+                  }
+                  downloadCsv(rows, 'rapport.csv');
+                }}
+              ><Download size={14} /> Export CSV</button>
+              <Link to="/sales/ai-chat" className="sr-btn-primary"><Sparkles size={16} /> Insight IA</Link>
             </>
           }
         />

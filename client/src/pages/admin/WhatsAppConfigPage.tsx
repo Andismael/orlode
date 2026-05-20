@@ -1265,6 +1265,7 @@ function BotConfigSection({ status }: any) {
     { id: 'Shimmer', desc: 'Féminin, doux', gender: 'F', color: '#A855F7' },
   ];
   const languages = [
+    { id: 'auto', label: 'Auto · répond dans la langue du message', flag: '🌍' },
     { id: 'fr', label: 'Français', flag: '🇫🇷' },
     { id: 'en', label: 'English', flag: '🇬🇧' },
     { id: 'ar', label: 'العربية', flag: '🇸🇦' },

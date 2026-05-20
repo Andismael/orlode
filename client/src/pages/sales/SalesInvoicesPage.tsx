@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { Plus, Filter, Download, Receipt, Send, CheckCircle2, AlertTriangle, FileText } from 'lucide-react';
 import api from '@/services/api';
 import { useCurrency } from '@/hooks/useCurrency';
+import { toast } from '@/components/common/Toast';
 import SalesHero from './_SalesHero';
 import SalesNav from './_SalesNav';
 
@@ -35,6 +36,20 @@ const fmt = (n: number) => {
   return String(n);
 };
 
+const downloadCsv = (rows: Record<string, unknown>[], filename: string) => {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(',')),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+};
+
 export default function SalesInvoicesPage() {
   const { symbol } = useCurrency();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -47,6 +62,15 @@ export default function SalesInvoicesPage() {
       setInvoices(arr as Invoice[]);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  const handleRemind = async (id: string) => {
+    try {
+      await api.post(`/sales/invoices/${id}/remind`);
+      toast.success('Relance envoyée');
+    } catch (e) {
+      toast.error('Erreur', (e as Error)?.message || 'Impossible d\'envoyer la relance');
+    }
+  };
 
   const totalAmount = invoices.reduce((s, i) => s + (i.totalTTC || 0), 0);
   const paidCount = invoices.filter(i => i.status === 'paid' || i.status === 'payée').length;
@@ -82,8 +106,8 @@ export default function SalesInvoicesPage() {
           }
           actions={
             <>
-              <button className="siv-btn-secondary"><Download size={14} /> Export</button>
-              <Link to="/accounting/invoices" className="siv-btn-primary"><Plus size={16} /> Nouvelle facture</Link>
+              <button className="siv-btn-secondary" onClick={() => downloadCsv(invoices as unknown as Record<string, unknown>[], 'factures.csv')}><Download size={14} /> Export</button>
+              <Link to="/finance/invoices?new=1" className="siv-btn-primary"><Plus size={16} /> Nouvelle facture</Link>
             </>
           }
         />
@@ -125,10 +149,10 @@ export default function SalesInvoicesPage() {
                         {symbol}{fmt(inv.totalTTC || 0)}
                       </div>
                     </div>
-                    <button className="siv-btn-secondary" style={{ padding: '9px 14px', fontSize: 12 }}>
+                    <button className="siv-btn-secondary" style={{ padding: '9px 14px', fontSize: 12 }} onClick={() => handleRemind(inv.id)}>
                       <Send size={13} /> Relancer
                     </button>
-                    <button className="siv-icon-btn"><Download size={14} /></button>
+                    <button className="siv-icon-btn" onClick={() => window.open(`/api/sales/invoices/${inv.id}/pdf`, '_blank')} title="Télécharger PDF"><Download size={14} /></button>
                   </div>
                 );
               })}

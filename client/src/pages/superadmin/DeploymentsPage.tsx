@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import api from '@/services/api';
-import { useLangStore } from '@/store/langStore';
-import { Server, CheckCircle, AlertCircle, RefreshCw, Clock } from 'lucide-react';
+import { Server, CheckCircle, AlertCircle, RefreshCw, Clock, Loader2 } from 'lucide-react';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface Deployment { id: string; name: string; version: string; status: 'running' | 'deploying' | 'error' | 'stopped'; region: string; lastDeploy: string; uptime: string; }
 
-const STATUS_STYLE: Record<string, { color: string; icon: React.ReactNode }> = {
-  running: { color: 'text-green-400', icon: <CheckCircle size={14} /> },
-  deploying: { color: 'text-blue-400', icon: <RefreshCw size={14} className="animate-spin" /> },
-  error: { color: 'text-red-400', icon: <AlertCircle size={14} /> },
-  stopped: { color: 'text-white/30', icon: <Clock size={14} /> },
+const STATUS_STYLE: Record<string, { color: string; bg: string; icon: React.ReactNode }> = {
+  running:   { color: 'text-green-700',  bg: 'bg-green-50',  icon: <CheckCircle size={14} /> },
+  deploying: { color: 'text-blue-700',   bg: 'bg-blue-50',   icon: <RefreshCw size={14} className="animate-spin" /> },
+  error:     { color: 'text-red-700',    bg: 'bg-red-50',    icon: <AlertCircle size={14} /> },
+  stopped:   { color: 'text-gray-500',   bg: 'bg-gray-100',  icon: <Clock size={14} /> },
 };
 
 const MOCK: Deployment[] = [
@@ -21,7 +21,6 @@ const MOCK: Deployment[] = [
 ];
 
 export default function DeploymentsPage() {
-  const { t } = useLangStore();
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -36,66 +35,69 @@ export default function DeploymentsPage() {
 
   const healthCount = {
     running: deployments.filter(d => d.status === 'running').length,
-    error: deployments.filter(d => d.status === 'error').length,
+    error:   deployments.filter(d => d.status === 'error').length,
   };
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">Déploiements</h1>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-green-400">{healthCount.running} actifs</span>
-          {healthCount.error > 0 && <span className="text-red-400">{healthCount.error} erreur(s)</span>}
+    <SuperAdminPage
+      title="Déploiements"
+      subtitle="Statut des services Cloud Run + redéploiement à la volée"
+      icon={<Server size={20} />}
+      actions={
+        <div className="flex items-center gap-2 text-xs md:text-sm">
+          <span className="text-green-700 font-medium">{healthCount.running} actifs</span>
+          {healthCount.error > 0 && <span className="text-red-700 font-medium">{healthCount.error} erreur(s)</span>}
         </div>
-      </div>
-
-      {/* Health summary */}
-      <div className={`rounded-xl border p-4 flex items-center gap-3 ${healthCount.error > 0 ? 'border-red-500/30 bg-red-500/10' : 'border-green-500/30 bg-green-500/10'}`}>
-        {healthCount.error > 0
-          ? <AlertCircle size={20} className="text-red-400 flex-shrink-0" />
-          : <CheckCircle size={20} className="text-green-400 flex-shrink-0" />}
-        <p className="text-sm text-white">
+      }
+    >
+      <div className="space-y-4">
+        {/* Health summary */}
+        <div className={`rounded-xl border p-4 flex items-center gap-3 ${healthCount.error > 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
           {healthCount.error > 0
-            ? `${healthCount.error} service(s) en erreur — intervention requise`
-            : 'Tous les services fonctionnent normalement'}
-        </p>
-      </div>
+            ? <AlertCircle size={20} className="text-red-500 flex-shrink-0" />
+            : <CheckCircle size={20} className="text-green-500 flex-shrink-0" />}
+          <p className={`text-sm ${healthCount.error > 0 ? 'text-red-800' : 'text-green-800'}`}>
+            {healthCount.error > 0
+              ? `${healthCount.error} service(s) en erreur — intervention requise`
+              : 'Tous les services fonctionnent normalement'}
+          </p>
+        </div>
 
-      {/* Deployments list */}
-      {loading ? (
-        <div className="space-y-2">{[...Array(4)].map((_, i) => <div key={i} className="h-20 bg-white/5 rounded-xl animate-pulse" />)}</div>
-      ) : (
-        <div className="space-y-2">
-          {deployments.map(d => {
-            const st = STATUS_STYLE[d.status];
-            return (
-              <div key={d.id} className="bg-white/5 border border-white/10 rounded-xl p-4">
-                <div className="flex items-center gap-3">
-                  <Server size={18} className="text-white/40 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="font-medium text-white text-sm">{d.name}</p>
-                      <span className="text-xs text-white/30 font-mono">{d.version}</span>
+        {loading ? (
+          <div className="flex items-center justify-center py-12"><Loader2 size={20} className="animate-spin text-gray-400" /></div>
+        ) : (
+          <div className="space-y-2">
+            {deployments.map(d => {
+              const st = STATUS_STYLE[d.status];
+              return (
+                <div key={d.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                  <div className="flex items-center gap-3 flex-wrap md:flex-nowrap">
+                    <Server size={18} className="text-gray-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                        <p className="font-semibold text-gray-900 text-sm">{d.name}</p>
+                        <span className="text-xs text-gray-400 font-mono">{d.version}</span>
+                      </div>
+                      <p className="text-xs text-gray-500">{d.region} · Uptime: {d.uptime} · {new Date(d.lastDeploy).toLocaleString('fr-FR')}</p>
                     </div>
-                    <p className="text-xs text-white/40">{d.region} · Uptime: {d.uptime} · Dernier deploy: {new Date(d.lastDeploy).toLocaleString('fr-FR')}</p>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className={`flex items-center gap-1 text-xs font-medium ${st.color}`}>
-                      {st.icon} {d.status}
-                    </span>
-                    {(d.status === 'error' || d.status === 'stopped') && (
-                      <button onClick={() => redeploy(d.id)}
-                        className="px-3 py-1 text-xs text-white/70 hover:text-white border border-white/20 hover:border-white/40 rounded-lg transition-colors">
-                        Redéployer
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+                      <span className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${st.bg} ${st.color}`}>
+                        {st.icon} {d.status}
+                      </span>
+                      {(d.status === 'error' || d.status === 'stopped') && (
+                        <button onClick={() => redeploy(d.id)}
+                          className="px-3 py-1 text-xs text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg transition-colors">
+                          Redéployer
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </SuperAdminPage>
   );
 }

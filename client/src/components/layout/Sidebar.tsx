@@ -9,7 +9,7 @@ import {
   ChevronDown, Clock, CalendarClock, Building2, KeyRound, Calendar,
   UserPlus, Receipt, BarChart2, BookOpen, PenTool, Package, Key,
   CircleDot, Database, BarChart3, Plug, Crown, Sparkles, ShoppingBag, Boxes,
-  MessageSquarePlus,
+  MessageSquarePlus, Brain,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useLangStore } from '@/store/langStore';
@@ -37,6 +37,7 @@ interface NavSection {
 // Top-level items (always visible)
 const TOP_ITEMS: NavItem[] = [
   { path: '/',         label: 'Dashboard',   icon: LayoutDashboard },
+  { path: '/agent',    label: 'Mes packs',   icon: Boxes },
   { path: '/chat',     label: 'AI Chat',     icon: MessageSquare },
   { path: '/agents',   label: 'Agents',      icon: Bot },
   { path: '/insights', label: 'Insights',    icon: Lightbulb },
@@ -212,12 +213,13 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
   // ── Simplified sidebar — agents are accessed via /agents/:id dashboards ──
 
   const TOP_ITEMS_T: NavItem[] = [
-    { path: '/',          label: t('dashboard'),       icon: LayoutDashboard },
-    { path: '/chat',      label: t('ai_chat'),         icon: MessageSquare },
-    { path: '/agents',    label: 'Mes Agents',         icon: Bot },
-    { path: '/team',      label: 'Equipe',             icon: Users },
-    { path: '/workspace', label: 'Espace de travail',  icon: Boxes },
-    { path: '/calendar',  label: 'Calendrier',         icon: Calendar },
+    { path: '/',             label: t('dashboard'),       icon: LayoutDashboard },
+    { path: '/admin/brain',  label: 'Cerveau IA',         icon: Brain },
+    { path: '/chat',         label: t('ai_chat'),         icon: MessageSquare },
+    { path: '/agents',       label: 'Mes Agents',         icon: Bot },
+    { path: '/team',         label: 'Equipe',             icon: Users },
+    { path: '/workspace',    label: 'Espace de travail',  icon: Boxes },
+    { path: '/calendar',     label: 'Calendrier',         icon: Calendar },
   ];
 
   // No more collapsible agent sections — everything is inside agent dashboards
@@ -225,7 +227,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
 
   const BOTTOM_ITEMS_T: NavItem[] = [
     { path: '/marketplace',        label: 'Marketplace',  icon: ShoppingBag },
-    { path: '/admin/subscription', label: 'Abonnement',   icon: Crown },
+    { path: '/admin/billing',      label: 'Abonnement',   icon: Crown },
     { path: '/creator',            label: 'Createur',     icon: Sparkles },
     { path: '/feedback',           label: 'Feedback',     icon: MessageSquarePlus },
     { path: '/settings',           label: t('settings'),  icon: Settings },

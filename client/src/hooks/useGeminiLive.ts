@@ -41,7 +41,8 @@ interface GeminiLiveHook {
 
 // Gemini Live key is fetched per-session from the backend (per-tenant BYOE) to prevent cost leaks.
 // The old VITE_GOOGLE_AI_API_KEY env var is no longer used — it was a public cost leak.
-const MODEL: string = import.meta.env.VITE_GEMINI_LIVE_MODEL ?? 'models/gemini-3.1-flash-live-preview';
+// Latest Live API model. Fallback to flash-live in case the env var is set to an older one.
+const MODEL: string = import.meta.env.VITE_GEMINI_LIVE_MODEL ?? 'models/gemini-2.5-flash-preview-native-audio-dialog';
 const WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 
 async function fetchTenantLiveKey(): Promise<string> {

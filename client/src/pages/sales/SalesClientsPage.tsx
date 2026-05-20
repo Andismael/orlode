@@ -2,10 +2,10 @@
  * Sales Clients Page — Premium edition (list + grid views, expandable cards)
  */
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Trash2, ChevronDown, Mail, Phone, Building2, MapPin,
-  FileText, Receipt, Star, Filter, List, LayoutGrid,
+  FileText, Receipt, Star, Filter, List, LayoutGrid, X,
 } from 'lucide-react';
 import api from '@/services/api';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -54,14 +54,38 @@ const tagLabel = (t: string) => ({ vip: 'VIP', active: 'Actif', prospect: 'Prosp
 
 export default function SalesClientsPage() {
   const { symbol } = useCurrency();
+  const [searchParams] = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(searchParams.get('new') === '1');
+  const [form, setForm] = useState({ name: '', email: '', phone: '', company: '' });
+  const [submitting, setSubmitting] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(() =>
     (localStorage.getItem('sales-clients-view') as 'list' | 'grid') ?? 'list');
 
   useEffect(() => { localStorage.setItem('sales-clients-view', viewMode); }, [viewMode]);
+
+  const handleCreate = async () => {
+    if (!form.name) return;
+    setSubmitting(true);
+    try {
+      const r = await api.post('/sales/clients', form);
+      const created = (r.data as { client?: Client } | Client | null);
+      const newClient = (created && typeof created === 'object' && 'client' in (created as object)
+        ? (created as { client?: Client }).client
+        : (created as Client | null));
+      if (newClient && newClient.id) setClients(prev => [newClient, ...prev]);
+      setShowCreate(false);
+      setForm({ name: '', email: '', phone: '', company: '' });
+    } catch {} finally { setSubmitting(false); }
+  };
+
+  const focusSearch = () => {
+    const el = document.querySelector<HTMLInputElement>('.cl-root input[placeholder^="Rechercher"]');
+    el?.focus();
+  };
 
   useEffect(() => {
     api.get('/sales/clients').then(r => {
@@ -122,8 +146,8 @@ export default function SalesClientsPage() {
           }
           actions={
             <>
-              <button className="cl-btn-secondary"><Filter size={14} /> Filtres</button>
-              <button className="cl-btn-primary"><Plus size={16} /> Nouveau client</button>
+              <button className="cl-btn-secondary" onClick={focusSearch}><Filter size={14} /> Filtres</button>
+              <button className="cl-btn-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> Nouveau client</button>
             </>
           }
         />
@@ -245,7 +269,9 @@ export default function SalesClientsPage() {
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <Link to={`/sales/quotes?client=${client.id}`} className="cl-btn-secondary"><FileText size={13} /> {client.quotesCount || 0} devis</Link>
                           <Link to={`/sales/invoices?client=${client.id}`} className="cl-btn-secondary"><Receipt size={13} /> {client.invoicesCount || 0} factures</Link>
-                          <button className="cl-btn-secondary"><Mail size={13} /> Envoyer email</button>
+                          {client.email && (
+                            <a href={`mailto:${client.email}`} className="cl-btn-secondary"><Mail size={13} /> Envoyer email</a>
+                          )}
                           <button className="cl-icon-btn danger" onClick={(e) => { e.stopPropagation(); handleDelete(client.id); }}><Trash2 size={14} /></button>
                         </div>
                       </div>
@@ -256,6 +282,27 @@ export default function SalesClientsPage() {
             </div>
           )}
         </div>
+
+        {showCreate && (
+          <div onClick={() => setShowCreate(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(10,42,32,.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: C.cream, borderRadius: 20, width: '100%', maxWidth: 480, padding: 24, boxShadow: '0 40px 80px -20px rgba(0,0,0,.5)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+                <h2 className="cl-display" style={{ fontSize: 20, fontWeight: 700, color: C.ink, margin: 0 }}>Nouveau client</h2>
+                <button onClick={() => setShowCreate(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: C.inkSoft }}><X size={18} /></button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <input placeholder="Nom *" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={{ padding: '11px 14px', borderRadius: 10, border: '1.5px solid rgba(10,42,32,.1)', fontSize: 14, fontFamily: 'inherit', outline: 'none' }} />
+                <input placeholder="Email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} style={{ padding: '11px 14px', borderRadius: 10, border: '1.5px solid rgba(10,42,32,.1)', fontSize: 14, fontFamily: 'inherit', outline: 'none' }} />
+                <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={{ padding: '11px 14px', borderRadius: 10, border: '1.5px solid rgba(10,42,32,.1)', fontSize: 14, fontFamily: 'inherit', outline: 'none' }} />
+                <input placeholder="Entreprise" value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} style={{ padding: '11px 14px', borderRadius: 10, border: '1.5px solid rgba(10,42,32,.1)', fontSize: 14, fontFamily: 'inherit', outline: 'none' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+                <button className="cl-btn-secondary" onClick={() => setShowCreate(false)}>Annuler</button>
+                <button className="cl-btn-primary" onClick={handleCreate} disabled={submitting || !form.name}>{submitting ? '...' : 'Créer'}</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

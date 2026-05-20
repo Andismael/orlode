@@ -100,12 +100,12 @@ export default function SalesDashboardPage() {
   const donutTotal = leadDist.reduce((s, d) => s + d.value, 0) || 1;
 
   const kpis = stats ? [
-    { id: 'leads', label: 'Leads', value: String(stats.totalLeads), trend: stats.hotLeads > 0 ? `${stats.hotLeads} chauds` : '—', trendDir: stats.hotLeads > 0 ? 'up' : 'flat', sub: 'Cette semaine', icon: Users, style: 'orange' as const },
-    { id: 'clients', label: 'Clients', value: String(stats.totalClients), trend: '—', trendDir: 'flat' as const, sub: 'Total actifs', icon: Target, style: 'cream' as const },
-    { id: 'pipeline', label: 'Pipeline', value: fmt(stats.pipelineValue), prefix: `${symbol} `, trend: '—', trendDir: 'flat' as const, sub: 'À engager', icon: FileText, style: 'cream' as const },
-    { id: 'devis', label: 'Devis', value: String(stats.totalQuotes), trend: stats.acceptedQuotes > 0 ? `${stats.acceptedQuotes} acceptés` : '—', trendDir: stats.acceptedQuotes > 0 ? 'up' : 'flat', sub: 'En cours', icon: TrendingUp, style: 'cream' as const },
-    { id: 'conversion', label: 'Conversion', value: String(stats.conversionRate), suffix: '%', trend: stats.conversionRate > 0 ? `${stats.conversionRate}%` : 'À optimiser', trendDir: stats.conversionRate > 50 ? 'up' : 'flat', sub: 'Lead → Client', icon: Sparkles, style: 'cream' as const },
-    { id: 'relances', label: 'Relances', value: String(overdueCount), trend: overdueCount > 0 ? `${overdueCount} retard` : 'À jour', trendDir: overdueCount > 0 ? 'down' : 'up', sub: "Aujourd'hui", icon: Clock, style: 'cream' as const },
+    { id: 'leads', label: 'Leads', value: String(stats.totalLeads), trend: stats.hotLeads > 0 ? `${stats.hotLeads} chauds` : '—', trendDir: stats.hotLeads > 0 ? 'up' : 'flat', sub: 'Cette semaine', icon: Users, style: 'orange' as const, to: '/sales/leads' },
+    { id: 'clients', label: 'Clients', value: String(stats.totalClients), trend: '—', trendDir: 'flat' as const, sub: 'Total actifs', icon: Target, style: 'cream' as const, to: '/sales/clients' },
+    { id: 'pipeline', label: 'Pipeline', value: fmt(stats.pipelineValue), prefix: `${symbol} `, trend: '—', trendDir: 'flat' as const, sub: 'À engager', icon: FileText, style: 'cream' as const, to: '/sales/pipeline' },
+    { id: 'devis', label: 'Devis', value: String(stats.totalQuotes), trend: stats.acceptedQuotes > 0 ? `${stats.acceptedQuotes} acceptés` : '—', trendDir: stats.acceptedQuotes > 0 ? 'up' : 'flat', sub: 'En cours', icon: TrendingUp, style: 'cream' as const, to: '/sales/quotes' },
+    { id: 'conversion', label: 'Conversion', value: String(stats.conversionRate), suffix: '%', trend: stats.conversionRate > 0 ? `${stats.conversionRate}%` : 'À optimiser', trendDir: stats.conversionRate > 50 ? 'up' : 'flat', sub: 'Lead → Client', icon: Sparkles, style: 'cream' as const, to: '/sales/reports' },
+    { id: 'relances', label: 'Relances', value: String(overdueCount), trend: overdueCount > 0 ? `${overdueCount} retard` : 'À jour', trendDir: overdueCount > 0 ? 'down' : 'up', sub: "Aujourd'hui", icon: Clock, style: 'cream' as const, to: '/sales/followups' },
   ] : [];
 
   const radius = 70;
@@ -207,10 +207,10 @@ export default function SalesDashboardPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 12 }}>
-              <button className="csd-back-btn" style={{ padding: '12px 20px', fontSize: 14, fontWeight: 500, gap: 8, fontFamily: 'inherit' }}>
+              <Link to="/sales/leads" className="csd-back-btn" style={{ padding: '12px 20px', fontSize: 14, fontWeight: 500, gap: 8, fontFamily: 'inherit', textDecoration: 'none' }}>
                 <Filter size={15} /> Filtres
-              </button>
-              <Link to="/sales/leads" style={{ background: C.greenDeep, color: C.cream, padding: '12px 22px', borderRadius: 12, fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 8px 24px -8px rgba(6,61,46,.6)', textDecoration: 'none' }}>
+              </Link>
+              <Link to="/sales/leads?new=1" style={{ background: C.greenDeep, color: C.cream, padding: '12px 22px', borderRadius: 12, fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 8px 24px -8px rgba(6,61,46,.6)', textDecoration: 'none' }}>
                 <Plus size={16} /> Nouveau lead
               </Link>
             </div>
@@ -227,7 +227,7 @@ export default function SalesDashboardPage() {
                 const Icon = kpi.icon;
                 const isOrange = kpi.style === 'orange';
                 return (
-                  <div key={kpi.id} className={`csd-kpi ${kpi.style}`}>
+                  <Link key={kpi.id} to={kpi.to} className={`csd-kpi ${kpi.style}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
                     <span className="corner-mark"></span>
                     <div className={`csd-icon-badge ${isOrange ? 'cream-on-orange' : 'green'}`}>
                       <Icon size={20} strokeWidth={1.75} />
@@ -249,7 +249,7 @@ export default function SalesDashboardPage() {
                         {kpi.trend}
                       </span>
                     </div>
-                  </div>
+                  </Link>
                 );
               })
           }

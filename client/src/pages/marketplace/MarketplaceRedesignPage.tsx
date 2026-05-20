@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, createContext, useContext, useMemo 
 import api from '@/services/api';
 import { toast } from '@/components/common/Toast';
 import { useCurrency } from '@/hooks/useCurrency';
+import BoutiqueActivationWizard from '@/components/commerce/BoutiqueActivationWizard';
 import {
   Search, Bell, ChevronDown, ChevronRight, ChevronLeft, ArrowLeft, ArrowRight, ArrowUp,
   LayoutDashboard, MessageSquare, MessageCircle, Bot, UsersRound, Briefcase, Calendar,
@@ -3602,6 +3603,37 @@ function MarketplacePageInner() {
   // Per-bundle trial state — 'none' (default), 'starting' (loading), 'active' (in trial), 'expired'
   const [trialStateByBundle, setTrialStateByBundle] = useState<Record<string, 'none' | 'starting' | 'active' | 'expired'>>({});
 
+  // Boutique WhatsApp activation wizard — opens when user activates the
+  // commerce agent or any pack containing it. Without a provisioned store the
+  // WhatsApp webhook can't route owner photos, so the wizard is a hard gate.
+  const [boutiqueWizardOpen, setBoutiqueWizardOpen] = useState(false);
+  const boutiqueResolverRef = useRef<((ok: boolean) => void) | null>(null);
+
+  /**
+   * Returns true when a Boutique store exists (or has just been provisioned),
+   * false if the user cancelled. Idempotent — calls /commerce/stores first,
+   * skips the wizard entirely if a store is already there.
+   */
+  const ensureBoutiqueStore = async (item: { id?: string; agentIds?: string[]; agents?: Array<{ id: string }> }): Promise<boolean> => {
+    const involves =
+      item.id === 'commerce' ||
+      item.id === 'b16' ||
+      (Array.isArray(item.agentIds) && item.agentIds.includes('commerce')) ||
+      (Array.isArray(item.agents) && item.agents.some(a => a.id === 'commerce'));
+    if (!involves) return true;
+
+    try {
+      const r: any = await api.get('/commerce/stores');
+      const stores = r?.data?.stores ?? [];
+      if (stores.length > 0) return true;
+    } catch { /* fall through to wizard */ }
+
+    return new Promise<boolean>((resolve) => {
+      boutiqueResolverRef.current = resolve;
+      setBoutiqueWizardOpen(true);
+    });
+  };
+
   // Fetch already-installed agents on mount → mark them in UI + derive trial state
   useEffect(() => {
     api.get('/marketplace/my-installed').then((r: any) => {
@@ -3621,6 +3653,14 @@ function MarketplacePageInner() {
   }, []);
 
   const handleStartTrial = async (bundle: any) => {
+    // Boutique gate: if this pack involves the commerce agent, provision the
+    // store first. Otherwise the WhatsApp webhook would silently drop owner
+    // photos because no ownerPhone is mapped.
+    const ok = await ensureBoutiqueStore(bundle);
+    if (!ok) {
+      toast.info('Activation annulée');
+      return;
+    }
     setTrialStateByBundle(s => ({ ...s, [bundle.id]: 'starting' }));
     try {
       const r: any = await api.post(`/marketplace/bundles/${bundle.id}/start-trial`, {});
@@ -3659,6 +3699,12 @@ function MarketplacePageInner() {
   // — no cart, no checkout flow needed since they're either part of a pack or free.
   const handleInstallAgent = async (agent: any) => {
     if (installedIds.has(agent.id)) { toast.info('Déjà installé'); return; }
+    // Boutique gate: provision store before activating commerce agent
+    const ok = await ensureBoutiqueStore(agent);
+    if (!ok) {
+      toast.info('Activation annulée');
+      return;
+    }
     try {
       await api.post(`/marketplace/agents/${agent.id}/install`, { agentId: agent.id });
       setInstalledIds(prev => new Set([...prev, agent.id]));
@@ -3688,6 +3734,20 @@ function MarketplacePageInner() {
   };
 
   const handleCheckoutSuccess = async () => {
+    // Boutique gate: if any cart item involves the commerce agent, provision
+    // the store before charging. Cart processing then proceeds normally.
+    const cartTouchesCommerce = cart.some(it =>
+      it.id === 'commerce' || it.id === 'b16' ||
+      (Array.isArray(it.agentIds) && it.agentIds.includes('commerce')) ||
+      (Array.isArray(it.agents) && it.agents.some((a: any) => a.id === 'commerce'))
+    );
+    if (cartTouchesCommerce) {
+      const ok = await ensureBoutiqueStore({ id: 'commerce' });
+      if (!ok) {
+        toast.info('Checkout annulé');
+        return;
+      }
+    }
     // Install each item via backend. Bundles → /bundles/:id/checkout · Agents → /agents/:id/install
     const installed: string[] = [];
     const failed: string[] = [];
@@ -3852,6 +3912,21 @@ function MarketplacePageInner() {
           onSuccess={handleCheckoutSuccess}
         />
       )}
+
+      {/* Boutique WhatsApp activation wizard */}
+      <BoutiqueActivationWizard
+        open={boutiqueWizardOpen}
+        onClose={() => {
+          setBoutiqueWizardOpen(false);
+          boutiqueResolverRef.current?.(false);
+          boutiqueResolverRef.current = null;
+        }}
+        onSuccess={() => {
+          setBoutiqueWizardOpen(false);
+          boutiqueResolverRef.current?.(true);
+          boutiqueResolverRef.current = null;
+        }}
+      />
     </Chrome>
     </MarketplaceProvider>
   );

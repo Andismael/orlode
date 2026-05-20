@@ -444,6 +444,25 @@ export const AGENT_DASHBOARDS: Record<string, AgentDashboardConfig> = {
     dataCollections: [],
   },
 
+  kora: {
+    id: 'kora', name: 'Kora', icon: '🪕', description: 'Compagnon personnel — se souvient, anticipe, écoute',
+    color: 'from-blue-900 to-amber-500', category: 'Core',
+    pages: [
+      { path: '/agents/kora', label: 'Discuter avec Kora', icon: 'MessageCircle', description: 'Chat web + mémoire longue' },
+    ],
+    stats: [
+      { key: 'facts', label: 'Souvenirs', icon: 'Brain', color: 'amber', defaultValue: '—' },
+      { key: 'reminders', label: 'Rappels actifs', icon: 'BellRing', color: 'blue', defaultValue: '—' },
+      { key: 'sessions', label: 'Conversations', icon: 'MessageCircle', color: 'cyan', defaultValue: '—' },
+    ],
+    quickActions: [
+      { label: 'Programme un rappel', prompt: 'Rappelle-moi demain 9h d\'appeler le fournisseur', icon: 'BellRing' },
+      { label: 'Oublie ce souvenir', prompt: 'Oublie ce que je t\'ai dit sur…', icon: 'Trash2' },
+      { label: 'Comment tu vas ?', prompt: 'Salut, comment tu vas aujourd\'hui ?', icon: 'MessageCircle' },
+    ],
+    dataCollections: [],
+  },
+
   datascientist: {
     id: 'datascientist', name: 'Data Scientist', icon: '🔬', description: 'Analyse cross-modules, prédictions',
     color: 'from-cyan-700 to-blue-500', category: 'Stratégie',

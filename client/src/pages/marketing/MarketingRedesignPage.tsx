@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import api from '@/services/api';
 import AgentDrawer from '@/components/ai/AgentDrawer';
 import { toast } from '@/components/common/Toast';
@@ -15,7 +16,8 @@ import {
   Hash, Megaphone, Trophy, Stars, Rocket,
   Layers, Layout, MapPin, Users, Lightbulb, Calendar,
   Instagram, Facebook, Linkedin, Twitter, Youtube,
-  Music, Crown, BookOpen, LayoutGrid, List as ListIcon
+  Music, Crown, BookOpen, LayoutGrid, List as ListIcon,
+  Loader2
 } from 'lucide-react';
 
 const C = {
@@ -347,7 +349,7 @@ function RoyalAvatar({ speaking, size = 220 }: any) {
 }
 
 // ============ MODALS ============
-function NewPostModal({ onClose }: any) {
+function NewPostModal({ onClose, openModal }: any) {
   const [generating, setGenerating] = useState(false);
   const [content, setContent] = useState('');
   const [platforms, setPlatforms] = useState<string[]>(['instagram']);
@@ -418,9 +420,9 @@ function NewPostModal({ onClose }: any) {
         <input type="datetime-local" className="form-input" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} />
       </div>
       <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={() => toast.info('Bientôt', 'L\'attachement direct depuis le module Données arrive bientôt.')} className="btn-secondary" style={{ padding: '8px 12px', fontSize: 12 }}><Image size={12} /> Image</button>
-        <button onClick={() => toast.info('Vidéos IA', 'Génère ta vidéo dans l\'onglet Vidéos IA puis copie le lien.')} className="btn-secondary" style={{ padding: '8px 12px', fontSize: 12 }}><Video size={12} /> Vidéo</button>
-        <button onClick={() => toast.info('Visuels IA', 'Génère ton visuel dans l\'onglet Visuels IA puis copie le lien.')} className="btn-secondary" style={{ padding: '8px 12px', fontSize: 12 }}><Sparkles size={12} /> Visuel IA</button>
+        <button onClick={() => { onClose(); openModal('image'); }} className="btn-secondary" style={{ padding: '8px 12px', fontSize: 12 }}><Image size={12} /> Image</button>
+        <button onClick={() => { onClose(); openModal('video'); }} className="btn-secondary" style={{ padding: '8px 12px', fontSize: 12 }}><Video size={12} /> Vidéo</button>
+        <button onClick={() => { onClose(); openModal('image'); }} className="btn-secondary" style={{ padding: '8px 12px', fontSize: 12 }}><Sparkles size={12} /> Visuel IA</button>
       </div>
     </ModalShell>
   );
@@ -489,7 +491,7 @@ function FlyerIAModal({ onClose }: any) {
     { id: 'wedding', name: 'Mariage', icon: Heart, color: C.violet },
     { id: 'launch', name: 'Lancement', icon: Rocket, color: C.orange },
     { id: 'promo', name: 'Promo', icon: Megaphone, color: C.red },
-    { id: 'event', name: 'Événement', icon: Calendar, color: C.cyan },
+    { id: 'season', name: 'Saison', icon: Calendar, color: C.cyan },
   ];
   const [occasion, setOccasion] = useState('promo');
   const [title, setTitle] = useState('');
@@ -544,39 +546,197 @@ function FlyerIAModal({ onClose }: any) {
 
 function VideoIAModal({ onClose }: any) {
   const [prompt, setPrompt] = useState('');
-  const [duration, setDuration] = useState('5 secondes');
-  const [format, setFormat] = useState('1080p Carré');
+  const [duration, setDuration] = useState(5);
+  const [platform, setPlatform] = useState<'instagram_reel' | 'tiktok' | 'youtube_short' | 'instagram_post' | 'youtube'>('instagram_reel');
+  const [quality, setQuality] = useState<'fast' | 'balanced' | 'premium'>('balanced');
   const [submitting, setSubmitting] = useState(false);
+  const [estimate, setEstimate] = useState<number | null>(null);
+
+  // Recompute estimate on quality/duration/platform change
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r: any = await api.post('/video/estimate', { quality, duration, platforms: [platform] });
+        if (!cancelled) setEstimate(r?.data?.data?.estimatedCost ?? null);
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [quality, duration, platform]);
+
   const submit = async () => {
     if (submitting) return;
     if (!prompt.trim()) { toast.error('Prompt vidéo requis'); return; }
     setSubmitting(true);
     try {
-      await api.post('/video/generate', { prompt, duration, format });
-      toast.success('Vidéo en cours de génération', 'Notification dès que prête (1-3 min).');
+      await api.post('/video/generate', {
+        script: prompt.trim(),
+        quality,
+        platforms: [platform],
+        duration,
+        language: 'fr',
+      });
+      toast.success('Vidéo en cours de génération', `${quality === 'premium' ? 'Veo 3' : quality === 'balanced' ? 'Kling' : 'Wan'} · 1-3 min · Notification quand prête.`);
       onClose();
     } catch (e: any) {
       toast.error('Erreur', e?.response?.data?.message || 'Génération vidéo indisponible.');
     } finally { setSubmitting(false); }
   };
+
+  const QUALITY_TIERS = [
+    { id: 'fast' as const, label: 'Rapide', sub: 'Wan · $0.20 / 10s', icon: '⚡' },
+    { id: 'balanced' as const, label: 'Équilibré', sub: 'Kling · $0.50 / 10s', icon: '⚖️' },
+    { id: 'premium' as const, label: 'Premium', sub: 'Veo 3 · $3 / 10s', icon: '💎' },
+  ];
+
   return (
-    <ModalShell title="Génération vidéo IA" subtitle="Veo / Sora-style · 5-15 secondes" icon={Video} color={C.red} onClose={onClose}
+    <ModalShell title="Génération vidéo IA" subtitle="Wan · Kling · Veo 3" icon={Video} color={C.red} onClose={onClose}
       footer={<><button className="btn-secondary" onClick={onClose}>Annuler</button>
         <button className="btn-primary" style={{ background: C.red }} disabled={submitting} onClick={submit}><Wand2 size={14} /> {submitting ? 'Lancement…' : 'Générer la vidéo'}</button></>}>
-      <div><label className="form-label">Prompt vidéo</label>
-        <textarea className="form-input" rows={4} placeholder="Une vue cinématographique au coucher du soleil, lumière dorée, ambiance majestueuse…" value={prompt} onChange={e => setPrompt(e.target.value)}></textarea>
+      <div><label className="form-label">Prompt vidéo *</label>
+        <textarea className="form-input" rows={3} placeholder="Une vue cinématographique d'un plat de poisson braisé qui fume, lumière dorée du soir, ambiance restaurant chic Abidjan…" value={prompt} onChange={e => setPrompt(e.target.value)} autoFocus></textarea>
       </div>
+
+      <div style={{ marginTop: 14 }}>
+        <label className="form-label">Modèle IA</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+          {QUALITY_TIERS.map(t => {
+            const sel = quality === t.id;
+            return (
+              <button key={t.id} type="button" onClick={() => setQuality(t.id)}
+                style={{
+                  padding: '10px 8px', borderRadius: 10,
+                  border: sel ? `1.5px solid ${C.red}` : '1.5px solid rgba(10,42,32,0.1)',
+                  background: sel ? `${C.red}10` : '#fff',
+                  color: sel ? C.red : C.ink,
+                  cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                }}>
+                <div style={{ fontSize: 14 }}>{t.icon}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, marginTop: 2 }}>{t.label}</div>
+                <div style={{ fontSize: 10, opacity: 0.7, marginTop: 1 }}>{t.sub}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="form-row" style={{ marginTop: 14 }}>
         <div><label className="form-label">Durée</label>
-          <select className="form-input" value={duration} onChange={e => setDuration(e.target.value)}><option>5 secondes</option><option>10 secondes</option><option>15 secondes</option></select>
+          <select className="form-input" value={duration} onChange={e => setDuration(parseInt(e.target.value))}>
+            <option value={5}>5 secondes</option>
+            <option value={10}>10 secondes</option>
+            <option value={15}>15 secondes</option>
+          </select>
         </div>
-        <div><label className="form-label">Format</label>
-          <select className="form-input" value={format} onChange={e => setFormat(e.target.value)}><option>1080p Carré</option><option>1080x1920 Vertical</option><option>1920x1080 Horizontal</option></select>
+        <div><label className="form-label">Plateforme cible</label>
+          <select className="form-input" value={platform} onChange={e => setPlatform(e.target.value as typeof platform)}>
+            <option value="instagram_reel">Instagram Reel (9:16)</option>
+            <option value="tiktok">TikTok (9:16)</option>
+            <option value="youtube_short">YouTube Short (9:16)</option>
+            <option value="instagram_post">Instagram Post (1:1)</option>
+            <option value="youtube">YouTube (16:9)</option>
+          </select>
         </div>
       </div>
-      <div style={{ marginTop: 14, padding: 12, background: C.redSoft, borderRadius: 10, fontSize: 12, color: C.ink }}>
-        💎 Génération vidéo · 1-3 minutes de processing · Coût : 50 crédits
+
+      <div style={{ marginTop: 14, padding: 12, background: C.redSoft, borderRadius: 10, fontSize: 12, color: C.ink, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>💎 1-3 min de processing · Notification quand prête</span>
+        {estimate !== null && (
+          <span style={{ fontWeight: 800, color: C.red, fontFamily: 'JetBrains Mono, monospace' }}>~${estimate.toFixed(2)}</span>
+        )}
       </div>
+    </ModalShell>
+  );
+}
+
+function ImageGeneratorModal({ onClose, onUse }: any) {
+  const [prompt, setPrompt] = useState('');
+  const [style, setStyle] = useState('photo');
+  const [format, setFormat] = useState('1:1');
+  const [submitting, setSubmitting] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  const generate = async () => {
+    if (submitting) return;
+    if (!prompt.trim()) { toast.error('Prompt requis'); return; }
+    setSubmitting(true);
+    try {
+      const res = await api.post('/marketing/images/generate', { prompt, style, format });
+      const url = (res?.data as any)?.url;
+      if (!url) {
+        toast.error('Erreur', 'Pas d\'image retournée.');
+      } else {
+        setImageUrl(url);
+        toast.success('Image générée');
+      }
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message || 'Génération indisponible.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const useImage = () => {
+    if (imageUrl && onUse) onUse(imageUrl);
+    onClose();
+  };
+
+  return (
+    <ModalShell title="Génération d'image IA" subtitle="Prompt · Style · Format" icon={Sparkles} color={C.cyan} onClose={onClose}
+      footer={imageUrl ? (
+        <>
+          <button className="btn-secondary" onClick={() => setImageUrl(null)} disabled={submitting}><RefreshCw size={14} /> Régénérer</button>
+          <button className="btn-primary" style={{ background: C.cyan }} onClick={useImage}>✅ Utiliser cette image</button>
+        </>
+      ) : (
+        <>
+          <button className="btn-secondary" onClick={onClose}>Annuler</button>
+          <button className="btn-primary" style={{ background: C.cyan }} disabled={submitting} onClick={generate}>
+            {submitting ? <Loader2 size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={14} />}
+            {submitting ? 'Génération…' : 'Générer'}
+          </button>
+        </>
+      )}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <div>
+        <label className="form-label">Prompt</label>
+        <textarea className="form-input" rows={3} value={prompt} onChange={(e: any) => setPrompt(e.target.value)} placeholder="Décris l'image : ex. 'photo studio d'une bouteille de jus de bissap avec glaçons sur fond crème'" />
+      </div>
+      <div className="form-row" style={{ marginTop: 14 }}>
+        <div>
+          <label className="form-label">Style</label>
+          <select className="form-input" value={style} onChange={e => setStyle(e.target.value)}>
+            <option value="photo">Photo</option>
+            <option value="illustration">Illustration</option>
+            <option value="3d">3D</option>
+            <option value="pop-art">Pop-art</option>
+          </select>
+        </div>
+        <div>
+          <label className="form-label">Format</label>
+          <select className="form-input" value={format} onChange={e => setFormat(e.target.value)}>
+            <option value="1:1">1:1 carré</option>
+            <option value="9:16">9:16 vertical</option>
+            <option value="16:9">16:9 horizontal</option>
+          </select>
+        </div>
+      </div>
+      {submitting && !imageUrl && (
+        <div style={{ marginTop: 20, padding: 32, background: C.cyanSoft, borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <Loader2 size={28} color={C.cyan} style={{ animation: 'spin 1s linear infinite' }} />
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>Génération en cours…</div>
+        </div>
+      )}
+      {imageUrl && (
+        <div style={{ marginTop: 18 }}>
+          <img src={imageUrl} alt="Image générée" style={{ width: '100%', borderRadius: 14, display: 'block', border: '1px solid rgba(10,42,32,0.08)' }} />
+          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+            <a href={imageUrl} download target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{ textDecoration: 'none', fontSize: 12 }}>
+              <Download size={12} /> 📥 Télécharger
+            </a>
+          </div>
+        </div>
+      )}
     </ModalShell>
   );
 }
@@ -606,7 +766,7 @@ function AccueilPage({ onTab, openModal, data }: any) {
     { name: 'Campagnes', desc: `${(data?.campaigns || []).length} actives`, icon: Rocket, color: C.orange, page: 'Campagnes' },
     { name: 'Ads Manager', desc: 'Meta · Google Ads', icon: Target, color: C.emerald, page: 'Ads Manager' },
     { name: 'SEO', desc: 'Mots-clés · Articles', icon: Search, color: C.teal, page: 'SEO' },
-    { name: 'Influenceurs', desc: 'CRM influenceurs · Engagement · ROI', icon: Stars, color: C.purple, page: 'Influenceurs' },
+    { name: 'Influenceurs', desc: 'CRM influenceurs · ROI', icon: Stars, color: C.purple, page: 'Influenceurs' },
     { name: 'Brand Kit', desc: 'Logos · Couleurs · Voice', icon: Palette, color: C.violetMid, page: 'Brand Kit' },
     { name: 'Analytics', desc: 'ROI · Insights', icon: BarChart3, color: C.greenDeep, page: 'Analytics' },
   ];
@@ -617,7 +777,7 @@ function AccueilPage({ onTab, openModal, data }: any) {
         subtitle="Posts multi-plateforme · Flyers IA · Calendrier éditorial · Campagnes · Influenceurs · Le Roi vous accompagne."
         badge="ROYAUME PROSPÈRE"
         actions={<>
-          <button className="btn-secondary" style={{ background: 'rgba(255,250,240,0.15)', color: C.cream, border: '1px solid rgba(255,250,240,0.25)' }}><Wand2 size={14} /> Créer avec IA</button>
+          <button className="btn-secondary" onClick={() => openModal('post')} style={{ background: 'rgba(255,250,240,0.15)', color: C.cream, border: '1px solid rgba(255,250,240,0.25)' }}><Wand2 size={14} /> Créer avec IA</button>
           <button className="btn-gold" onClick={() => openModal('campaign')}><Crown size={16} /> Lancer une campagne</button>
         </>} />
 
@@ -682,6 +842,11 @@ function AccueilPage({ onTab, openModal, data }: any) {
                 {mod.royal && (
                   <div style={{ position: 'absolute', top: 14, right: 14, width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg, ${C.goldBright}, ${C.gold})`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 4px 12px -4px ${C.gold}` }}>
                     <Crown size={12} color={C.violetDeep} />
+                  </div>
+                )}
+                {mod.badge && (
+                  <div style={{ position: 'absolute', top: 14, right: 14, fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 6, background: `${mod.color}22`, color: mod.color, border: `1px solid ${mod.color}55` }}>
+                    {mod.badge}
                   </div>
                 )}
                 <div style={{ width: 48, height: 48, borderRadius: 14, background: `linear-gradient(135deg, ${mod.color} 0%, ${mod.color}cc 100%)`, color: C.cream, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, boxShadow: `0 12px 24px -8px ${mod.color}` }}>
@@ -855,30 +1020,30 @@ function VideosIAPage({ openModal }: any) {
 }
 
 // ============ VISUELS IA ============
-function VisuelsIAPage() {
+function VisuelsIAPage({ openModal }: any) {
   return (
     <>
       <PageHeader title="Visuels" italic="IA"
         subtitle="Images générées · Style cohérent avec votre brand"
-        actions={<button className="btn-primary" style={{ background: C.cyan }}><Sparkles size={16} /> Générer une image</button>} />
+        actions={<button className="btn-primary" style={{ background: C.cyan }} onClick={() => openModal('image')}><Sparkles size={16} /> Générer une image</button>} />
       <div style={{ padding: '24px 32px 32px' }}>
-        <EmptyState icon={Sparkles} title="Bibliothèque visuelle vide" desc="Génère tes premiers visuels avec l'IA — Midjourney, DALL-E, Stable Diffusion intégrés." />
+        <EmptyState icon={Sparkles} title="Bibliothèque visuelle vide" desc="Génère tes premiers visuels avec l'IA — Midjourney, DALL-E, Stable Diffusion intégrés." action={<button className="btn-primary" style={{ background: C.cyan }} onClick={() => openModal('image')}><Sparkles size={14} /> Générer une image</button>} />
       </div>
     </>
   );
 }
 
 // ============ CALENDRIER ============
-function CalendrierPage({ data }: any) {
+function CalendrierPage({ data, openModal }: any) {
   const events = data?.calendar || [];
   return (
     <>
       <PageHeader title="Calendrier" italic="éditorial"
         subtitle="Drag & drop · Vue mois/semaine/liste"
-        actions={<button className="btn-primary"><Plus size={16} /> Nouveau contenu</button>} />
+        actions={<button className="btn-primary" onClick={() => openModal('post')}><Plus size={16} /> Nouveau contenu</button>} />
       <div style={{ padding: '24px 32px 32px' }}>
         {events.length === 0 ? (
-          <EmptyState icon={CalendarRange} title="Calendrier éditorial vide" desc="Planifie tes contenus à venir pour avoir une vue claire sur tes prochaines publications." />
+          <EmptyState icon={CalendarRange} title="Calendrier éditorial vide" desc="Planifie tes contenus à venir pour avoir une vue claire sur tes prochaines publications." action={<button className="btn-primary" onClick={() => openModal('post')}><Plus size={14} /> Planifier du contenu</button>} />
         ) : (
           <div className="stagger" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {events.map((e: any, i: number) => (
@@ -947,19 +1112,357 @@ function CampagnesPage({ openModal, campaigns = [] }: any) {
 
 // ============ SIMPLE PAGES ============
 function AdsManagerPage() {
-  return (<><PageHeader title="Ads Manager" italic="Meta · Google" subtitle="Gestion publicitaire centralisée" /><div style={{ padding: '24px 32px 32px' }}><EmptyState icon={Target} title="Connecte ton Ads Manager" desc="Lie ton compte Meta Business ou Google Ads pour piloter tes campagnes payantes ici." /></div></>);
+  return (<><PageHeader title="Ads Manager" italic="Meta · Google" subtitle="Gestion publicitaire centralisée" /><div style={{ padding: '24px 32px 32px' }}><EmptyState icon={Target} title="Connecte ton Ads Manager" desc="Lie ton compte Meta Business ou Google Ads pour piloter tes campagnes payantes ici." action={<Link to="/admin/connectors" className="btn-primary" style={{ textDecoration: 'none' }}><Plus size={14} /> Connecter Meta Ads</Link>} /></div></>);
 }
 function SEOPage() {
-  return (<><PageHeader title="SEO" italic="& contenus" subtitle="Mots-clés · Articles · Score Google" /><div style={{ padding: '24px 32px 32px' }}><EmptyState icon={Search} title="Audit SEO à lancer" desc="Lance un audit complet pour découvrir les mots-clés à cibler et les articles à créer." /></div></>);
+  const [topic, setTopic] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const run = async () => {
+    if (!topic.trim()) { toast.info('Sujet requis', 'Indique le produit ou thème à analyser.'); return; }
+    setLoading(true); setResult(null);
+    try {
+      const r: any = await api.post('/marketing/seo/analyze', { topic });
+      setResult(r?.data ?? r);
+      toast.success('Audit SEO terminé', `${(r?.data ?? r)?.keywords?.length || 0} mots-clés identifiés.`);
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message || 'Audit indisponible.');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <>
+      <PageHeader title="SEO" italic="& contenus" subtitle="Mots-clés · Articles · Score Google" />
+      <div style={{ padding: '24px 32px 32px' }}>
+        <div style={{ background: C.cream, borderRadius: 18, padding: 24, border: '1px solid rgba(10,42,32,0.06)', marginBottom: 16 }}>
+          <label className="form-label">Sujet, produit ou thème à analyser</label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <input className="form-input" placeholder="Ex. restaurant africain Abidjan, location de salle, formation Excel…" value={topic} onChange={e => setTopic(e.target.value)} style={{ flex: 1 }} />
+            <button className="btn-primary" onClick={run} disabled={loading}>
+              <Wand2 size={14} /> {loading ? 'Analyse…' : "Lancer l'audit"}
+            </button>
+          </div>
+        </div>
+
+        {!result ? (
+          <EmptyState icon={Search} title="Audit SEO à lancer" desc="Saisis un sujet ci-dessus et clique sur Lancer l'audit pour obtenir mots-clés cibles, suggestions de titres et meta-description." />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+            <div style={{ background: C.cream, borderRadius: 18, padding: 20, border: '1px solid rgba(10,42,32,0.06)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.teal, letterSpacing: '0.1em', marginBottom: 10 }}>MOTS-CLÉS</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {(result.keywords || []).map((k: string, i: number) => (
+                  <span key={i} className="pill" style={{ background: `${C.teal}18`, color: C.teal, border: `1px solid ${C.teal}44` }}>{k}</span>
+                ))}
+              </div>
+            </div>
+            <div style={{ background: C.cream, borderRadius: 18, padding: 20, border: '1px solid rgba(10,42,32,0.06)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.violet, letterSpacing: '0.1em', marginBottom: 10 }}>TITRES SUGGÉRÉS</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: C.ink, lineHeight: 1.7 }}>
+                {(result.titleSuggestions || []).map((t: string, i: number) => <li key={i}>{t}</li>)}
+              </ul>
+            </div>
+            {result.metaDescription && (
+              <div style={{ background: C.cream, borderRadius: 18, padding: 20, border: '1px solid rgba(10,42,32,0.06)', gridColumn: '1 / -1' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, letterSpacing: '0.1em', marginBottom: 10 }}>META DESCRIPTION</div>
+                <div style={{ fontSize: 13, color: C.ink, lineHeight: 1.6 }}>{result.metaDescription}</div>
+              </div>
+            )}
+            {(result.tips || []).length > 0 && (
+              <div style={{ background: C.cream, borderRadius: 18, padding: 20, border: '1px solid rgba(10,42,32,0.06)', gridColumn: '1 / -1' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.emerald, letterSpacing: '0.1em', marginBottom: 10 }}>RECOMMANDATIONS</div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: C.ink, lineHeight: 1.7 }}>
+                  {result.tips.map((t: string, i: number) => <li key={i}>{t}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
+const INFLUENCER_STATUSES = [
+  { id: 'prospect',  label: 'Prospect',     color: C.inkSoft },
+  { id: 'contacted', label: 'DM envoyé',    color: C.blue },
+  { id: 'replied',   label: 'A répondu',    color: C.yellow },
+  { id: 'active',    label: 'Actif',        color: C.emerald },
+  { id: 'lost',      label: 'Perdu',        color: C.red },
+] as const;
+
+const PLATFORM_META: Record<string, { label: string; color: string; icon: any }> = {
+  instagram: { label: 'Instagram', color: C.instagram, icon: Instagram },
+  facebook:  { label: 'Facebook',  color: C.facebook,  icon: Facebook },
+  tiktok:    { label: 'TikTok',    color: C.tiktok,    icon: Music },
+  youtube:   { label: 'YouTube',   color: C.youtube,   icon: Youtube },
+  linkedin:  { label: 'LinkedIn',  color: C.linkedin,  icon: Linkedin },
+  twitter:   { label: 'X / Twitter', color: C.twitter, icon: Twitter },
+};
+
+function statusMeta(id: string) {
+  return INFLUENCER_STATUSES.find(s => s.id === id) || INFLUENCER_STATUSES[0];
+}
+function platformMeta(p: string) {
+  return PLATFORM_META[(p || 'instagram').toLowerCase()] || PLATFORM_META.instagram;
+}
+
+function NewInfluencerModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState('');
+  const [handle, setHandle] = useState('');
+  const [platform, setPlatform] = useState('instagram');
+  const [followers, setFollowers] = useState('');
+  const [engagement, setEngagement] = useState('');
+  const [niche, setNiche] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const save = async () => {
+    if (submitting) return;
+    if (!name.trim()) { toast.error('Nom requis'); return; }
+    setSubmitting(true);
+    try {
+      await api.post('/marketing/influencers', {
+        name, handle, platform,
+        followers: Number(followers) || 0,
+        engagement: Number(engagement) || 0,
+        niche, email, phone, notes,
+      });
+      toast.success('Influenceur ajouté');
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message || 'Création impossible.');
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <ModalShell title="Nouvel influenceur" subtitle="Crée une fiche manuelle" icon={Stars} color={C.purple} onClose={onClose}
+      footer={<>
+        <button className="btn-secondary" onClick={onClose}>Annuler</button>
+        <button className="btn-primary" style={{ background: C.purple }} onClick={save} disabled={submitting}>
+          {submitting ? <Loader2 size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={14} />}
+          {submitting ? 'Ajout…' : 'Ajouter'}
+        </button>
+      </>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div><label className="form-label">Nom *</label><input className="form-input" placeholder="Ex. Awa Kone" value={name} onChange={e => setName(e.target.value)} /></div>
+        <div><label className="form-label">Handle</label><input className="form-input" placeholder="@awakone" value={handle} onChange={e => setHandle(e.target.value)} /></div>
+        <div>
+          <label className="form-label">Plateforme</label>
+          <select className="form-input" value={platform} onChange={e => setPlatform(e.target.value)}>
+            {Object.entries(PLATFORM_META).map(([id, m]) => <option key={id} value={id}>{m.label}</option>)}
+          </select>
+        </div>
+        <div><label className="form-label">Niche</label><input className="form-input" placeholder="Mode, food, lifestyle…" value={niche} onChange={e => setNiche(e.target.value)} /></div>
+        <div><label className="form-label">Followers</label><input className="form-input" type="number" placeholder="10000" value={followers} onChange={e => setFollowers(e.target.value)} /></div>
+        <div><label className="form-label">Taux d'engagement (%)</label><input className="form-input" type="number" step="0.1" placeholder="3.5" value={engagement} onChange={e => setEngagement(e.target.value)} /></div>
+        <div><label className="form-label">Email</label><input className="form-input" type="email" placeholder="contact@…" value={email} onChange={e => setEmail(e.target.value)} /></div>
+        <div><label className="form-label">Téléphone / WhatsApp</label><input className="form-input" placeholder="+225 …" value={phone} onChange={e => setPhone(e.target.value)} /></div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label className="form-label">Notes</label>
+          <textarea className="form-input" rows={3} placeholder="Notes privées, points de contact, codes promo négociés…" value={notes} onChange={e => setNotes(e.target.value)} />
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ImportInfluencersModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [csv, setCsv] = useState('name,handle,platform,followers,engagement,niche,email,phone\n');
+  const [submitting, setSubmitting] = useState(false);
+  const [preview, setPreview] = useState<any[]>([]);
+
+  const parseCsv = (text: string): any[] => {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
+    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+    return lines.slice(1).map(line => {
+      const cells = line.split(',').map(c => c.trim());
+      const row: any = {};
+      header.forEach((h, i) => { row[h] = cells[i] ?? ''; });
+      return row;
+    }).filter(r => r.name);
+  };
+
+  useEffect(() => { setPreview(parseCsv(csv).slice(0, 5)); }, [csv]);
+
+  const submit = async () => {
+    if (submitting) return;
+    const rows = parseCsv(csv);
+    if (rows.length === 0) { toast.error('CSV vide', 'Ajoute au moins une ligne avec un nom.'); return; }
+    setSubmitting(true);
+    try {
+      const r: any = await api.post('/marketing/influencers/import', { rows });
+      toast.success('Import terminé', `${r?.data?.imported ?? rows.length} influenceurs ajoutés.`);
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message || 'Import indisponible.');
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <ModalShell title="Importer depuis CSV" subtitle="Une ligne d'en-tête + une ligne par influenceur" icon={Upload} color={C.purple} onClose={onClose}
+      footer={<>
+        <button className="btn-secondary" onClick={onClose}>Annuler</button>
+        <button className="btn-primary" style={{ background: C.purple }} onClick={submit} disabled={submitting || preview.length === 0}>
+          {submitting ? <Loader2 size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={14} />}
+          {submitting ? 'Import…' : `Importer ${preview.length > 0 ? `(${parseCsv(csv).length})` : ''}`}
+        </button>
+      </>}>
+      <div style={{ marginBottom: 10, fontSize: 12, color: C.inkSoft }}>
+        Colonnes attendues : <code style={{ background: C.creamDeep, padding: '2px 6px', borderRadius: 4 }}>name,handle,platform,followers,engagement,niche,email,phone</code>
+      </div>
+      <textarea className="form-input mono-font" rows={10} value={csv} onChange={e => setCsv(e.target.value)} style={{ fontSize: 12 }} />
+      {preview.length > 0 && (
+        <div style={{ marginTop: 14, fontSize: 12, color: C.inkSoft }}>
+          Aperçu : <strong>{parseCsv(csv).length}</strong> ligne(s) — première : <em>{preview[0]?.name}</em> ({preview[0]?.platform || 'instagram'}, {preview[0]?.followers || 0} followers)
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
 function InfluenceursPage() {
-  return (<><PageHeader title="Influenceurs" italic="& Partenariats" subtitle="CRM influenceurs · Engagement · ROI" /><div style={{ padding: '24px 32px 32px' }}><EmptyState icon={Stars} title="CRM Influenceurs vide" desc="Importez votre base d'influenceurs ou découvrez les top profils dans votre secteur." /></div></>);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>('all');
+  const [showNew, setShowNew] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r: any = await api.get('/marketing/influencers');
+      setItems(Array.isArray(r?.data) ? r.data : []);
+    } catch {
+      setItems([]);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const counts = INFLUENCER_STATUSES.reduce((acc: any, s) => {
+    acc[s.id] = items.filter(i => i.status === s.id).length;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const filtered = filter === 'all' ? items : items.filter(i => i.status === filter);
+
+  const updateStatus = async (id: string, status: string) => {
+    try {
+      await api.patch(`/marketing/influencers/${id}`, { status });
+      setItems(prev => prev.map(i => i.id === id ? { ...i, status } : i));
+      toast.success('Mis à jour');
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message || 'Mise à jour impossible.');
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (!window.confirm('Supprimer cet influenceur ?')) return;
+    try {
+      await api.delete(`/marketing/influencers/${id}`);
+      setItems(prev => prev.filter(i => i.id !== id));
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message || 'Suppression impossible.');
+    }
+  };
+
+  return (
+    <>
+      <PageHeader title="Influenceurs" italic="& Partenariats"
+        subtitle={`CRM influenceurs · ${items.length} fiche${items.length > 1 ? 's' : ''} · ${counts.active || 0} actif${(counts.active || 0) > 1 ? 's' : ''}`}
+        actions={<>
+          <button className="btn-secondary" onClick={() => setShowImport(true)} style={{ background: 'rgba(255,250,240,0.15)', color: C.cream, border: '1px solid rgba(255,250,240,0.25)' }}><Upload size={14} /> Importer CSV</button>
+          <button className="btn-gold" onClick={() => setShowNew(true)}><Plus size={16} /> Nouvel influenceur</button>
+        </>}
+      />
+      <div style={{ padding: '24px 32px 32px' }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+          <button onClick={() => setFilter('all')} className="pill" style={{ background: filter === 'all' ? C.purple : C.creamDeep, color: filter === 'all' ? C.cream : C.ink, cursor: 'pointer', border: 'none' }}>
+            Tous · {items.length}
+          </button>
+          {INFLUENCER_STATUSES.map(s => (
+            <button key={s.id} onClick={() => setFilter(s.id)} className="pill" style={{ background: filter === s.id ? s.color : `${s.color}22`, color: filter === s.id ? C.cream : s.color, cursor: 'pointer', border: 'none' }}>
+              {s.label} · {counts[s.id] || 0}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ padding: 60, textAlign: 'center', color: C.inkSoft }}><Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} /></div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Stars}
+            title={items.length === 0 ? 'Aucun influenceur pour l\'instant' : 'Aucun dans ce filtre'}
+            desc={items.length === 0 ? 'Ajoute manuellement une fiche ou importe ta base depuis un fichier CSV.' : 'Change le filtre pour voir d\'autres statuts.'}
+            action={items.length === 0 ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn-primary" onClick={() => setShowNew(true)}><Plus size={14} /> Ajouter</button>
+                <button className="btn-secondary" onClick={() => setShowImport(true)}><Upload size={14} /> Importer CSV</button>
+              </div>
+            ) : null}
+          />
+        ) : (
+          <div style={{ background: C.cream, borderRadius: 18, border: '1px solid rgba(10,42,32,0.06)', overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1.3fr 0.8fr', padding: '14px 18px', borderBottom: '1px solid rgba(10,42,32,0.06)', background: C.creamDeep, fontSize: 11, fontWeight: 700, color: C.inkSoft, letterSpacing: '0.08em' }}>
+              <div>INFLUENCEUR</div>
+              <div>PLATEFORME</div>
+              <div>FOLLOWERS</div>
+              <div>ENGAG.</div>
+              <div>STATUT</div>
+              <div style={{ textAlign: 'right' }}>ACTIONS</div>
+            </div>
+            {filtered.map((inf: any) => {
+              const sm = statusMeta(inf.status);
+              const pm = platformMeta(inf.platform);
+              const Pi = pm.icon;
+              return (
+                <div key={inf.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1.3fr 0.8fr', padding: '14px 18px', borderBottom: '1px solid rgba(10,42,32,0.04)', alignItems: 'center', fontSize: 13 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: C.ink }}>{inf.name}</div>
+                    <div style={{ fontSize: 11, color: C.inkSoft }}>{inf.handle ? `@${inf.handle.replace(/^@/, '')}` : (inf.niche || '—')}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: pm.color }}>
+                    <Pi size={14} /> <span style={{ fontSize: 12 }}>{pm.label}</span>
+                  </div>
+                  <div className="mono-font" style={{ color: C.ink, fontWeight: 600 }}>{Number(inf.followers || 0).toLocaleString()}</div>
+                  <div className="mono-font" style={{ color: C.ink }}>{inf.engagement ? `${inf.engagement}%` : '—'}</div>
+                  <div>
+                    <select value={inf.status || 'prospect'} onChange={(e) => updateStatus(inf.id, e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: `1px solid ${sm.color}55`, background: `${sm.color}18`, color: sm.color, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      {INFLUENCER_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                    {inf.phone && (
+                      <a href={`https://wa.me/${inf.phone.replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" title="WhatsApp" style={{ color: C.whatsapp, padding: 6, borderRadius: 8, background: `${C.whatsapp}18`, display: 'inline-flex' }}>
+                        <Send size={14} />
+                      </a>
+                    )}
+                    <button onClick={() => remove(inf.id)} title="Supprimer" style={{ color: C.red, padding: 6, borderRadius: 8, background: `${C.red}18`, border: 'none', cursor: 'pointer', display: 'inline-flex' }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {showNew && <NewInfluencerModal onClose={() => setShowNew(false)} onSaved={load} />}
+      {showImport && <ImportInfluencersModal onClose={() => setShowImport(false)} onSaved={load} />}
+    </>
+  );
 }
 function BrandKitPage({ data }: any) {
-  return (<><PageHeader title="Brand Kit" italic="& identité" subtitle="Logos · Couleurs · Fonts · Voice" /><div style={{ padding: '24px 32px 32px' }}>{!data?.brand ? (<EmptyState icon={Palette} title="Brand Kit non configuré" desc="Configure ton identité visuelle pour que l'IA respecte ta charte graphique." />) : (<div style={{ background: C.cream, borderRadius: 18, padding: 24, border: '1px solid rgba(10,42,32,0.06)' }}><pre style={{ fontSize: 12, color: C.ink, overflow: 'auto', background: C.creamDeep, padding: 16, borderRadius: 10 }}>{JSON.stringify(data.brand, null, 2)}</pre></div>)}</div></>);
+  return (<><PageHeader title="Brand Kit" italic="& identité" subtitle="Logos · Couleurs · Fonts · Voice" /><div style={{ padding: '24px 32px 32px' }}>{!data?.brand ? (<EmptyState icon={Palette} title="Brand Kit non configuré" desc="Configure ton identité visuelle pour que l'IA respecte ta charte graphique." action={<Link to="/settings/profile" className="btn-primary" style={{ textDecoration: 'none' }}><Plus size={14} /> Configurer le Brand Kit</Link>} />) : (<div style={{ background: C.cream, borderRadius: 18, padding: 24, border: '1px solid rgba(10,42,32,0.06)' }}><pre style={{ fontSize: 12, color: C.ink, overflow: 'auto', background: C.creamDeep, padding: 16, borderRadius: 10 }}>{JSON.stringify(data.brand, null, 2)}</pre></div>)}</div></>);
 }
 function AnalyticsPage({ data }: any) {
-  return (<><PageHeader title="Analytics" italic="& ROI" subtitle="Performance · Insights · Attribution" /><div style={{ padding: '24px 32px 32px' }}><EmptyState icon={BarChart3} title="Analytics en attente" desc="Les statistiques apparaîtront ici dès tes premières publications." /></div></>);
+  return (<><PageHeader title="Analytics" italic="& ROI" subtitle="Performance · Insights · Attribution" /><div style={{ padding: '24px 32px 32px' }}><EmptyState icon={BarChart3} title="Analytics en attente" desc="Les statistiques apparaîtront ici dès tes premières publications." action={<Link to="/insights" className="btn-primary" style={{ textDecoration: 'none' }}><BarChart3 size={14} /> Voir les insights</Link>} /></div></>);
 }
 
 // ============ MAIN ============
@@ -975,22 +1478,23 @@ export default function MarketingRedesignPage() {
       <TabSwitcher active={activeTab} setActive={setActiveTab} />
       {activeTab === 'Accueil' && <AccueilPage onTab={setActiveTab} openModal={openModal} data={data} />}
       {activeTab === 'Hub Marketing' && <HubPage data={data} />}
-      {activeTab === 'Calendrier' && <CalendrierPage data={data} />}
+      {activeTab === 'Calendrier' && <CalendrierPage data={data} openModal={openModal} />}
       {activeTab === 'Analytics' && <AnalyticsPage data={data} />}
       {activeTab === 'Posts sociaux' && <PostsPage openModal={openModal} posts={data.posts} />}
       {activeTab === 'Flyers IA' && <FlyersIAPage openModal={openModal} />}
       {activeTab === 'Vidéos IA' && <VideosIAPage openModal={openModal} />}
-      {activeTab === 'Visuels IA' && <VisuelsIAPage />}
+      {activeTab === 'Visuels IA' && <VisuelsIAPage openModal={openModal} />}
       {activeTab === 'Brand Kit' && <BrandKitPage data={data} />}
       {activeTab === 'Campagnes' && <CampagnesPage openModal={openModal} campaigns={data.campaigns} />}
       {activeTab === 'Ads Manager' && <AdsManagerPage />}
       {activeTab === 'SEO' && <SEOPage />}
       {activeTab === 'Influenceurs' && <InfluenceursPage />}
 
-      {activeModal === 'post' && <NewPostModal onClose={closeModal} />}
+      {activeModal === 'post' && <NewPostModal onClose={closeModal} openModal={openModal} />}
       {activeModal === 'campaign' && <NewCampaignModal onClose={closeModal} />}
       {activeModal === 'flyer' && <FlyerIAModal onClose={closeModal} />}
       {activeModal === 'video' && <VideoIAModal onClose={closeModal} />}
+      {activeModal === 'image' && <ImageGeneratorModal onClose={closeModal} />}
 
       <LiveSyncBadge lastSync={data?.lastSync} intervalMs={REFRESH_INTERVAL_MS} />
 

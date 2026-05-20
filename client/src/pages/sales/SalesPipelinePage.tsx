@@ -177,8 +177,8 @@ export default function SalesPipelinePage() {
               </p>
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
-              <button className="sp-btn-secondary"><Filter size={14} /> Filtres</button>
-              <Link to="/sales/leads" className="sp-btn-primary"><Plus size={16} /> Nouveau lead</Link>
+              <Link to="/sales/leads" className="sp-btn-secondary"><Filter size={14} /> Filtres</Link>
+              <Link to="/sales/leads?new=1" className="sp-btn-primary"><Plus size={16} /> Nouveau lead</Link>
             </div>
           </div>
         </div>
@@ -288,7 +288,7 @@ export default function SalesPipelinePage() {
                     })
                   )}
                   {stageLeads.length > 0 && (
-                    <button className="sp-add-btn"><Plus size={14} /> Ajouter</button>
+                    <Link to={`/sales/leads?new=1&stage=${stage.key}`} className="sp-add-btn" style={{ textDecoration: 'none' }}><Plus size={14} /> Ajouter</Link>
                   )}
                 </div>
               );

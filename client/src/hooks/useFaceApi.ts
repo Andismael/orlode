@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef } from 'react';
 import * as faceapi from 'face-api.js';
 
-// Load models from CDN — no need to bundle them locally
-const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+// Load models from official CDN (jsdelivr no longer serves the weights subdir)
+const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
 
 export interface FaceMatch {
   employeeId: string;

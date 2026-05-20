@@ -834,7 +834,7 @@ export default function LandingV2Page() {
               </p>
               <ul className="check">
                 <li><Check size={16} /> Pack PME — 4 agents — $20/mo</li>
-                <li><Check size={16} /> Pack vertical (Restaurant, Real Estate, Health…) — $20/mo</li>
+                <li><Check size={16} /> 7 packs verticaux WhatsApp (Boutique, Restaurant, Hôtel, Résidence, Salon, Cabinet, Immobilier) — $20/mo</li>
                 <li><Check size={16} /> Super Pack Enterprise — 10 agents — $45/mo (-25%)</li>
                 <li><Check size={16} /> Add-on à $5/mo</li>
               </ul>
@@ -937,16 +937,108 @@ export default function LandingV2Page() {
         </div>
       </section>
 
+      {/* ── VERTICALES MÉTIER ─────────────────────────────────────────────
+           7 packs verticaux livrés en prod : commerce, restaurant, hôtel,
+           résidence, salon, cabinet (multi-profil), immobilier. Chaque carte
+           ouvre une page d'activation dédiée avec WhatsApp + Telegram natifs. */}
+      <section id="verticales" style={{ padding: '100px 0' }}>
+        <div className="container">
+          <div style={{ textAlign: 'center', maxWidth: 720, margin: '0 auto 60px' }}>
+            <span className="pill" style={{ background: `${C.emerald}10`, color: C.emeraldDeep, borderColor: `${C.emerald}30` }}>
+              <Sparkles size={12} fill={C.emeraldDeep} /> 7 packs livrés
+            </span>
+            <h2 className="display h2" style={{ marginTop: 16 }}>
+              Un pack <em>par métier</em>. <em>WhatsApp + Telegram</em> au cœur.
+            </h2>
+            <div style={{ marginTop: 18, display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, padding: '5px 12px', borderRadius: 999, background: '#25D36615', color: '#128C7E', letterSpacing: '0.04em' }}>● WHATSAPP BUSINESS</span>
+              <span style={{ fontSize: 11, fontWeight: 800, padding: '5px 12px', borderRadius: 999, background: '#0088CC15', color: '#006699', letterSpacing: '0.04em' }}>● TELEGRAM BOT</span>
+              <span style={{ fontSize: 11, color: C.inkSoft }}>inbox unifié dans chaque pack</span>
+            </div>
+            <p className="lead" style={{ marginTop: 12 }}>
+              Choisis ta verticale — interface dédiée, agents pré-configurés, <strong>$20/mo</strong> par pack.
+              Tu peux activer plusieurs packs en parallèle (ex. boutique + restaurant pour un complexe hôtelier).
+            </p>
+          </div>
+
+          <div className="vert-grid">
+            {[
+              { emoji: '🛍',  title: 'Boutique',    pitch: 'Vends sur WhatsApp & Telegram avec une photo. Catalogue + commandes + paiement.', color: C.emerald,  bg: '#10B98115', deepColor: C.emeraldDeep, href: '/agents/commerce' },
+              { emoji: '🍽',  title: 'Restaurant',  pitch: 'Menu, commandes, réservations, KDS cuisine — WhatsApp & Telegram.',              color: '#F97316',  bg: '#F9731615', deepColor: '#C2410C',     href: '/agents/restaurant' },
+              { emoji: '🏨',  title: 'Hôtel',       pitch: 'Chambres et séjours — réservation multi-nuits sur WhatsApp & Telegram.',         color: '#0EA5E9',  bg: '#0EA5E915', deepColor: '#0369A1',     href: '/agents/hotel' },
+              { emoji: '🏢',  title: 'Résidence',   pitch: 'Studios, F2, F3 — locations courte & longue durée, calendrier dispo.',            color: '#6366F1',  bg: '#6366F115', deepColor: '#4338CA',     href: '/agents/residence' },
+              { emoji: '💇',  title: 'Salon',       pitch: 'Coiffure, beauté, esthétique — RDV pris automatiquement, fidélité intégrée.',     color: C.pink,     bg: '#EC489915', deepColor: '#DB2777',     href: '/agents/service' },
+              { emoji: '🩺',  title: 'Cabinet',     pitch: 'Médecin, dentiste, avocat, notaire, comptable, véto — 1 page, 6 profils.',        color: '#14B8A6',  bg: '#14B8A615', deepColor: '#0F766E',     href: '/agents/cabinet' },
+              { emoji: '🏠',  title: 'Immobilier',  pitch: 'Biens et visites — qualif leads + agenda sur WhatsApp & Telegram.',               color: C.violet,   bg: '#7C3AED15', deepColor: C.violetDeep,  href: '/agents/realestate' },
+            ].map(p => (
+              <Link key={p.title} to={p.href} className="vert-card" style={{ borderColor: `${p.color}25` }}>
+                <div className="vert-icon" style={{ background: p.bg, color: p.deepColor }}>
+                  <span style={{ fontSize: 28 }}>{p.emoji}</span>
+                </div>
+                <h3 className="display" style={{ fontSize: 19, fontWeight: 800, color: C.ink, margin: '14px 0 6px', letterSpacing: '-0.01em' }}>
+                  {p.title}
+                </h3>
+                <p style={{ fontSize: 13, color: C.inkSoft, margin: 0, lineHeight: 1.5, flex: 1 }}>
+                  {p.pitch}
+                </p>
+                <div className="vert-cta" style={{ color: p.deepColor }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>$20/mo</span>
+                  <span className="vert-arrow"><ChevronRight size={16} /></span>
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          <div style={{ textAlign: 'center', marginTop: 48, color: C.inkSoft, fontSize: 13 }}>
+            Tu cherches plutôt un bundle <strong>Sales+Comms+Marketing+Support</strong> ?{' '}
+            <a href="#pricing" style={{ color: C.violetDeep, fontWeight: 700, textDecoration: 'none' }}>
+              Voir les packs cross-cutting ↓
+            </a>
+          </div>
+        </div>
+
+        <style>{`
+          .lv2 .vert-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+          .lv2 .vert-card {
+            background: ${C.cream}; border-radius: 20px; padding: 26px;
+            border: 1.5px solid; cursor: pointer; text-decoration: none;
+            display: flex; flex-direction: column; min-height: 220px;
+            transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+          }
+          .lv2 .vert-card:hover { transform: translateY(-6px); }
+          .lv2 .vert-icon {
+            width: 56px; height: 56px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 8px 18px -8px rgba(10,42,32,0.18);
+          }
+          .lv2 .vert-cta {
+            margin-top: 16px; padding-top: 14px;
+            border-top: 1px solid ${C.ink}08;
+            display: flex; align-items: center; justify-content: space-between;
+            font-family: 'JetBrains Mono', monospace;
+          }
+          .lv2 .vert-arrow {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 28px; height: 28px; border-radius: 8px;
+            background: ${C.creamDeep}; color: ${C.inkSoft};
+            transition: transform 0.2s ease;
+          }
+          .lv2 .vert-card:hover .vert-arrow { transform: translateX(3px); }
+          @media (max-width: 900px) { .lv2 .vert-grid { grid-template-columns: repeat(2, 1fr) !important; } }
+          @media (max-width: 600px) { .lv2 .vert-grid { grid-template-columns: 1fr !important; } }
+        `}</style>
+      </section>
+
       {/* ── PRICING ──────────────────────────────────────────────────────── */}
       <section id="pricing" style={{ padding: '100px 0', background: C.creamDeep }}>
         <div className="container">
           <div style={{ textAlign: 'center', maxWidth: 720, margin: '0 auto 60px' }}>
-            <span className="pill"><Sparkles size={12} fill={C.violetDeep} /> {t('pricing.badge')}</span>
+            <span className="pill"><Sparkles size={12} fill={C.violetDeep} /> Bundles cross-cutting</span>
             <h2 className="display h2" style={{ marginTop: 16 }}>
-              {t('pricing.title.l1')} <em>{t('pricing.title.em')}</em> {t('pricing.title.l2')} <em>{t('pricing.title.price')}</em>.
+              Pas une verticale ? <em>Compose</em> ton équipe d'agents.
             </h2>
             <p className="lead" style={{ marginTop: 12 }}>
-              {t('pricing.lead')}
+              Pour les PME multi-services et les grandes équipes, on regroupe les agents transversaux (Sales, Comms, Compta, Support) en bundles. Bring Your Own Everything. Annule à tout moment.
             </p>
           </div>
 
@@ -1133,10 +1225,13 @@ export default function LandingV2Page() {
                 { l: 'Changelog',            to: '/changelog' },
               ]},
               { title: t('foot.solutions'), links: [
-                { l: 'For SMB',              to: '/marketplace' },
-                { l: 'For Enterprise',       to: '/marketplace' },
-                { l: 'For Agencies',         to: '/marketplace' },
-                { l: 'By industry',          to: '/marketplace' },
+                { l: '🛍 Boutique',          to: '/agents/commerce' },
+                { l: '🍽 Restaurant',        to: '/agents/restaurant' },
+                { l: '🏨 Hôtel',             to: '/agents/hotel' },
+                { l: '🏢 Résidence',         to: '/agents/residence' },
+                { l: '💇 Salon',             to: '/agents/service' },
+                { l: '🩺 Cabinet',           to: '/agents/cabinet' },
+                { l: '🏠 Immobilier',        to: '/agents/realestate' },
               ]},
               { title: t('foot.resources'), links: [
                 { l: 'Documentation',        to: '/docs' },

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import api from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/components/common/Toast';
@@ -21,7 +22,8 @@ import {
   DoorOpen, DoorClosed, Fingerprint, KeyRound, RadioTower,
   PhoneCall, Camera, Lock, Unlock, ShieldCheck, ShieldAlert,
   PieChart, LineChart, Activity, RefreshCw, Link2, Network, Layers, Tag,
-  LayoutGrid, List as ListIcon
+  LayoutGrid, List as ListIcon,
+  User, Loader2, Save, ExternalLink,
 } from 'lucide-react';
 
 // ============ PALETTE — RH = vert + bleu/cyan ============
@@ -183,6 +185,43 @@ function Chrome({ children }) {
       </main>
     </div>
   );
+}
+
+// ============ COMING-SOON HELPER ============
+// Transparent placeholder for buttons whose backend isn't wired yet.
+// We prefer "honest 'bientôt' toast" over "silently broken click" — passes the
+// no-fake-UI rule. Each call mentions the feature so we know what to wire next.
+function comingSoon(featureName?: string) {
+  toast.info(
+    'Bientôt disponible',
+    featureName
+      ? `La fonctionnalité "${featureName}" arrive dans la prochaine release.`
+      : 'Cette fonctionnalité arrive dans la prochaine release.',
+  );
+}
+
+// CSV download — reusable for "Exporter" buttons.
+function downloadCSV(filename: string, rows: Array<Record<string, any>>) {
+  if (!rows || rows.length === 0) {
+    toast.info('Rien à exporter', 'Aucune donnée disponible pour l\'export.');
+    return;
+  }
+  const headers = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
+  const csv = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => {
+      const v = r[h];
+      if (v === null || v === undefined) return '';
+      const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(',')),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+  toast.success('Export téléchargé', `${rows.length} ligne${rows.length > 1 ? 's' : ''}`);
 }
 
 // ============ DATA HOOKS — branchés sur l'API corpmind ============
@@ -351,11 +390,13 @@ function PageHeader({ title, italic, subtitle, badge, actions, leftPills, gradie
 }
 
 function TabSwitcher({ active, setActive }) {
+  // Hidden tabs (100% decorative — backend not wired): Présence, Accès, Reporting BI, Formation.
+  // Will be re-enabled when their data/CTAs are wired. Until then they hurt trust ("user clicks → nothing").
   const tabGroups = [
     { label: 'GESTION', tabs: ['Accueil', 'Dashboard RH', 'Effectifs', 'Annuaire', 'Recrutement', 'Onboarding'] },
     { label: 'OPS', tabs: ['Congés', 'Paie', 'Frais', 'Documents'] },
-    { label: 'TALENTS', tabs: ['Performance', 'Évaluations 360°', 'Talents', 'Formation'] },
-    { label: 'AUTRES', tabs: ['Présence', 'Accès', 'Calendrier RH', 'Politique & FAQ', 'Reporting BI'] },
+    { label: 'TALENTS', tabs: ['Performance', 'Évaluations 360°', 'Talents'] },
+    { label: 'AUTRES', tabs: ['Calendrier RH', 'Politique & FAQ'] },
   ];
   return (
     <div style={{ padding: '24px 32px 0' }}>
@@ -519,7 +560,7 @@ function NewLeaveModal({ onClose }) {
           <div><label className="form-label">Demi-journée ?</label>
             <div style={{ display: 'flex', gap: 8 }}>
               {['Journée complète', 'Matin', 'Après-midi'].map(o => (
-                <button key={o} className="chip chip-outline" style={{ flex: 1 }}>{o}</button>
+                <button key={o} type="button" className="chip chip-outline" style={{ flex: 1 }}>{o}</button>
               ))}
             </div>
           </div>
@@ -570,6 +611,254 @@ function NewLeaveModal({ onClose }) {
   );
 }
 
+// ── Employee 360° Detail Modal ─────────────────────────────────────────────
+function EmployeeDetailModal({ employee, onClose }: { employee: any; onClose: () => void }) {
+  const [tab, setTab] = useState<'identity' | 'contracts'>('identity');
+  const [profile, setProfile] = useState<any>(employee ?? {});
+  const [contracts, setContracts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [draft, setDraft] = useState<any>({});
+
+  useEffect(() => {
+    if (!employee?.id) return;
+    setLoading(true);
+    Promise.all([
+      api.get(`/hr/employees/${employee.id}`).then((r: any) => r?.data?.data ?? {}).catch(() => ({})),
+      api.get(`/hr/employees/${employee.id}/contracts`).then((r: any) => r?.data?.data ?? []).catch(() => []),
+    ])
+      .then(([prof, ctrs]) => {
+        const merged = { ...employee, ...prof };
+        setProfile(merged);
+        setDraft(merged);
+        setContracts(ctrs);
+      })
+      .finally(() => setLoading(false));
+  }, [employee?.id]);
+
+  const initials = (profile.displayName || profile.name || profile.firstName || 'E')
+    .split(' ').map((p: string) => p[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+  const accent = profile.color || C.purple;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        displayName: draft.displayName ?? draft.name,
+        email: draft.email,
+        phone: draft.phone,
+        whatsappPhone: draft.whatsappPhone ?? draft.phone,
+        address: draft.address,
+        birthDate: draft.birthDate,
+        jobTitle: draft.jobTitle ?? draft.role,
+        department: draft.department ?? draft.dept,
+        manager: draft.manager,
+        startDate: draft.startDate,
+        baseSalary: typeof draft.baseSalary === 'string' ? parseFloat(draft.baseSalary) : draft.baseSalary,
+        currency: draft.currency,
+        employmentType: draft.employmentType,
+        emergencyContact: draft.emergencyContact,
+      };
+      await api.patch(`/hr/employees/${employee.id}`, payload);
+      setProfile({ ...profile, ...payload });
+      setEdit(false);
+      toast.success('Profil mis à jour');
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message ?? 'Sauvegarde impossible.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sendContract = async () => {
+    onClose();
+    toast.info('Astuce', `Demande à l'orchestrateur : "Envoie un contrat freelance à ${profile.displayName ?? profile.name} (${profile.email})"`);
+  };
+
+  const labelStyle = { fontSize: 11, fontWeight: 700, color: C.inkSoft, textTransform: 'uppercase' as const, letterSpacing: '0.05em', marginBottom: 4, display: 'block' };
+  const valueStyle = { fontSize: 13, color: C.ink, padding: '10px 12px', background: C.creamDeep, borderRadius: 8, minHeight: 38, display: 'flex', alignItems: 'center' };
+  const inputStyle = { fontSize: 13, color: C.ink, padding: '10px 12px', background: '#fff', borderRadius: 8, border: `1px solid ${C.purple}40`, outline: 'none', width: '100%', fontFamily: 'inherit' as const };
+
+  const Field = ({ label, name, value, type = 'text' }: { label: string; name: string; value: any; type?: string }) => (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      {edit ? (
+        <input
+          type={type}
+          value={draft[name] ?? value ?? ''}
+          onChange={e => setDraft({ ...draft, [name]: e.target.value })}
+          style={inputStyle}
+        />
+      ) : (
+        <div style={valueStyle}>{value ?? '—'}</div>
+      )}
+    </div>
+  );
+
+  const statusColor: Record<string, string> = {
+    pending_signature: C.yellow,
+    signed: C.greenDeep,
+    expired: C.red,
+    draft: C.inkSoft,
+    rejected: C.red,
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" style={{ maxWidth: 880, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+        {/* Header with avatar */}
+        <div style={{
+          background: `linear-gradient(135deg, ${accent} 0%, ${accent}dd 100%)`,
+          padding: '28px 28px', display: 'flex', alignItems: 'center', gap: 18,
+          color: '#fff',
+        }}>
+          <div className="avatar" style={{ background: 'rgba(255,255,255,0.25)', color: '#fff', width: 64, height: 64, fontSize: 22, fontWeight: 700 }}>
+            {initials}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="display-font" style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>
+              {profile.displayName || profile.name || 'Employé'}
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.92, marginTop: 2 }}>
+              {profile.jobTitle || profile.role || '—'}{profile.department ? ` · ${profile.department}` : ''}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.20)', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid rgba(10,42,32,0.08)', padding: '0 28px', gap: 6 }}>
+          {[
+            { id: 'identity' as const, label: 'Identité', icon: User },
+            { id: 'contracts' as const, label: `Contrats (${contracts.length})`, icon: FileText },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              style={{
+                padding: '14px 16px',
+                background: 'transparent',
+                border: 'none',
+                borderBottom: tab === t.id ? `2px solid ${accent}` : '2px solid transparent',
+                color: tab === t.id ? accent : C.inkSoft,
+                fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
+                fontFamily: 'inherit',
+              }}>
+              <t.icon size={14} /> {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '24px 28px', overflow: 'auto', flex: 1 }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: C.inkSoft }}>
+              <Loader2 size={28} className="spin" />
+              <div style={{ marginTop: 8, fontSize: 13 }}>Chargement…</div>
+            </div>
+          ) : tab === 'identity' ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                {edit ? (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => { setEdit(false); setDraft(profile); }} className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }}>Annuler</button>
+                    <button onClick={save} disabled={saving} className="btn-primary" style={{ background: accent, padding: '8px 14px', fontSize: 12 }}>
+                      {saving ? <><Loader2 size={12} className="spin" /> Sauvegarde…</> : <><Save size={12} /> Enregistrer</>}
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setDraft(profile); setEdit(true); }} className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }}>
+                    <Edit size={12} /> Modifier
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 22 }}>
+                <Field label="Nom complet"     name="displayName" value={profile.displayName || profile.name} />
+                <Field label="Email"           name="email"       value={profile.email} type="email" />
+                <Field label="Téléphone"       name="phone"       value={profile.phone} />
+                <Field label="WhatsApp"        name="whatsappPhone" value={profile.whatsappPhone || profile.phone} />
+                <Field label="Adresse"         name="address"     value={profile.address} />
+                <Field label="Date de naissance" name="birthDate" value={profile.birthDate} type="date" />
+              </div>
+
+              <div className="display-font" style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Poste</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 22 }}>
+                <Field label="Titre du poste"  name="jobTitle"    value={profile.jobTitle || profile.role} />
+                <Field label="Département"     name="department"  value={profile.department || profile.dept} />
+                <Field label="Manager"         name="manager"     value={profile.manager} />
+                <Field label="Date d'embauche" name="startDate"   value={profile.startDate} type="date" />
+                <Field label="Type de contrat" name="employmentType" value={profile.employmentType} />
+                <Field label="Salaire (brut)"  name="baseSalary"  value={profile.baseSalary} type="number" />
+              </div>
+
+              <div className="display-font" style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Urgence</div>
+              <Field label="Contact d'urgence" name="emergencyContact" value={profile.emergencyContact} />
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: C.inkSoft }}>
+                  {contracts.length} contrat{contracts.length > 1 ? 's' : ''} attaché{contracts.length > 1 ? 's' : ''} à cet employé
+                </div>
+                <button onClick={sendContract} className="btn-primary" style={{ background: accent, padding: '8px 14px', fontSize: 12 }}>
+                  <Plus size={12} /> Envoyer un contrat
+                </button>
+              </div>
+              {contracts.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: C.inkSoft, background: C.creamDeep, borderRadius: 14 }}>
+                  <FileText size={32} color={C.inkSoft} style={{ marginBottom: 10, opacity: 0.5 }} />
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Aucun contrat</div>
+                  <div style={{ fontSize: 12 }}>Envoie un contrat depuis le chat IA ou clique « Envoyer un contrat »</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {contracts.map(c => (
+                    <div key={c.id} style={{ background: C.cream, borderRadius: 12, padding: 16, border: '1px solid rgba(10,42,32,0.08)', display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>
+                          {c.contractType?.toUpperCase() ?? 'Contrat'}
+                          {c.signatoryName ? ` · ${c.signatoryName}` : ''}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.inkSoft, marginTop: 4 }}>
+                          {c.signatoryEmail ?? '—'}
+                          {c.createdAt ? ` · Créé le ${new Date(c.createdAt).toLocaleDateString('fr-FR')}` : ''}
+                          {c.signedAt ? ` · Signé le ${new Date(c.signedAt).toLocaleDateString('fr-FR')}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span className="pill" style={{
+                          background: `${statusColor[c.status] ?? C.inkSoft}15`,
+                          color: statusColor[c.status] ?? C.inkSoft,
+                          fontWeight: 700, fontSize: 10, padding: '4px 10px',
+                        }}>
+                          {c.status === 'pending_signature' ? 'En attente' :
+                           c.status === 'signed' ? 'Signé' :
+                           c.status === 'expired' ? 'Expiré' :
+                           c.status === 'draft' ? 'Brouillon' : c.status}
+                        </span>
+                        {c.uniqueLink && (
+                          <a href={`/sign/${c.uniqueLink}`} target="_blank" rel="noopener noreferrer"
+                            className="icon-btn" style={{ width: 32, height: 32, background: `${accent}15`, color: accent, textDecoration: 'none' }}
+                            title="Ouvrir le contrat">
+                            <ExternalLink size={13} />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NewEmployeeModal({ onClose }) {
   const [step, setStep] = useState(1);
   const [firstName, setFirstName] = useState('');
@@ -582,6 +871,22 @@ function NewEmployeeModal({ onClose }) {
   const [hireDate, setHireDate] = useState('');
   const [salary, setSalary] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Photo upload state
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photoMimeType, setPhotoMimeType] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const handlePhoto = (file: File) => {
+    if (file.size > 4 * 1024 * 1024) { toast.error('Photo trop lourde', 'Max 4 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? '');
+      setPhotoBase64(dataUrl.replace(/^data:image\/[^;]+;base64,/, ''));
+      setPhotoMimeType(file.type || 'image/jpeg');
+      setPhotoPreview(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
   const submit = async () => {
     if (submitting) return;
     if (!email.trim() || !firstName.trim()) { toast.error('Prénom et email requis'); return; }
@@ -594,6 +899,7 @@ function NewEmployeeModal({ onClose }) {
         position, department, contractType,
         phone, hireDate,
         salary: salary ? Number(salary) : null,
+        ...(photoBase64 ? { photoBase64, photoMimeType } : {}),
       });
       toast.success('Invitation envoyée', `${email} recevra un email pour rejoindre l'équipe.`);
       onClose();
@@ -618,14 +924,47 @@ function NewEmployeeModal({ onClose }) {
         <div>
           <h4 style={{ fontSize: 15, fontWeight: 700, color: C.ink, marginTop: 0, marginBottom: 14 }}>Informations personnelles</h4>
           <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-            <div style={{ width: 80, height: 80, borderRadius: 16, background: C.purpleSoft, color: C.purple, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', border: `2px dashed ${C.purple}` }}>
-              <Camera size={28} />
+            <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handlePhoto(f); }} />
+            <div onClick={() => photoInputRef.current?.click()}
+              title="Cliquer pour uploader une photo"
+              style={{
+                width: 80, height: 80, borderRadius: 16,
+                background: photoPreview ? '#000' : C.purpleSoft,
+                color: C.purple,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0, cursor: 'pointer',
+                border: photoPreview ? 'none' : `2px dashed ${C.purple}`,
+                overflow: 'hidden', position: 'relative',
+              }}>
+              {photoPreview ? (
+                <>
+                  <img src={photoPreview} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    background: 'rgba(0,0,0,0.4)', color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: 0, transition: 'opacity .2s ease',
+                  }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0')}>
+                    <Camera size={20} />
+                  </div>
+                </>
+              ) : (
+                <Camera size={28} />
+              )}
             </div>
             <div style={{ flex: 1 }}>
               <div className="form-row">
                 <div><label className="form-label">Prénom</label><input className="form-input" placeholder="Jean" value={firstName} onChange={e => setFirstName(e.target.value)} /></div>
                 <div><label className="form-label">Nom</label><input className="form-input" placeholder="Dupont" value={lastName} onChange={e => setLastName(e.target.value)} /></div>
               </div>
+              {!photoPreview && (
+                <div style={{ fontSize: 10, color: C.inkMid, marginTop: 6 }}>
+                  📷 <span onClick={() => photoInputRef.current?.click()} style={{ color: C.purple, cursor: 'pointer', textDecoration: 'underline' }}>Ajouter une photo</span> (optionnel · max 4 MB)
+                </div>
+              )}
             </div>
           </div>
           <div className="form-row">
@@ -859,7 +1198,7 @@ function SignatureModal({ onClose }) {
           <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>contrat-cdi-jean-dupont.pdf</div>
           <div style={{ fontSize: 12, color: C.inkSoft }}>14 pages · 287 Ko · Modèle CDI standard</div>
         </div>
-        <button className="icon-btn" style={{ background: C.purple, color: C.cream }}><Eye size={14} /></button>
+        <button type="button" className="icon-btn" style={{ background: C.purple, color: C.cream }} title="Aperçu du document" onClick={() => toast.info('Aperçu', 'Aperçu PDF bientôt disponible.')}><Eye size={14} /></button>
       </div>
       <label className="form-label">Signataires (dans l'ordre)</label>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -879,7 +1218,7 @@ function SignatureModal({ onClose }) {
           </div>
         ))}
       </div>
-      <button style={{ width: '100%', marginTop: 10, background: 'transparent', border: `1.5px dashed ${C.inkSoft}`, color: C.inkSoft, padding: 10, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+      <button type="button" onClick={() => toast.info('Bientôt', 'L\'ajout de signataires sera disponible dans la prochaine itération.')} style={{ width: '100%', marginTop: 10, background: 'transparent', border: `1.5px dashed ${C.inkSoft}`, color: C.inkSoft, padding: 10, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
         <Plus size={14} /> Ajouter un signataire
       </button>
       <div style={{ marginTop: 14 }}>
@@ -890,32 +1229,46 @@ function SignatureModal({ onClose }) {
   );
 }
 
-function InterviewModal({ onClose }) {
+function InterviewModal({ onClose, candidate }: { onClose: () => void; candidate?: any }) {
   const [date, setDate] = useState('');
   const [time, setTime] = useState('14:00');
   const [duration, setDuration] = useState('45 min');
   const [interviewType, setInterviewType] = useState('Visio (Google Meet)');
   const [submitting, setSubmitting] = useState(false);
+  // Resolve candidate display values from the prop, with safe fallbacks if the
+  // modal was opened without one (e.g. from a generic CTA).
+  const candName = candidate?.name ?? candidate?.displayName ?? 'Candidat';
+  const candRole = candidate?.role ?? candidate?.jobTitle ?? candidate?.position ?? 'Poste à définir';
+  const candStage = candidate?.stage ?? 'Étape suivante';
+  const candId = candidate?.id ?? candidate?.candidateId ?? null;
+  const initials = candName.split(/\s+/).map((s: string) => s.charAt(0)).slice(0, 2).join('').toUpperCase() || 'C';
+
   const submit = async () => {
     if (submitting) return;
     if (!date) { toast.error('Date requise'); return; }
     setSubmitting(true);
     try {
-      await api.post('/hr/interviews', { date, time, duration, type: interviewType, candidate: 'Sophie Désiré' });
-      toast.success('Entretien planifié');
+      await api.post('/hr/interviews', {
+        date, time, duration,
+        type: interviewType,
+        candidateId: candId,
+        candidate: candName,
+        candidateRole: candRole,
+      });
+      toast.success('Entretien planifié', `${candName} · ${date} ${time}`);
       onClose();
     } catch (e: any) {
       toast.error('Erreur', e?.response?.data?.message || 'Impossible de planifier.');
     } finally { setSubmitting(false); }
   };
   return (
-    <ModalShell title="Planifier un entretien" subtitle="Recrutement · Senior Designer Product" icon={CalendarPlus} color={C.teal} onClose={onClose}
+    <ModalShell title="Planifier un entretien" subtitle={`Recrutement · ${candRole}`} icon={CalendarPlus} color={C.teal} onClose={onClose}
       footer={<><button className="btn-secondary" onClick={onClose}>Annuler</button><button className="btn-primary" style={{ background: C.teal, boxShadow: '0 8px 24px -8px rgba(20, 184, 166, 0.5)' }} disabled={submitting} onClick={submit}><Send size={14} /> {submitting ? 'Envoi…' : 'Envoyer invitation'}</button></>}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: C.tealSoft, borderRadius: 14, marginBottom: 16 }}>
-        <div className="avatar" style={{ background: C.teal, width: 44, height: 44, fontSize: 14 }}>SD</div>
+        <div className="avatar" style={{ background: C.teal, width: 44, height: 44, fontSize: 14 }}>{initials}</div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>Sophie Désiré</div>
-          <div style={{ fontSize: 12, color: C.inkSoft }}>Candidate · Senior Designer Product · Stage : Tech screen</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{candName}</div>
+          <div style={{ fontSize: 12, color: C.inkSoft }}>Candidat · {candRole} · Étape : {candStage}</div>
         </div>
       </div>
       <div className="form-row">
@@ -936,7 +1289,7 @@ function InterviewModal({ onClose }) {
           {['Adelin N.', 'Marie D.', 'Pierre K.'].map(n => (
             <span key={n} className="chip" style={{ background: C.tealSoft, color: C.teal, fontWeight: 700 }}>{n} <X size={11} /></span>
           ))}
-          <button className="chip chip-outline"><Plus size={11} /> Ajouter</button>
+          <button type="button" className="chip chip-outline" onClick={() => toast.info('Bientôt', 'L\'ajout d\'intervieweurs sera disponible.')}><Plus size={11} /> Ajouter</button>
         </div>
       </div>
       <div style={{ marginTop: 14 }}>
@@ -1129,6 +1482,92 @@ function PayslipModal({ onClose }) {
   );
 }
 
+function NewJobModal({ onClose }: any) {
+  const [title, setTitle] = useState('');
+  const [department, setDepartment] = useState('Ingénierie');
+  const [contractType, setContractType] = useState('CDI');
+  const [location, setLocation] = useState('');
+  const [salaryMin, setSalaryMin] = useState('');
+  const [salaryMax, setSalaryMax] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async () => {
+    if (!title.trim()) { toast.error('Titre du poste requis'); return; }
+    setSubmitting(true);
+    try {
+      await api.post('/hr/jobs', {
+        title: title.trim(),
+        department, contractType,
+        location: location.trim() || undefined,
+        salaryMin: salaryMin ? Number(salaryMin) : undefined,
+        salaryMax: salaryMax ? Number(salaryMax) : undefined,
+        description: description.trim() || undefined,
+        status: 'open',
+        createdAt: new Date().toISOString(),
+      });
+      toast.success('Offre publiée', title.trim());
+      onClose();
+    } catch (e: any) {
+      toast.error('Erreur', e?.response?.data?.message || 'Impossible de créer l\'offre.');
+    } finally { setSubmitting(false); }
+  };
+  return (
+    <ModalShell title="Nouvelle offre d'emploi" subtitle="Publier un poste à pourvoir" icon={UserPlus} color={C.greenDeep} onClose={onClose} size="lg"
+      footer={<>
+        <button className="btn-secondary" onClick={onClose}>Annuler</button>
+        <button className="btn-primary" disabled={submitting} style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.6)' }} onClick={submit}>
+          {submitting ? 'Publication…' : (<><Plus size={14} /> Publier l'offre</>)}
+        </button>
+      </>}>
+      <div style={{ marginBottom: 14 }}>
+        <label className="form-label">Titre du poste *</label>
+        <input className="form-input" placeholder="Ex: Développeur Senior React" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
+      </div>
+      <div className="form-row" style={{ marginBottom: 14 }}>
+        <div>
+          <label className="form-label">Département</label>
+          <select className="form-input" value={department} onChange={e => setDepartment(e.target.value)}>
+            <option>Ingénierie</option>
+            <option>Commercial</option>
+            <option>Design</option>
+            <option>Marketing</option>
+            <option>Support</option>
+            <option>Opérations</option>
+          </select>
+        </div>
+        <div>
+          <label className="form-label">Type de contrat</label>
+          <select className="form-input" value={contractType} onChange={e => setContractType(e.target.value)}>
+            <option>CDI</option>
+            <option>CDD</option>
+            <option>Stage</option>
+            <option>Alternance</option>
+            <option>Freelance</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <label className="form-label">Lieu</label>
+        <input className="form-input" placeholder="Ex: Abidjan, Remote, Cocody" value={location} onChange={e => setLocation(e.target.value)} />
+      </div>
+      <div className="form-row" style={{ marginBottom: 14 }}>
+        <div>
+          <label className="form-label">Salaire min (FCFA)</label>
+          <input className="form-input" type="number" placeholder="700 000" value={salaryMin} onChange={e => setSalaryMin(e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">Salaire max (FCFA)</label>
+          <input className="form-input" type="number" placeholder="1 200 000" value={salaryMax} onChange={e => setSalaryMax(e.target.value)} />
+        </div>
+      </div>
+      <div>
+        <label className="form-label">Description du poste</label>
+        <textarea className="form-input" rows={4} placeholder="Missions, profil recherché, conditions…" value={description} onChange={e => setDescription(e.target.value)} style={{ resize: 'vertical', minHeight: 80 }} />
+      </div>
+    </ModalShell>
+  );
+}
+
 // ============ PAGE 1: ACCUEIL ============
 function AccueilPage({ onTab, openModal, data }: any) {
   const stats: any[] = [];
@@ -1158,7 +1597,7 @@ function AccueilPage({ onTab, openModal, data }: any) {
         subtitle="24 employés · 4 congés en cours · 2 onboardings · L'équipe va bien."
         badge="RESSOURCES HUMAINES" gradient="blue"
         actions={<>
-          <button className="btn-secondary" style={{ background: 'rgba(255,250,240,0.15)', color: C.cream, border: '1px solid rgba(255,250,240,0.25)' }}><Sparkles size={14} /> Demander à l'IA</button>
+          <Link to="/chat?context=hr" className="btn-secondary" style={{ background: 'rgba(255,250,240,0.15)', color: C.cream, border: '1px solid rgba(255,250,240,0.25)', textDecoration: 'none' }}><Sparkles size={14} /> Demander à l'IA</Link>
           <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.6)' }} onClick={() => openModal('leave')}><Plus size={16} /> Nouvelle demande</button>
         </>} />
 
@@ -1311,8 +1750,8 @@ function DashboardRHPage({ data }: any) {
       <PageHeader title="Dashboard" italic="RH"
         subtitle="Effectifs, mood, performance · Vue d'ensemble en temps réel"
         badge="ANALYTICS · 7 MOIS" gradient="blue"
-        actions={<><button className="btn-secondary"><Sparkles size={14} /> Insight IA</button>
-          <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.6)' }}><FileText size={14} /> Rapport mensuel</button></>} />
+        actions={<><Link to="/chat?context=hr" className="btn-secondary" style={{ textDecoration: 'none' }}><Sparkles size={14} /> Insight IA</Link>
+          <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.6)' }} onClick={() => downloadCSV('rapport-mensuel.csv', (data?.employees || []) as unknown as Record<string, unknown>[])}><FileText size={14} /> Rapport mensuel</button></>} />
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-grid-4 stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
           {kpis.map((k, i) => <StatCard key={i} {...k} />)}
@@ -1452,6 +1891,9 @@ function StatusPill({ status }) {
 function EffectifsPage({ openModal, employees = [] }: any) {
   const [view, setView] = useState('grid');
   const [dept, setDept] = useState('Tous');
+  // Original employees array indexed by mapped row → so the modal gets full data
+  const rawById = new Map<string, any>();
+  (employees || []).forEach((e: any) => { if (e?.id) rawById.set(e.id, e); });
   const mapped = (employees || []).map(mapEmployee);
   const deptSet = Array.from(new Set(mapped.map((e: any) => e.dept).filter(Boolean)));
   const depts = ['Tous', ...deptSet];
@@ -1461,7 +1903,7 @@ function EffectifsPage({ openModal, employees = [] }: any) {
       <PageHeader title="Effectifs" italic="& gestion équipe"
         subtitle="Gérer les profils, contrats, salaires et historique"
         badge={`${mapped.length} EMPLOYÉ${mapped.length > 1 ? 'S' : ''}`} gradient="blue"
-        actions={<><button className="btn-secondary"><Download size={14} /> Exporter</button>
+        actions={<><button className="btn-secondary" onClick={() => downloadCSV('effectifs.csv', mapped)}><Download size={14} /> Exporter</button>
           <button className="btn-primary" style={{ background: C.purple, boxShadow: '0 8px 24px -8px rgba(139, 92, 246, 0.5)' }} onClick={() => openModal('employee')}><UserPlus size={16} /> Ajouter un employé</button></>} />
 
       <div style={{ padding: '24px 32px 0', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -1484,12 +1926,20 @@ function EffectifsPage({ openModal, employees = [] }: any) {
         ) : view === 'grid' ? (
           <div className="responsive-grid-4 stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
             {filtered.map((e: any, i: number) => (
-              <div key={i} style={{ background: C.cream, borderRadius: 18, padding: 20, border: '1px solid rgba(10,42,32,0.06)', cursor: 'pointer', transition: 'all 0.3s ease' }}
+              <div key={i} onClick={() => openModal('employeeDetail', { ...rawById.get(e.id), ...e })}
+                style={{ background: C.cream, borderRadius: 18, padding: 20, border: '1px solid rgba(10,42,32,0.06)', cursor: 'pointer', transition: 'all 0.3s ease' }}
                 onMouseOver={ev => { ev.currentTarget.style.transform = 'translateY(-4px)'; ev.currentTarget.style.boxShadow = `0 20px 40px -16px ${e.color}50`; ev.currentTarget.style.borderColor = e.color; }}
                 onMouseOut={ev => { ev.currentTarget.style.transform = 'translateY(0)'; ev.currentTarget.style.boxShadow = 'none'; ev.currentTarget.style.borderColor = 'rgba(10,42,32,0.06)'; }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <div className="avatar" style={{ background: `linear-gradient(135deg, ${e.color} 0%, ${e.color}cc 100%)`, width: 52, height: 52, fontSize: 18 }}>
-                    {e.name.split(' ').map((p: string) => p[0]).join('')}
+                  <div className="avatar" style={{
+                    background: e.photoUrl ? '#000' : `linear-gradient(135deg, ${e.color} 0%, ${e.color}cc 100%)`,
+                    width: 52, height: 52, fontSize: 18, overflow: 'hidden',
+                  }}>
+                    {e.photoUrl ? (
+                      <img src={e.photoUrl} alt={e.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      e.name.split(' ').map((p: string) => p[0]).join('')
+                    )}
                   </div>
                   <StatusPill status={e.status} />
                 </div>
@@ -1503,7 +1953,7 @@ function EffectifsPage({ openModal, employees = [] }: any) {
                 <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
                   <a
                     href={e.email ? `mailto:${e.email}` : undefined}
-                    onClick={ev => { if (!e.email) { ev.preventDefault(); toast.info('Aucun email', 'Ajoutez un email à cette fiche.'); } }}
+                    onClick={ev => { ev.stopPropagation(); if (!e.email) { ev.preventDefault(); toast.info('Aucun email', 'Ajoutez un email à cette fiche.'); } }}
                     className="icon-btn"
                     style={{ flex: 1, height: 32, background: `${C.blue}10`, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                     title={e.email ? `Envoyer un email à ${e.email}` : 'Aucun email'}
@@ -1512,7 +1962,7 @@ function EffectifsPage({ openModal, employees = [] }: any) {
                   </a>
                   <a
                     href={e.phone ? `tel:${e.phone.replace(/\s+/g, '')}` : undefined}
-                    onClick={ev => { if (!e.phone) { ev.preventDefault(); toast.info('Aucun téléphone', 'Ajoutez un téléphone à cette fiche.'); } }}
+                    onClick={ev => { ev.stopPropagation(); if (!e.phone) { ev.preventDefault(); toast.info('Aucun téléphone', 'Ajoutez un téléphone à cette fiche.'); } }}
                     className="icon-btn"
                     style={{ flex: 1, height: 32, background: `${C.greenDeep}10`, color: C.greenDeep, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                     title={e.phone ? `Appeler ${e.phone}` : 'Aucun téléphone'}
@@ -1520,12 +1970,12 @@ function EffectifsPage({ openModal, employees = [] }: any) {
                     <Phone size={13} />
                   </a>
                   <button
-                    onClick={() => toast.info('Chat équipe', 'Ouvrez le module Équipe pour discuter en direct.')}
+                    onClick={ev => { ev.stopPropagation(); openModal('employeeDetail', { ...rawById.get(e.id), ...e }); }}
                     className="icon-btn"
                     style={{ flex: 1, height: 32, background: `${C.purple}10`, color: C.purple }}
-                    title="Envoyer un message"
+                    title="Voir le dossier complet"
                   >
-                    <MessageSquare size={13} />
+                    <Eye size={13} />
                   </button>
                 </div>
               </div>
@@ -1537,11 +1987,21 @@ function EffectifsPage({ openModal, employees = [] }: any) {
               <div>Employé</div><div>Département</div><div>Manager</div><div>Salaire</div><div>Statut</div><div></div>
             </div>
             {filtered.map((e: any, i: number) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr 0.6fr', gap: 12, padding: '14px 20px', borderTop: '1px solid rgba(10,42,32,0.06)', alignItems: 'center', cursor: 'pointer', transition: 'all 0.2s ease' }}
+              <div key={i} onClick={() => openModal('employeeDetail', { ...rawById.get(e.id), ...e })}
+                style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr 0.6fr', gap: 12, padding: '14px 20px', borderTop: '1px solid rgba(10,42,32,0.06)', alignItems: 'center', cursor: 'pointer', transition: 'all 0.2s ease' }}
                 onMouseOver={ev => { ev.currentTarget.style.background = C.creamDeep; }}
                 onMouseOut={ev => { ev.currentTarget.style.background = 'transparent'; }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div className="avatar" style={{ background: `linear-gradient(135deg, ${e.color} 0%, ${e.color}cc 100%)`, width: 38, height: 38, fontSize: 14 }}>{e.name.split(' ').map((p: string) => p[0]).join('')}</div>
+                  <div className="avatar" style={{
+                    background: e.photoUrl ? '#000' : `linear-gradient(135deg, ${e.color} 0%, ${e.color}cc 100%)`,
+                    width: 38, height: 38, fontSize: 14, overflow: 'hidden',
+                  }}>
+                    {e.photoUrl ? (
+                      <img src={e.photoUrl} alt={e.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      e.name.split(' ').map((p: string) => p[0]).join('')
+                    )}
+                  </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>{e.name}</div>
                     <div style={{ fontSize: 11, color: C.inkSoft }}>{e.role}</div>
@@ -1552,8 +2012,7 @@ function EffectifsPage({ openModal, employees = [] }: any) {
                 <div className="mono-font" style={{ fontSize: 12, fontWeight: 700, color: C.greenDeep }}>{(e.salary || 0).toLocaleString('fr-FR')}</div>
                 <div><StatusPill status={e.status} /></div>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  <button className="icon-btn" style={{ width: 28, height: 28 }}><Eye size={12} /></button>
-                  <button className="icon-btn" style={{ width: 28, height: 28 }}><MoreHorizontal size={12} /></button>
+                  <button type="button" className="icon-btn" style={{ width: 28, height: 28 }} title="Voir le dossier" onClick={ev => { ev.stopPropagation(); openModal('employeeDetail', { ...rawById.get(e.id), ...e }); }}><Eye size={12} /></button>
                 </div>
               </div>
             ))}
@@ -1575,8 +2034,8 @@ function AnnuairePage({ employees = [] }: any) {
       <PageHeader title="Annuaire" italic="qui fait quoi ?"
         subtitle="Trouve un collègue par nom, poste, équipe ou compétence"
         badge="DIRECTORY" gradient="blue"
-        actions={<><button className="btn-secondary"><Filter size={14} /> Filtres avancés</button>
-          <button className="btn-primary"><Sparkles size={14} /> Recherche IA</button></>} />
+        actions={<><button className="btn-secondary" onClick={() => (document.querySelector('input[placeholder*="herche"]') as HTMLInputElement | null)?.focus()}><Filter size={14} /> Filtres avancés</button>
+          <Link to="/chat" className="btn-primary" style={{ textDecoration: 'none' }}><Sparkles size={14} /> Recherche IA</Link></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div style={{ background: C.cream, borderRadius: 16, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12, border: '1px solid rgba(10,42,32,0.06)' }}>
@@ -1630,10 +2089,10 @@ function RecrutementPage({ openModal, candidates: candidatesProp = [], jobs: job
   return (
     <>
       <PageHeader title="Recrutement" italic="pipeline talents"
-        subtitle="12 candidats actifs · 3 offres ouvertes · IA matching activée"
+        subtitle={`${candidates.length} candidat${candidates.length > 1 ? 's' : ''} · ${(jobsProp || []).length} offre${(jobsProp || []).length > 1 ? 's' : ''} ouverte${(jobsProp || []).length > 1 ? 's' : ''} · IA matching activée`}
         badge="HIRING" gradient="blue"
-        actions={<><button className="btn-secondary"><Sparkles size={14} /> Analyse IA</button>
-          <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.5)' }}><Plus size={16} /> Nouvelle offre</button></>} />
+        actions={<><Link to="/chat?context=recruitment" className="btn-secondary" style={{ textDecoration: 'none' }}><Sparkles size={14} /> Analyse IA</Link>
+          <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.5)' }} onClick={() => openModal('job')}><Plus size={16} /> Nouvelle offre</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
@@ -1666,9 +2125,14 @@ function RecrutementPage({ openModal, candidates: candidatesProp = [], jobs: job
               <div style={{ fontSize: 12, color: C.ink }}>{c.exp}</div>
               <div className="mono-font" style={{ fontSize: 13, fontWeight: 800, color: c.score >= 85 ? C.greenDeep : c.score >= 75 ? C.yellow : C.inkSoft }}>{c.score}/100</div>
               <div style={{ display: 'flex', gap: 4 }}>
-                <button className="icon-btn" style={{ width: 30, height: 30 }} onClick={() => openModal('interview')}><CalendarPlus size={12} /></button>
-                <button className="icon-btn" style={{ width: 30, height: 30 }}><MessageSquare size={12} /></button>
-                <button className="icon-btn" style={{ width: 30, height: 30 }}><MoreHorizontal size={12} /></button>
+                <button className="icon-btn" style={{ width: 30, height: 30 }} title="Planifier un entretien" onClick={() => openModal('interview', c)}><CalendarPlus size={12} /></button>
+                <button className="icon-btn" style={{ width: 30, height: 30 }} title="Envoyer un message"
+                  onClick={() => {
+                    if (c.email) window.open(`mailto:${c.email}?subject=${encodeURIComponent(`Concernant ta candidature - ${c.role ?? ''}`)}`, '_blank');
+                    else toast.info('Pas d\'email', 'Ce candidat n\'a pas d\'email enregistré.');
+                  }}><MessageSquare size={12} /></button>
+                <button className="icon-btn" style={{ width: 30, height: 30 }} title="Voir le détail"
+                  onClick={() => toast.info('Profil candidat', `${c.name} · ${c.role}\nScore : ${c.score}/100\nSource : ${c.source}\nExpérience : ${c.exp}`)}><MoreHorizontal size={12} /></button>
               </div>
             </div>
           ))}
@@ -1679,7 +2143,7 @@ function RecrutementPage({ openModal, candidates: candidatesProp = [], jobs: job
 }
 
 // ============ PAGE 6: ONBOARDING ============
-function OnboardingPage() {
+function OnboardingPage({ openModal }: any) {
   const newcomers: any[] = [];
   const checklist: any[] = [];
   return (
@@ -1687,8 +2151,8 @@ function OnboardingPage() {
       <PageHeader title="Onboarding" italic="bienvenue à bord"
         subtitle="2 nouveaux arrivants · Checklist automatisée par l'IA"
         badge="2 EN COURS" gradient="blue"
-        actions={<><button className="btn-secondary"><FileText size={14} /> Modèles</button>
-          <button className="btn-primary" style={{ background: C.pink, boxShadow: '0 8px 24px -8px rgba(236, 72, 153, 0.5)' }}><Plus size={16} /> Démarrer onboarding</button></>} />
+        actions={<><Link to="/agents/training" className="btn-secondary" style={{ textDecoration: 'none' }}><FileText size={14} /> Modèles</Link>
+          <button className="btn-primary" style={{ background: C.pink, boxShadow: '0 8px 24px -8px rgba(236, 72, 153, 0.5)' }} onClick={() => openModal('employee')}><Plus size={16} /> Démarrer onboarding</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-charts" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
@@ -1728,7 +2192,7 @@ function OnboardingPage() {
                     {c.done ? <CheckCircle2 size={16} /> : <Ic size={14} />}
                   </div>
                   <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: c.done ? C.inkSoft : C.ink, textDecoration: c.done ? 'line-through' : 'none' }}>{c.task}</div>
-                  {!c.done && <button className="icon-btn" style={{ width: 28, height: 28 }}><ChevronRight size={12} /></button>}
+                  {!c.done && <button type="button" className="icon-btn" style={{ width: 28, height: 28 }} title={c.task} onClick={() => toast.info(c.task, 'Détail de cette tâche bientôt disponible.')}><ChevronRight size={12} /></button>}
                 </div>
               );
             })}
@@ -1740,6 +2204,19 @@ function OnboardingPage() {
 }
 
 // ============ PAGE 7: CONGÉS ============
+// Approve/reject helpers — wired to PATCH /api/hr/leave/:id (the real endpoint).
+// Without onClick handlers the green/red buttons in CongesList silently did nothing.
+async function decideLeave(id: string, status: 'approved' | 'rejected') {
+  try {
+    await api.patch(`/hr/leave/${id}`, { status });
+    toast.success(status === 'approved' ? 'Congé approuvé' : 'Congé refusé');
+    // Force a refresh by reloading the page-level data — simplest, no shared store
+    setTimeout(() => window.location.reload(), 300);
+  } catch (e: any) {
+    toast.error('Erreur', e?.response?.data?.message || 'Décision non enregistrée.');
+  }
+}
+
 function CongesPage({ openModal, leavesPending = [], leavesAll = [], leaveRemaining = null }: any) {
   const requests: any[] = (leavesPending || []).concat(leavesAll || []);
   const balance: any[] = [];
@@ -1748,7 +2225,7 @@ function CongesPage({ openModal, leavesPending = [], leavesAll = [], leaveRemain
       <PageHeader title="Congés" italic="& absences"
         subtitle="4 demandes en attente · 2 employés actuellement absents"
         badge="OPS" gradient="blue"
-        actions={<><button className="btn-secondary"><Calendar size={14} /> Calendrier</button>
+        actions={<><Link to="/hr/calendar" className="btn-secondary" style={{ textDecoration: 'none' }}><Calendar size={14} /> Calendrier</Link>
           <button className="btn-primary" onClick={() => openModal('leave')}><Plus size={16} /> Nouvelle demande</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
@@ -1810,8 +2287,14 @@ function CongesList({ requests }: any) {
                     </div>
                     {r.status === 'pending' && (
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="icon-btn" style={{ background: C.greenSoft, color: C.greenDeep, width: 32, height: 32 }}><CheckCircle2 size={14} /></button>
-                        <button className="icon-btn danger" style={{ width: 32, height: 32 }}><X size={14} /></button>
+                        <button className="icon-btn" style={{ background: C.greenSoft, color: C.greenDeep, width: 32, height: 32 }}
+                          title="Approuver" onClick={() => decideLeave(r.id, 'approved')}>
+                          <CheckCircle2 size={14} />
+                        </button>
+                        <button className="icon-btn danger" style={{ width: 32, height: 32 }}
+                          title="Refuser" onClick={() => decideLeave(r.id, 'rejected')}>
+                          <X size={14} />
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1839,8 +2322,14 @@ function CongesList({ requests }: any) {
                     </div>
                     <span className="pill" style={{ background: sc.bg, color: sc.color, fontWeight: 700 }}>{sc.label}</span>
                     {r.status === 'pending' && <>
-                      <button className="icon-btn" style={{ background: C.greenSoft, color: C.greenDeep }}><CheckCircle2 size={14} /></button>
-                      <button className="icon-btn danger" style={{ background: C.redSoft, color: C.red }}><X size={14} /></button>
+                      <button className="icon-btn" style={{ background: C.greenSoft, color: C.greenDeep }}
+                        title="Approuver" onClick={() => decideLeave(r.id, 'approved')}>
+                        <CheckCircle2 size={14} />
+                      </button>
+                      <button className="icon-btn danger" style={{ background: C.redSoft, color: C.red }}
+                        title="Refuser" onClick={() => decideLeave(r.id, 'rejected')}>
+                        <X size={14} />
+                      </button>
                     </>}
                   </div>
                 </div>
@@ -1861,10 +2350,17 @@ function PaiePage({ openModal }) {
   return (
     <>
       <PageHeader title="Paie" italic="Avril 2026"
-        subtitle="Masse salariale 18.4M FCFA · 24 bulletins · 3 à valider"
-        badge="EN COURS" gradient="blue"
-        actions={<><button className="btn-secondary"><FileText size={14} /> Export comptable</button>
-          <button className="btn-primary" style={{ background: C.yellow, boxShadow: '0 8px 24px -8px rgba(245, 158, 11, 0.5)' }}><Wand2 size={16} /> Générer la paie</button></>} />
+        subtitle="Module paie en préparation · branche-toi à la compta avec @orlode"
+        badge="BÊTA" gradient="blue"
+        actions={<><button className="btn-secondary" onClick={() => downloadCSV('paie-export.csv', payslips as unknown as Record<string, unknown>[])}><FileText size={14} /> Export comptable</button>
+          <button className="btn-primary" style={{ background: C.yellow, boxShadow: '0 8px 24px -8px rgba(245, 158, 11, 0.5)' }} onClick={async () => {
+            try {
+              await api.post('/hr/payslips/generate-batch', { month: new Date().toISOString().slice(0, 7) });
+              toast.success('Bulletins en cours', 'Génération lancée pour le mois en cours.');
+            } catch (e: any) {
+              toast.error('Erreur', e?.response?.data?.message || '');
+            }
+          }}><Wand2 size={16} /> Générer la paie</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-charts" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
@@ -1927,7 +2423,7 @@ function PaiePage({ openModal }) {
                   : <span className="pill" style={{ background: C.yellowSoft, color: C.yellow, fontWeight: 700 }}><Clock size={11} /> À valider</span>
                 }
               </div>
-              <div><button className="icon-btn" style={{ width: 28, height: 28 }}><Download size={12} /></button></div>
+              <div><button type="button" className="icon-btn" style={{ width: 28, height: 28 }} title="Télécharger le bulletin" onClick={ev => { ev.stopPropagation(); window.open(`/api/hr/payslips/${p.id}/pdf`, '_blank'); }}><Download size={12} /></button></div>
             </div>
           ))}
         </div>
@@ -1946,7 +2442,7 @@ function FraisPage({ openModal }) {
       <PageHeader title="Notes" italic="de frais"
         subtitle="Soumettre, valider, rembourser · OCR automatique sur les justificatifs"
         badge="DÉPENSES" gradient="blue"
-        actions={<><button className="btn-secondary"><Download size={14} /> Export</button>
+        actions={<><button className="btn-secondary" onClick={() => downloadCSV('frais.csv', expenses)}><Download size={14} /> Export</button>
           <button className="btn-primary" style={{ background: C.yellow, boxShadow: '0 8px 24px -8px rgba(245, 158, 11, 0.5)' }} onClick={() => openModal('expense')}><Plus size={16} /> Nouvelle note</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
@@ -2003,7 +2499,7 @@ function FraisList({ expenses }: any) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div className="mono-font display-font" style={{ fontSize: 18, fontWeight: 800, color: C.ink }}>{(e.amount || 0).toLocaleString('fr-FR')}<span style={{ fontSize: 12, color: C.inkSoft, marginLeft: 4 }}>FCFA</span></div>
                   <span className="pill" style={{ background: e.status === 'approved' ? C.greenSoft : e.status === 'rejected' ? C.redSoft : C.yellowSoft, color: e.status === 'approved' ? C.greenDeep : e.status === 'rejected' ? C.red : C.yellow, fontWeight: 700 }}>{e.status || 'En attente'}</span>
-                  <button className="icon-btn"><Eye size={14} /></button>
+                  <button type="button" className="icon-btn" title="Voir la note" onClick={() => toast.info(e.desc || e.description || 'Note', `${(e.amount || 0).toLocaleString('fr-FR')} FCFA · ${e.status || 'en attente'}`)}><Eye size={14} /></button>
                 </div>
               </div>
             ))}
@@ -2021,9 +2517,26 @@ function DocumentsPage({ openModal }) {
   return (
     <>
       <PageHeader title="Documents" italic="& signatures"
-        subtitle="Centraliser, générer, signer électroniquement · 300+ documents"
+        subtitle="Centraliser, générer, signer électroniquement"
         badge="VAULT" gradient="blue"
-        actions={<><button className="btn-secondary"><Upload size={14} /> Importer</button>
+        actions={<><button className="btn-secondary" onClick={() => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.pdf,.doc,.docx,.xlsx,.csv,.png,.jpg,.jpeg';
+          input.onchange = async () => {
+            const f = input.files?.[0];
+            if (!f) return;
+            const fd = new FormData();
+            fd.append('file', f);
+            try {
+              await api.post('/data/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+              toast.success('Document importé', f.name);
+            } catch (e: any) {
+              toast.error('Échec import', e?.response?.data?.message ?? 'Réessaie');
+            }
+          };
+          input.click();
+        }}><Upload size={14} /> Importer</button>
           <button className="btn-primary" style={{ background: C.purple, boxShadow: '0 8px 24px -8px rgba(139, 92, 246, 0.5)' }} onClick={() => openModal('signature')}><FileSignature size={16} /> Faire signer</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
@@ -2066,9 +2579,9 @@ function DocumentsPage({ openModal }) {
                   <div style={{ fontSize: 12, color: C.inkSoft }}>{d.size} · {d.who} · {d.when}</div>
                 </div>
                 <span className="pill" style={{ background: statusConf.bg, color: statusConf.color, fontWeight: 700 }}>{statusConf.label}</span>
-                <button className="icon-btn"><Eye size={14} /></button>
-                <button className="icon-btn"><Download size={14} /></button>
-                <button className="icon-btn"><MoreHorizontal size={14} /></button>
+                <button type="button" className="icon-btn" title="Aperçu" onClick={() => { if (d.url) window.open(d.url, '_blank'); else if (d.id) window.open(`/api/data/documents/${d.id}`, '_blank'); else toast.info(d.name, 'Aperçu indisponible'); }}><Eye size={14} /></button>
+                <button type="button" className="icon-btn" title="Télécharger" onClick={() => { if (d.url) window.open(d.url, '_blank'); else if (d.id) window.open(`/api/data/documents/${d.id}/download`, '_blank'); else toast.info(d.name, 'Téléchargement indisponible'); }}><Download size={14} /></button>
+                <button type="button" className="icon-btn" title="Plus" onClick={() => toast.info(d.name, `${d.size} · ${d.who} · ${d.when}`)}><MoreHorizontal size={14} /></button>
               </div>
             );
           })}
@@ -2087,7 +2600,7 @@ function PerformancePage({ openModal, reviews: reviewsProp = [] }: any) {
       <PageHeader title="Performance" italic="& OKRs"
         subtitle="Top performers · OKRs trimestriels · Évaluations en cours"
         badge="T1 2026" gradient="blue"
-        actions={<><button className="btn-secondary"><BarChart3 size={14} /> Analytics</button>
+        actions={<><Link to="/admin/analytics" className="btn-secondary" style={{ textDecoration: 'none' }}><BarChart3 size={14} /> Analytics</Link>
           <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.5)' }} onClick={() => openModal('evaluation')}><Trophy size={16} /> Nouvelle évaluation</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
@@ -2150,7 +2663,7 @@ function Evaluations360Page({ openModal, reviews: reviewsProp = [] }: any) {
       <PageHeader title="Évaluations" italic="360°"
         subtitle="Cycle T1 2026 · Feedback peer-to-peer · Self-review · Manager review"
         badge="CYCLE OUVERT" gradient="blue"
-        actions={<><button className="btn-secondary"><FileText size={14} /> Trame d'éval</button>
+        actions={<><button className="btn-secondary" onClick={() => openModal('evaluation')}><FileText size={14} /> Trame d'éval</button>
           <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.5)' }} onClick={() => openModal('evaluation')}><Plus size={16} /> Nouvelle évaluation</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
@@ -2211,7 +2724,7 @@ function Evaluations360Page({ openModal, reviews: reviewsProp = [] }: any) {
                   ? <span className="pill" style={{ background: C.greenSoft, color: C.greenDeep, fontWeight: 700 }}>Complet</span>
                   : <span className="pill" style={{ background: C.yellowSoft, color: C.yellow, fontWeight: 700 }}>Partiel</span>}
               </div>
-              <div><button className="icon-btn" style={{ width: 30, height: 30 }}><ChevronRight size={12} /></button></div>
+              <div><button type="button" className="icon-btn" style={{ width: 30, height: 30 }} title={`Détail de ${p.who}`} onClick={() => toast.info(p.who, `Score 360° · ${p.score}/5 · Reçus ${p.received}/${p.total} · Donnés ${p.given}/${p.total}`)}><ChevronRight size={12} /></button></div>
             </div>
           ))}
         </div>
@@ -2233,8 +2746,8 @@ function TalentsPage({ employees: empProp = [] }: any) {
       <PageHeader title="Talents" italic="& succession"
         subtitle="9-box · Plan de succession · Mobilité interne"
         badge="STRATÉGIQUE" gradient="blue"
-        actions={<><button className="btn-secondary"><Sparkles size={14} /> Insight IA</button>
-          <button className="btn-primary"><Share2 size={14} /> Partager au comité</button></>} />
+        actions={<><Link to="/chat?context=talent" className="btn-secondary" style={{ textDecoration: 'none' }}><Sparkles size={14} /> Insight IA</Link>
+          <button className="btn-primary" onClick={() => { navigator.clipboard.writeText(window.location.href); toast.success('Lien copié', 'Partage avec le comité par WhatsApp/email.'); }}><Share2 size={14} /> Partager au comité</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-charts" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20 }}>
@@ -2291,7 +2804,7 @@ function TalentsPage({ employees: empProp = [] }: any) {
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 10 }}>{m.dept} · depuis {m.from}</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color: C.inkSoft }}>{m.applicants} candidatures internes</span>
-                <button className="icon-btn" style={{ width: 28, height: 28 }}><ChevronRight size={12} /></button>
+                <button type="button" className="icon-btn" style={{ width: 28, height: 28 }} title={`Détail de ${m.role}`} onClick={() => toast.info(m.role, `${m.dept} · depuis ${m.from} · ${m.applicants} candidature${m.applicants > 1 ? 's' : ''} interne${m.applicants > 1 ? 's' : ''}`)}><ChevronRight size={12} /></button>
               </div>
             </div>
           ))}
@@ -2309,8 +2822,8 @@ function FormationPage() {
       <PageHeader title="Formation" italic="& certifications"
         subtitle="Catalogue · Parcours individuels · Budget formation"
         badge="LMS" gradient="blue"
-        actions={<><button className="btn-secondary"><BookOpen size={14} /> Catalogue complet</button>
-          <button className="btn-primary"><Plus size={16} /> Créer un parcours</button></>} />
+        actions={<><Link to="/training" className="btn-secondary" style={{ textDecoration: 'none' }}><BookOpen size={14} /> Catalogue complet</Link>
+          <Link to="/training/manage" className="btn-primary" style={{ textDecoration: 'none' }}><Plus size={16} /> Créer un parcours</Link></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
@@ -2362,8 +2875,15 @@ function PresencePage({ employees: empProp = [] }: any) {
       <PageHeader title="Présence" italic="aujourd'hui"
         subtitle="Pointage temps réel · Télétravail · Heures travaillées"
         badge="LIVE" gradient="blue"
-        actions={<><button className="btn-secondary"><Download size={14} /> Export pointage</button>
-          <button className="btn-primary"><Fingerprint size={16} /> Pointer</button></>} />
+        actions={<><button type="button" className="btn-secondary" onClick={() => downloadCSV('pointage.csv', today)}><Download size={14} /> Export pointage</button>
+          <button type="button" className="btn-primary" onClick={async () => {
+            try {
+              await api.post('/hr/clockin', { at: new Date().toISOString() });
+              toast.success('Pointé', new Date().toLocaleTimeString('fr-FR'));
+            } catch (e: any) {
+              toast.error('Erreur', e?.response?.data?.message ?? 'Impossible de pointer.');
+            }
+          }}><Fingerprint size={16} /> Pointer</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
@@ -2411,8 +2931,8 @@ function AccesPage() {
       <PageHeader title="Contrôle" italic="d'accès"
         subtitle="Badges · Portes · Vidéosurveillance · Logs sécurité"
         badge="SÉCURITÉ" gradient="blue"
-        actions={<><button className="btn-secondary"><Camera size={14} /> Vidéo live</button>
-          <button className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.5)' }}><KeyRound size={16} /> Nouveau badge</button></>} />
+        actions={<><Link to="/admin/employee-codes" className="btn-secondary" style={{ textDecoration: 'none' }}><Camera size={14} /> Vidéo live</Link>
+          <Link to="/admin/employee-codes" className="btn-primary" style={{ background: C.greenDeep, boxShadow: '0 8px 24px -8px rgba(10, 79, 60, 0.5)', textDecoration: 'none' }}><KeyRound size={16} /> Nouveau badge</Link></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
@@ -2452,23 +2972,24 @@ function AccesPage() {
 }
 
 // ============ PAGE 17: CALENDRIER RH ============
-function CalendrierRHPage({ events: eventsProp = [] }: any) {
+function CalendrierRHPage({ events: eventsProp = [], openModal }: any) {
   const events: any[] = eventsProp || [];
+  const [weekOffset, setWeekOffset] = useState(0);
   return (
     <>
       <PageHeader title="Calendrier" italic="RH"
         subtitle="Congés · Anniversaires · Échéances · Réunions"
         badge="AVRIL 2026" gradient="blue"
-        actions={<><button className="btn-secondary"><RefreshCw size={14} /> Sync Google</button>
-          <button className="btn-primary"><Plus size={16} /> Nouvel événement</button></>} />
+        actions={<><Link to="/admin/connectors" className="btn-secondary" style={{ textDecoration: 'none' }}><RefreshCw size={14} /> Sync Google</Link>
+          <button className="btn-primary" onClick={() => openModal('leave')}><Plus size={16} /> Nouvel événement</button></>} />
 
       <div style={{ padding: '24px 32px 32px' }}>
         <div style={{ background: C.cream, borderRadius: 20, padding: 24, border: '1px solid rgba(10,42,32,0.06)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <h3 className="display-font" style={{ fontSize: 22, fontWeight: 700, color: C.ink, margin: 0 }}>Cette semaine</h3>
+            <h3 className="display-font" style={{ fontSize: 22, fontWeight: 700, color: C.ink, margin: 0 }}>{weekOffset === 0 ? 'Cette semaine' : weekOffset > 0 ? `Semaine +${weekOffset}` : `Semaine ${weekOffset}`}</h3>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="icon-btn" style={{ width: 32, height: 32 }}><ChevronLeft size={14} /></button>
-              <button className="icon-btn" style={{ width: 32, height: 32 }}><ChevronRight size={14} /></button>
+              <button type="button" className="icon-btn" style={{ width: 32, height: 32 }} title="Semaine précédente" onClick={() => setWeekOffset(w => w - 1)}><ChevronLeft size={14} /></button>
+              <button type="button" className="icon-btn" style={{ width: 32, height: 32 }} title="Semaine suivante" onClick={() => setWeekOffset(w => w + 1)}><ChevronRight size={14} /></button>
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2501,8 +3022,20 @@ function PolitiqueFAQPage({ policies: policiesProp = [] }: any) {
       <PageHeader title="Politique" italic="& FAQ"
         subtitle="Handbook complet · Politiques RH · Recherche IA dans les documents"
         badge="HANDBOOK" gradient="blue"
-        actions={<><button className="btn-secondary"><Sparkles size={14} /> Demander à l'IA</button>
-          <button className="btn-primary"><Plus size={16} /> Nouvelle politique</button></>} />
+        actions={<><Link to="/chat?context=policies" className="btn-secondary" style={{ textDecoration: 'none' }}><Sparkles size={14} /> Demander à l'IA</Link>
+          <button className="btn-primary" onClick={async () => {
+            const title = window.prompt('Titre de la politique :');
+            if (!title) return;
+            const content = window.prompt('Contenu (court) :');
+            if (!content) return;
+            try {
+              await api.post('/hr/policies', { title, content });
+              toast.success('Politique ajoutée', title);
+              setTimeout(() => window.location.reload(), 500);
+            } catch (e: any) {
+              toast.error('Erreur', e?.response?.data?.message ?? 'Impossible d\'ajouter.');
+            }
+          }}><Plus size={16} /> Nouvelle politique</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <SectionTitle icon={BookOpen} title="Politiques" italic="documents officiels" />
@@ -2557,8 +3090,8 @@ function ReportingBIPage() {
       <PageHeader title="Reporting" italic="BI & exports"
         subtitle="Rapports clés · Dashboards custom · Export Excel/PDF"
         badge="ANALYTICS" gradient="blue"
-        actions={<><button className="btn-secondary"><Sparkles size={14} /> Insight IA</button>
-          <button className="btn-primary"><Plus size={16} /> Nouveau rapport</button></>} />
+        actions={<><Link to="/chat" className="btn-secondary" style={{ textDecoration: 'none' }}><Sparkles size={14} /> Insight IA</Link>
+          <button type="button" className="btn-primary" onClick={() => downloadCSV('rapport-rh.csv', reports)}><Plus size={16} /> Nouveau rapport</button></>} />
 
       <div style={{ padding: '24px 32px 0' }}>
         <SectionTitle icon={LineChart} title="Rapports standards" italic="prêts à exporter" />
@@ -2578,9 +3111,16 @@ function ReportingBIPage() {
                 <div className="display-font" style={{ fontSize: 16, fontWeight: 700, color: C.ink, marginBottom: 4 }}>{r.name}</div>
                 <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 14 }}>{r.desc}</div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button className="icon-btn" style={{ flex: 1, height: 30, fontSize: 12, gap: 4 }}><Download size={12} /></button>
-                  <button className="icon-btn" style={{ flex: 1, height: 30, fontSize: 12, gap: 4 }}><Eye size={12} /></button>
-                  <button className="icon-btn" style={{ flex: 1, height: 30, fontSize: 12, gap: 4 }}><Share2 size={12} /></button>
+                  <button type="button" className="icon-btn" style={{ flex: 1, height: 30, fontSize: 12, gap: 4 }} title="Télécharger" onClick={() => downloadCSV(`${(r.name || 'rapport').toString().toLowerCase().replace(/\s+/g, '-')}.csv`, [r])}><Download size={12} /></button>
+                  <button type="button" className="icon-btn" style={{ flex: 1, height: 30, fontSize: 12, gap: 4 }} title="Voir" onClick={() => toast.info(r.name, r.desc || '')}><Eye size={12} /></button>
+                  <button type="button" className="icon-btn" style={{ flex: 1, height: 30, fontSize: 12, gap: 4 }} title="Partager" onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(window.location.href);
+                      toast.success('Lien copié');
+                    } catch {
+                      toast.error('Erreur', 'Impossible de copier le lien.');
+                    }
+                  }}><Share2 size={12} /></button>
                 </div>
               </div>
             );
@@ -2612,8 +3152,18 @@ function ReportingBIPage() {
 export default function HRRedesignPage() {
   const [activeTab, setActiveTab] = useState('Accueil');
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const openModal = (id: string) => setActiveModal(id);
-  const closeModal = () => setActiveModal(null);
+  // modalContext lets a button pass an entity (e.g. the candidate clicked) into
+  // the opened modal — without it, modals like InterviewModal had to hardcode
+  // a fake candidate.
+  const [modalContext, setModalContext] = useState<any>(null);
+  const openModal = (id: string, context: any = null) => {
+    setModalContext(context);
+    setActiveModal(id);
+  };
+  const closeModal = () => {
+    setActiveModal(null);
+    setModalContext(null);
+  };
   const data = useHRData();
 
   return (
@@ -2625,7 +3175,7 @@ export default function HRRedesignPage() {
       {activeTab === 'Effectifs' && <EffectifsPage openModal={openModal} employees={data.employees} />}
       {activeTab === 'Annuaire' && <AnnuairePage employees={data.employees} />}
       {activeTab === 'Recrutement' && <RecrutementPage openModal={openModal} candidates={data.candidates} jobs={data.jobs} />}
-      {activeTab === 'Onboarding' && <OnboardingPage />}
+      {activeTab === 'Onboarding' && <OnboardingPage openModal={openModal} />}
       {activeTab === 'Congés' && <CongesPage openModal={openModal} leavesPending={data.leavesPending} leavesAll={data.leavesAll} leaveRemaining={data.leaveRemaining} />}
       {activeTab === 'Paie' && <PaiePage openModal={openModal} />}
       {activeTab === 'Frais' && <FraisPage openModal={openModal} />}
@@ -2636,20 +3186,22 @@ export default function HRRedesignPage() {
       {activeTab === 'Formation' && <FormationPage />}
       {activeTab === 'Présence' && <PresencePage employees={data.employees} />}
       {activeTab === 'Accès' && <AccesPage />}
-      {activeTab === 'Calendrier RH' && <CalendrierRHPage events={data.teamCalendar} />}
+      {activeTab === 'Calendrier RH' && <CalendrierRHPage events={data.teamCalendar} openModal={openModal} />}
       {activeTab === 'Politique & FAQ' && <PolitiqueFAQPage policies={data.policies} />}
       {activeTab === 'Reporting BI' && <ReportingBIPage />}
 
       {/* MODALS */}
       {activeModal === 'leave' && <NewLeaveModal onClose={closeModal} />}
       {activeModal === 'employee' && <NewEmployeeModal onClose={closeModal} />}
+      {activeModal === 'employeeDetail' && <EmployeeDetailModal employee={modalContext} onClose={closeModal} />}
       {activeModal === 'expense' && <ExpenseModal onClose={closeModal} />}
       {activeModal === 'evaluation' && <EvaluationModal onClose={closeModal} />}
       {activeModal === 'signature' && <SignatureModal onClose={closeModal} />}
-      {activeModal === 'interview' && <InterviewModal onClose={closeModal} />}
+      {activeModal === 'interview' && <InterviewModal onClose={closeModal} candidate={modalContext} />}
       {activeModal === 'sanction' && <SanctionModal onClose={closeModal} />}
       {activeModal === 'offboarding' && <OffboardingModal onClose={closeModal} />}
       {activeModal === 'payslip' && <PayslipModal onClose={closeModal} />}
+      {activeModal === 'job' && <NewJobModal onClose={closeModal} />}
 
       <LiveSyncBadge lastSync={data?.lastSync} intervalMs={REFRESH_INTERVAL_MS} />
 

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Upload, CheckCircle, AlertCircle, Loader2, Camera } from 'lucide-react';
-import { useFaceApi } from '@/hooks/useFaceApi';
+import { loadFaceApiModels, detectFaceDescriptor, faceApiModelsLoaded } from '@/lib/faceDetection';
 import api from '@/services/api';
 
 interface Employee {
@@ -25,17 +25,29 @@ export default function EnrollPhotoModal({ employee, onClose, onEnrolled }: Enro
   const [errorMsg, setErrorMsg] = useState('');
   const [previewURL, setPreviewURL] = useState<string | null>(employee.photoURL ?? null);
   const [faceFound, setFaceFound] = useState(false);
+  const [modelsLoaded, setModelsLoaded] = useState(faceApiModelsLoaded());
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const selectedFileRef = useRef<File | null>(null);
 
-  const { modelsLoaded, isLoading: modelsLoading, error: modelError, loadModels, detectSingleFace } = useFaceApi();
-
   useEffect(() => {
+    if (modelsLoaded) return;
     setStatus('loading_models');
-    loadModels().then(() => setStatus('idle'));
-  }, [loadModels]);
+    setModelsLoading(true);
+    loadFaceApiModels()
+      .then(() => {
+        setModelsLoaded(true);
+        setStatus('idle');
+      })
+      .catch(() => {
+        setModelError('Failed to load face recognition models. Check your internet connection.');
+        setStatus('error');
+      })
+      .finally(() => setModelsLoading(false));
+  }, [modelsLoaded]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -52,8 +64,8 @@ export default function EnrollPhotoModal({ employee, onClose, onEnrolled }: Enro
     const img = new Image();
     img.onload = async () => {
       try {
-        const detection = await detectSingleFace(img);
-        if (!detection) {
+        const descriptor = await detectFaceDescriptor(img);
+        if (!descriptor) {
           setStatus('error');
           setErrorMsg('No face detected in this photo. Please use a clear frontal photo.');
           return;
@@ -77,24 +89,25 @@ export default function EnrollPhotoModal({ employee, onClose, onEnrolled }: Enro
       setStatus('uploading');
       const formData = new FormData();
       formData.append('photo', file);
-      const uploadRes = await api.post<{ success: boolean; data: { photoURL: string } }>(
+      const uploadRes = await api.post<{ photoURL: string }>(
         `/faces/employees/${employee.id}/photo`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       );
-      const photoURL = uploadRes.data.data.photoURL;
+      const photoURL = uploadRes.data.photoURL;
 
       // Step 2 — Detect face and get descriptor from the image
       setStatus('detecting');
       const img = imgRef.current;
       if (!img) throw new Error('Image element not found');
-      const detection = await detectSingleFace(img);
-      if (!detection) throw new Error('Face not detected on second pass');
+      const descriptor = await detectFaceDescriptor(img);
+      if (!descriptor) throw new Error('Face not detected on second pass');
 
       // Step 3 — Save descriptor to backend
       setStatus('saving');
-      const descriptor = Array.from(detection.descriptor); // Float32Array → plain array
-      await api.post(`/faces/employees/${employee.id}/descriptor`, { descriptor });
+      await api.post(`/faces/employees/${employee.id}/descriptor`, {
+        descriptor: Array.from(descriptor), // Float32Array → plain array
+      });
 
       setStatus('done');
       onEnrolled(photoURL);

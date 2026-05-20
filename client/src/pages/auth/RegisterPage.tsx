@@ -8,29 +8,32 @@ import { auth, db } from '@/services/firebase';
 import { useLangStore } from '@/store/langStore';
 import { useSEO } from '@/hooks/useSEO';
 
+// Pricing pivot Apr 2026: $20/pack métier with 30-day free trial (no CB).
+// The actual pack picker lives in the onboarding wizard — this register page
+// just teases the model and lets the user start free.
 const PLANS = [
   {
-    id: 'starter',
-    label: 'Starter',
-    price: '$19.99',
-    period: '/mois',
-    desc: '4 agents au choix',
+    id: 'free',
+    label: 'Démarrer gratuit',
+    price: '$0',
+    period: '',
+    desc: '1 agent Knowledge · découvre la plateforme',
     highlight: false,
   },
   {
-    id: 'pro',
-    label: 'Pro',
-    price: '$49.99',
+    id: 'pack',
+    label: 'Pack métier',
+    price: '$20',
     period: '/mois',
-    desc: '8 agents au choix',
+    desc: '7 agents IA · 30 jours gratuits sans CB',
     highlight: true,
   },
   {
-    id: 'premium',
-    label: 'Premium',
-    price: '$99.99',
+    id: 'super',
+    label: 'Super Pack',
+    price: '$45',
     period: '/mois',
-    desc: '12 agents au choix',
+    desc: '11 agents flagship · couvre toute l\'entreprise',
     highlight: false,
   },
 ];
@@ -43,14 +46,14 @@ const ERRORS: Record<string, string> = {
 
 export default function RegisterPage() {
   useSEO({
-    title: 'Creer un compte | Orlode AI — 14 jours gratuits',
-    description: 'Creez votre espace Orlode AI. 14 jours d\'essai gratuits, aucune carte requise. 48 agents IA pretes a l\'emploi.',
+    title: 'Créer un compte | Orlode AI — 30 jours gratuits',
+    description: 'Crée ton espace Orlode AI. Pack métier à $20/mois, 30 jours d\'essai gratuits, sans CB. 30+ agents IA prêts à l\'emploi.',
     path: '/register',
   });
   const navigate = useNavigate();
   const { t } = useLangStore();
   const [form, setForm] = useState({
-    name: '', email: '', password: '', confirm: '', plan: 'starter', cgu: false,
+    name: '', email: '', password: '', confirm: '', plan: 'free', cgu: false,
   });
   const [showPwd, setShowPwd]       = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);

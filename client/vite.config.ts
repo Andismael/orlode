@@ -43,8 +43,12 @@ export default defineConfig({
           'charts-vendor': ['recharts'],
           'pdf-vendor': ['jspdf', 'jspdf-autotable'],
           'face-vendor': ['face-api.js'],
+          'three-vendor': ['three'],
+          'date-vendor': ['date-fns'],
+          'http-vendor': ['axios'],
         },
       },
     },
+    chunkSizeWarningLimit: 700,
   },
 });

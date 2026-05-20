@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Loader2, DollarSign, CheckCircle, XCircle, Clock, Filter } from 'lucide-react';
+import { Loader2, DollarSign, CheckCircle, XCircle, Clock, Filter, CreditCard } from 'lucide-react';
 import api from '@/services/api';
 import { useCurrency } from '@/hooks/useCurrency';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface Payment {
   id: string; type: string; companyId: string; planId?: string; agentId?: string;
@@ -88,16 +89,20 @@ export default function PaymentsPage() {
     (p.status === 'awaiting_confirmation' || p.status === 'pending') && (p.method === 'manual' || p.method === 'wave' || p.method === 'wave_manual');
 
   return (
-    <div className="p-6 space-y-5 max-w-6xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Paiements</h1>
-        {counts.pending > 0 && (
+    <SuperAdminPage
+      title="Paiements"
+      subtitle="Abonnements + marketplace, validation manuelle Wave"
+      icon={<CreditCard size={20} />}
+      maxWidth="6xl"
+      actions={
+        counts.pending > 0 ? (
           <span className="flex items-center gap-2 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">
             <Clock size={12} /> {counts.pending} en attente
           </span>
-        )}
-      </div>
-
+        ) : null
+      }
+    >
+      <div className="space-y-5">
       {flash && (
         <div className={`p-3 rounded-xl text-sm ${flash.tone === 'ok' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
           {flash.text}
@@ -195,6 +200,7 @@ export default function PaymentsPage() {
           </tbody>
         </table>
       </div>
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }

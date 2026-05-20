@@ -133,7 +133,7 @@ export default function LeadDetailPage() {
           <div className="flex gap-2">
             {lead.email && <a href={`mailto:${lead.email}`} className="p-2 border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-200" title="Email"><Mail size={14} className="text-gray-600" /></a>}
             {lead.phone && <a href={`tel:${lead.phone}`} className="p-2 border border-gray-200 rounded-lg hover:bg-green-50 hover:border-green-200" title="Appeler"><Phone size={14} className="text-gray-600" /></a>}
-            <Link to="/sales/quotes" className="p-2 border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200" title="Nouveau devis"><FileText size={14} className="text-gray-600" /></Link>
+            <Link to={`/sales/quotes?leadId=${leadId}`} className="p-2 border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200" title="Nouveau devis"><FileText size={14} className="text-gray-600" /></Link>
           </div>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Search, Shield, UserX, MoreVertical, Trash2, UserCheck, Crown } from 'lucide-react';
+import { Loader2, Search, Shield, UserX, MoreVertical, Trash2, UserCheck, Crown, Users } from 'lucide-react';
 import api from '@/services/api';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface User {
   uid: string; email: string; displayName: string; companyId: string;
@@ -40,16 +41,22 @@ export default function UsersPage() {
     u.companyId?.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>;
+  if (loading) return (
+    <SuperAdminPage title="Utilisateurs" icon={<Users size={20} />}>
+      <div className="flex justify-center py-12"><Loader2 className="animate-spin text-gray-400" size={24} /></div>
+    </SuperAdminPage>
+  );
 
   return (
-    <div className="p-6 space-y-5 max-w-6xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Utilisateurs</h1>
-        <span className="text-sm text-gray-400">{users.length} total</span>
-      </div>
-
-      <div className="grid grid-cols-4 gap-3">
+    <SuperAdminPage
+      title="Utilisateurs"
+      subtitle="Tous les comptes (admins, super admins, suspendus)"
+      icon={<Users size={20} />}
+      maxWidth="6xl"
+      actions={<span className="text-xs md:text-sm text-gray-400">{users.length} total</span>}
+    >
+      <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Total" value={users.length} color="text-blue-600" />
         <Stat label="Admins" value={users.filter(u => u.role === 'admin').length} color="text-violet-600" />
         <Stat label="Super Admins" value={users.filter(u => u.superAdmin).length} color="text-amber-600" />
@@ -152,7 +159,8 @@ export default function UsersPage() {
         </table>
         {filtered.length === 0 && <p className="text-center text-gray-400 py-8 text-sm">Aucun utilisateur</p>}
       </div>
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }
 

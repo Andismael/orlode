@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Building2, Users, Mic, Ban, RotateCcw, Trash2, Loader2, CheckCircle2, XCircle, Search, ChevronRight } from 'lucide-react';
 import api from '@/services/api';
+import SuperAdminPage from './_SuperAdminPage';
 
 interface Company { id: string; name: string; email?: string; plan?: string; status?: string; usersCount?: number; createdAt?: string; }
 interface Member { uid: string; id?: string; email?: string; displayName?: string; role?: string; status?: string; permissions?: string[]; photoURL?: string; }
@@ -75,20 +76,20 @@ export default function CompaniesMembersPage() {
   const selectedCompany = companies.find(c => c.id === selected);
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-xl bg-purple-100"><Building2 size={24} className="text-purple-600" /></div>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900">Entreprises & Utilisateurs</h1>
-          <p className="text-sm text-gray-500">Vue super admin — gère les membres de chaque entreprise</p>
-        </div>
+    <SuperAdminPage
+      title="Entreprises & Utilisateurs"
+      subtitle="Vue super admin — gère les membres de chaque entreprise"
+      icon={<Building2 size={20} />}
+      maxWidth="7xl"
+      actions={
         <div className="relative">
           <Search size={14} className="absolute left-3 top-2.5 text-gray-400" />
           <input type="text" placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)}
-            className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm w-64" />
+            className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm w-44 md:w-64" />
         </div>
-      </div>
-
+      }
+    >
+      <div className="space-y-6">
       {feedback && (
         <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${feedback.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
           {feedback.type === 'success' ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
@@ -230,6 +231,7 @@ export default function CompaniesMembersPage() {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </SuperAdminPage>
   );
 }

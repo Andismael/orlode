@@ -17,19 +17,23 @@ const adminNav: NavSection[] = [
   { label: 'Entreprise', defaultOpen: true, items: [
     { path: '/admin',       label: 'Paramètres',       icon: Building2 },
     { path: '/admin/users', label: 'Utilisateurs',      icon: Users },
+    { path: '/admin/domain', label: 'Domaine & emails', icon: Globe },
     // Roles & Permissions hidden until backend persistence is wired (was a UI-only stub)
     { path: '/admin/agent-permissions', label: 'Accès par agent', icon: UserCog },
     { path: '/admin/voice-permissions', label: 'Accès Voice Live', icon: UserCog },
     { path: '/admin/employee-codes',    label: 'Codes employés',   icon: KeyRound },
   ]},
-  { label: 'WhatsApp Suite', defaultOpen: true, items: [
-    { path: '/admin/whatsapp',                  label: 'Configuration',     icon: MessageCircle },
-    { path: '/admin/whatsapp/leads',            label: 'Leads',             icon: Users2 },
-    { path: '/admin/whatsapp/templates',        label: 'Templates Meta',    icon: BookOpen },
+  { label: 'Messagerie', defaultOpen: true, items: [
+    { path: '/admin/inbox',                     label: 'Inbox (WA + Telegram)', icon: MessageCircle },
+    { path: '/admin/whatsapp/leads',            label: 'Leads capturés',    icon: Users2 },
     { path: '/admin/whatsapp/broadcasts',       label: 'Broadcasts',        icon: Megaphone },
     { path: '/admin/whatsapp/auto-broadcasts',  label: 'Auto-broadcasts',   icon: Zap },
+    { path: '/admin/whatsapp/templates',        label: 'Templates Meta',    icon: BookOpen },
     { path: '/admin/whatsapp/catalog',          label: 'Catalogue produits', icon: ShoppingBag },
     { path: '/admin/whatsapp/ads',              label: 'Ads (CTW)',         icon: BarChart2 },
+    { path: '/admin/meta-ads',                  label: 'Meta Ads (config)', icon: BarChart2 },
+    { path: '/admin/whatsapp',                  label: 'Config WhatsApp',   icon: Settings },
+    { path: '/admin/telegram',                  label: 'Config Telegram',   icon: Settings },
   ]},
   { label: 'Growth Engine', defaultOpen: true, items: [
     { path: '/admin/social',          label: 'Comptes connectés', icon: Share2 },
@@ -54,7 +58,6 @@ const adminNav: NavSection[] = [
     { path: '/admin/shop',              label: 'Boutique',        icon: ShoppingBag },
   ]},
   { label: 'Autres canaux', items: [
-    { path: '/admin/telegram', label: 'Telegram Bot',    icon: MessageCircle },
     { path: '/admin/video',    label: 'Video Studio AI', icon: Video },
   ]},
   { label: 'Intégrations', items: [
@@ -127,6 +130,14 @@ export default function AdminLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
+  // Auto-close mobile drawer on route change. Belt-and-suspenders: NavLink
+  // onClick already calls setMobileOpen(false), but a path change is the
+  // source of truth — this catches any case where the drawer is open and
+  // the route changes (e.g. programmatic navigate, deep links, edge cases).
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
   const toggleSection = (label: string) => {
     setOpenSections(prev => ({ ...prev, [label]: !prev[label] }));
   };
@@ -142,10 +153,13 @@ export default function AdminLayout() {
     setOpenSections(none);
   };
 
-  const SidebarNav = ({ onClose }: { onClose?: () => void }) => (
+  // The mobile drawer ALWAYS renders expanded (collapsed=false) regardless of
+  // the outer auto-collapse state — collapsed mode hides labels + section
+  // headers, which makes the drawer unusable on touch.
+  const SidebarNav = ({ onClose, collapsed: collapsedProp }: { onClose?: () => void; collapsed: boolean }) => (
     <>
       <div className="flex items-center h-14 px-3 border-b border-white/10 flex-shrink-0">
-        {!collapsed && <span className="text-white font-semibold text-sm ml-1 flex items-center gap-2"><Settings size={16} /> Admin</span>}
+        {!collapsedProp && <span className="text-white font-semibold text-sm ml-1 flex items-center gap-2"><Settings size={16} /> Admin</span>}
         <div className="ml-auto flex items-center gap-1">
           {onClose && (
             <button onClick={onClose} className="text-white/60 hover:text-white p-1 md:hidden">
@@ -163,11 +177,11 @@ export default function AdminLayout() {
         className="flex items-center gap-2 px-3 py-2 text-white/60 hover:text-white hover:bg-white/5 text-xs transition-colors mx-2 mt-2 rounded-lg"
       >
         <ArrowLeft size={14} />
-        {!collapsed && <span>Retour à l'app</span>}
+        {!collapsedProp && <span>Retour à l'app</span>}
       </button>
 
       {/* Expand / collapse all (only visible when not collapsed) */}
-      {!collapsed && (
+      {!collapsedProp && (
         <div className="flex gap-1 px-3 mt-1 mb-1 text-[10px]">
           <button onClick={expandAll} className="flex-1 text-white/40 hover:text-white py-1 rounded transition-colors">
             Tout ouvrir
@@ -182,16 +196,15 @@ export default function AdminLayout() {
       <nav className="flex-1 overflow-y-auto px-2 py-1 space-y-1 no-scrollbar">
         {adminNav.map(section => {
           const isOpen = openSections[section.label] ?? false;
-          // Highlight the section header if any of its items matches the current path
           const containsActive = section.items.some(i =>
             location.pathname === i.path || location.pathname.startsWith(i.path + '/'),
           );
           return (
             <div key={section.label}>
-              {!collapsed ? (
+              {!collapsedProp ? (
                 <button
                   onClick={() => toggleSection(section.label)}
-                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                  className={`w-full flex items-center justify-between px-2 py-2.5 md:py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-colors ${
                     containsActive ? 'text-white/90' : 'text-white/40 hover:text-white/70'
                   }`}
                 >
@@ -203,10 +216,9 @@ export default function AdminLayout() {
                   />
                 </button>
               ) : (
-                // Collapsed sidebar — render a thin separator before each section
                 <div className="border-t border-white/5 my-1" />
               )}
-              {(isOpen || collapsed) && (
+              {(isOpen || collapsedProp) && (
                 <div className="space-y-0.5 mt-0.5">
                   {section.items.map(item => {
                     const Icon = item.icon;
@@ -217,15 +229,15 @@ export default function AdminLayout() {
                         end
                         onClick={() => onClose?.()}
                         className={({ isActive }) =>
-                          `flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors ${
+                          `flex items-center gap-2.5 px-2.5 py-2.5 md:py-1.5 rounded-lg transition-colors ${
                             isActive ? 'bg-blue-600 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'
                           }`
                         }
-                        title={collapsed ? item.label : undefined}
+                        title={collapsedProp ? item.label : undefined}
                       >
-                        <Icon size={15} className="flex-shrink-0" />
-                        {!collapsed && (
-                          <span className="whitespace-nowrap overflow-hidden text-xs">{item.label}</span>
+                        <Icon size={16} className="flex-shrink-0 md:!w-[15px] md:!h-[15px]" />
+                        {!collapsedProp && (
+                          <span className="whitespace-nowrap overflow-hidden text-sm md:text-xs">{item.label}</span>
                         )}
                       </NavLink>
                     );
@@ -259,7 +271,7 @@ export default function AdminLayout() {
         className="hidden md:flex flex-col flex-shrink-0 h-full transition-all duration-200"
         style={{ width: collapsed ? 56 : 220, background: '#1e293b' }}
       >
-        <SidebarNav />
+        <SidebarNav collapsed={collapsed} />
       </div>
 
       {/* ── Drawer mobile ──────────────────────────────────────────── */}
@@ -270,10 +282,10 @@ export default function AdminLayout() {
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ type: 'tween', duration: 0.22 }}
-            className="fixed left-0 top-0 h-full w-64 z-30 flex flex-col md:hidden"
+            className="fixed left-0 top-0 h-full w-72 z-30 flex flex-col md:hidden"
             style={{ background: '#1e293b' }}
           >
-            <SidebarNav onClose={() => setMobileOpen(false)} />
+            <SidebarNav collapsed={false} onClose={() => setMobileOpen(false)} />
           </motion.div>
         )}
       </AnimatePresence>
