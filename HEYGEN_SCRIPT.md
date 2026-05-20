@@ -24,45 +24,45 @@
 
 ## 🎬 TEXTE À DIRE — copier-coller dans HeyGen
 
-> **Astuce** : pour respecter le timing 90s, ne dépasse pas ~230 mots. Le bloc ci-dessous fait pile **~225 mots**.
+> **Astuce** : pour respecter le timing 90s, ne dépasse pas ~240 mots. Le bloc ci-dessous fait pile **~235 mots**.
 
 ---
 
 **[0:00 — Hook]**
 
-Salut. Si tu vends sur WhatsApp et que tu rates des messages la nuit, écoute bien.
+Salut. Si tu vends sur WhatsApp ou Telegram et que tu rates des messages la nuit, écoute bien.
 
-**[0:05 — Problème]**
+**[0:06 — Problème]**
 
-Aujourd'hui tu cliques. Tu réponds. Tu envoies des photos une par une. Tu oublies. Tes clients attendent. Et tu perds des ventes.
+Aujourd'hui tu cliques. Tu jongles entre deux apps. Tu réponds. Tu envoies des photos une par une. Tu oublies. Tes clients attendent. Et tu perds des ventes.
 
-**[0:15 — Solution intro]**
+**[0:17 — Solution intro]**
 
-Avec Orlode, tu crées ta boutique en deux minutes. Et ton intelligence artificielle répond à tes clients sur WhatsApp, vingt-quatre heures sur vingt-quatre.
+Avec Orlode, tu crées ta boutique en deux minutes. Et ton intelligence artificielle répond à tes clients — sur WhatsApp **et** Telegram — vingt-quatre heures sur vingt-quatre.
 
-**[0:25 — Démo Studio]**
+**[0:28 — Démo Studio]**
 
-Regarde. J'ouvre le Studio. Je choisis mon métier — restaurant. Mon style — Royal Bordeaux. Mon nom — Chez Maman. J'ajoute mon logo. Je connecte mon numéro WhatsApp. Je clique "Lancer". Voilà, ma boutique existe.
+Regarde. J'ouvre le Studio. Je choisis mon métier — restaurant. Mon style — Royal Bordeaux. Mon nom — Chez Maman. J'ajoute mon logo. Je connecte mon numéro WhatsApp **et mon bot Telegram**. Je clique "Lancer". Voilà, ma boutique existe.
 
-**[0:45 — Démo lien public]**
+**[0:48 — Démo lien public]**
 
-Mon site est en ligne. Cette adresse-là, je peux l'envoyer à mes clients tout de suite.
+Mon site est en ligne. Cette adresse-là, je l'envoie à mes clients tout de suite.
 
-**[0:52 — Démo WhatsApp]**
+**[0:55 — Démo WhatsApp + Telegram]**
 
-Maintenant je l'envoie sur WhatsApp à Marie. Marie clique. Elle voit mon menu. Elle veut réserver. Elle m'écrit. Et là, regarde — l'intelligence artificielle répond toute seule, en français, en moins de cinq secondes.
+Marie m'écrit sur WhatsApp pour réserver. Karim m'écrit sur Telegram. Deux canaux, mais tout arrive dans le même inbox. Et là, regarde — l'intelligence artificielle répond aux deux, en français, en moins de cinq secondes.
 
-**[1:12 — Bénéfice]**
+**[1:14 — Bénéfice]**
 
-Pendant que je dors, Orlode prend les commandes. Les réservations. Les demandes de devis. Et le matin, je vois tout dans mon inbox.
+Pendant que je dors, Orlode prend les commandes. Les réservations. Les demandes de devis. Sur WhatsApp, sur Telegram. Et le matin, je vois tout au même endroit.
 
-**[1:22 — Prix et CTA]**
+**[1:25 — Prix et CTA]**
 
 Vingt dollars par mois. Sans engagement. Activation en deux minutes. Va sur orlode.com. Ça change ta vie.
 
-**[1:32 — Outro]**
+**[1:35 — Outro]**
 
-Orlode. Ton entreprise. Sur WhatsApp.
+Orlode. Ton entreprise. Sur WhatsApp et Telegram.
 
 ---
 
@@ -76,8 +76,8 @@ Avant d'enregistrer dans HeyGen, prépare ces 6 captures (PNG haute résolution)
 | 2 | 0:30 - 0:35 | Écran "Quel style ?" avec Royal Bordeaux sélectionné | Studio étape 2 |
 | 3 | 0:35 - 0:45 | Écran "Identité" rempli ("Chez Maman" + logo + téléphone) | Studio étape 3 |
 | 4 | 0:45 - 0:52 | Écran de succès "Bienvenue chez Chez Maman 🎉" avec URL publique mise en évidence | Studio étape 5 |
-| 5 | 0:52 - 1:12 | Page publique `/menu/chez-maman` ouverte sur **téléphone** (idéalement filmé sur un vrai mobile) | https://orlode.com/menu/{ton-slug} |
-| 6 | 1:12 - 1:22 | Inbox Orlode (`/admin/inbox`) avec une conversation WhatsApp et la réponse IA visible | https://orlode.com/admin/inbox |
+| 5 | 0:55 - 1:14 | Page publique `/menu/chez-maman` ouverte sur **téléphone** (idéalement filmé sur un vrai mobile) | https://orlode.com/menu/{ton-slug} |
+| 6 | 1:14 - 1:25 | Inbox Orlode (`/admin/inbox`) avec **2 threads visibles côte à côte** : un avec badge **WA** (vert) + un avec badge **TG** (bleu), IA qui a répondu aux deux | https://orlode.com/admin/inbox |
 
 **Pro tip** : pour le visuel 5 (téléphone), filme-toi en train de scroller la page avec ton doigt. C'est 100x plus convaincant qu'un screen statique.
 
@@ -138,12 +138,12 @@ Coupe :
 Si le hook "Si tu vends sur WhatsApp" ne convertit pas, teste :
 
 **Variante A — Curiosité**
-> "Imagine. Tu dors. Et pourtant un client vient de réserver dans ton resto à minuit trois. Sans toi. Voilà comment."
+> "Imagine. Tu dors. Et pourtant un client vient de réserver dans ton resto à minuit trois — sur WhatsApp ou Telegram, ça change quoi pour toi ? Rien. Voilà comment."
 
 **Variante B — Promesse chiffrée**
-> "Voici comment passer de 50 messages WhatsApp qui te stressent par jour, à 0 message manqué, avec zéro effort en plus."
+> "Voici comment passer de 50 messages par jour qui te stressent — WhatsApp, Telegram, partout — à zéro message manqué, avec zéro effort en plus."
 
 **Variante C — Provocation locale**
-> "T'es commerçant à Abidjan, Dakar ou Lomé ? Si t'utilises WhatsApp pour vendre, t'as un problème que tu sais pas que t'as. Je t'explique."
+> "T'es commerçant à Abidjan, Dakar ou Lomé ? Si tes clients t'écrivent sur WhatsApp ou Telegram, t'as un problème que tu sais pas que t'as. Je t'explique."
 
 Garde le reste du script identique. Change juste le hook.
