@@ -101,6 +101,14 @@ const CabinetRedesignPage = lazy(() => import('@/pages/cabinet/CabinetRedesignPa
 const RealEstateRedesignPage = lazy(() => import('@/pages/realestate/RealEstateRedesignPage'));
 const ResidenceRedesignPage = lazy(() => import('@/pages/residence/ResidenceRedesignPage'));
 const PMEHubPage = lazy(() => import('@/pages/pme/PMEHubPage'));
+const SantePack       = lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.SantePack })));
+const ArtisanPack     = lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.ArtisanPack })));
+const AgriculturePack = lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.AgriculturePack })));
+const SecuriteTotPack = lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.SecuriteTotPack })));
+const SecuriteSitePack= lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.SecuriteSitePack })));
+const ModePack        = lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.ModePack })));
+const EducationPack   = lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.EducationPack })));
+const SuperPack       = lazy(() => import('@/pages/bundles/BundleHubPage').then(m => ({ default: m.SuperPack })));
 const EnterpriseHubPage = lazy(() => import('@/pages/enterprise/EnterpriseHubPage'));
 const MultiPackHomePage = lazy(() => import('@/pages/MultiPackHomePage'));
 
@@ -542,6 +550,17 @@ export default function App() {
             <Route path="agents/pme" element={<PMEHubPage />} />
             <Route path="agent/pme" element={<Navigate to="/agents/pme" replace />} />
             <Route path="pme" element={<Navigate to="/agents/pme" replace />} />
+
+            {/* Marketplace 4-agent bundle hubs — generic factory page per pack */}
+            <Route path="agents/sante"           element={<SantePack />} />
+            <Route path="agents/artisan"         element={<ArtisanPack />} />
+            <Route path="agents/agriculture"     element={<AgriculturePack />} />
+            <Route path="agents/securite-totale" element={<SecuriteTotPack />} />
+            <Route path="agents/securite-site"   element={<SecuriteSitePack />} />
+            <Route path="agents/mode"            element={<ModePack />} />
+            <Route path="agents/education"       element={<EducationPack />} />
+            <Route path="agents/super"           element={<SuperPack />} />
+            <Route path="agents/super-enterprise" element={<Navigate to="/agents/super" replace />} />
 
             <Route path="agents/datascientist" element={<DataScientistRedesignPage />} />
             <Route path="agents/kora" element={<KoraPage />} />
