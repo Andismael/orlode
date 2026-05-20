@@ -343,6 +343,27 @@ export const AGENT_CATALOG: AgentDefinition[] = [
       { id: 'general', name: 'General', description: 'Repond a tout ce que les autres ne couvrent pas' },
     ],
   },
+  {
+    id: 'kora', name: 'Kora', description: 'Compagnon personnel — se souvient, anticipe, écoute. WhatsApp + Web + voix.', icon: '🪕', category: 'core', minPlan: 'free', beta: true,
+    skills: [
+      { id: 'long_term_memory', name: 'Mémoire longue', description: 'Se souvient de tes préférences, projets et objectifs entre les sessions' },
+      { id: 'morning_checkin',  name: 'Check-in matinal', description: 'Te ping le matin uniquement quand il y a une vraie raison' },
+      { id: 'contextual_reminders', name: 'Rappels contextuels', description: 'Pas juste "rdv dans 30min" — "rdv avec X, la dernière fois vous parliez de Y"' },
+      { id: 'mood_aware', name: 'Détection humeur', description: 'Adapte son ton à ton énergie sans le mentionner' },
+      { id: 'forget_on_demand', name: 'Effacement', description: '"Oublie ce que je t\'ai dit sur X" → vraie suppression' },
+      { id: 'voice_natural', name: 'Voix naturelle', description: 'Gemini Live pour conversations vocales temps réel (Web premium)' },
+    ],
+  },
+  {
+    id: 'commerce', name: 'Boutique WhatsApp', description: 'Vends sur WhatsApp avec une photo : produit créé auto, catalogue, prise de commande, paiement cash/Wave', icon: '🛒', category: 'operations', minPlan: 'free',
+    skills: [
+      { id: 'photo_to_product', name: 'Photo → Produit', description: 'Owner envoie photo + nom + prix → fiche produit créée' },
+      { id: 'product_listing',  name: 'Catalogue',     description: 'Répond aux clients qui demandent les produits disponibles' },
+      { id: 'place_order',      name: 'Prise de commande', description: 'Collecte nom, téléphone, adresse, articles, méthode paiement' },
+      { id: 'order_management', name: 'Suivi commandes', description: 'Owner voit les commandes, marque comme payé, suit la livraison' },
+      { id: 'owner_otp',        name: 'OTP propriétaire', description: 'Code 6 chiffres pour authentifier l\'owner avant action sensible (24h session)' },
+    ],
+  },
 ];
 
 /** Plan limits for agent selection — users pick which agents they want */
@@ -367,7 +388,7 @@ export function resolvePlan(plan: string): string {
 
 /** Get agents available for a plan — all agents visible to all plans (pick any) */
 /** IDs of core agents that every plan gets automatically (not selectable). */
-const CORE_AGENT_IDS = new Set(['orchestrator', 'knowledge', 'wildcard']);
+const CORE_AGENT_IDS = new Set(['orchestrator', 'knowledge', 'wildcard', 'kora']);
 
 export function getAvailableAgents(plan: string): AgentDefinition[] {
   const resolved = resolvePlan(plan);

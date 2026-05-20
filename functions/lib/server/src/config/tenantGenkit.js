@@ -89,7 +89,7 @@ async function getTenantAi(companyId, userId) {
     // Build isolated Genkit instance with this key
     const ai = (0, genkit_1.genkit)({
         plugins: [(0, google_genai_1.googleAI)({ apiKey })],
-        model: 'googleai/gemini-3.1-flash-lite-preview',
+        model: 'googleai/gemini-2.5-flash',
     });
     cache.set(companyId, { ai, source, expiresAt: Date.now() + CACHE_TTL_MS });
     return { ai, source };

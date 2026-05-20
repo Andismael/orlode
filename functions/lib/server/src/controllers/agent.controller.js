@@ -126,10 +126,10 @@ async function agentSendMessage(req, res) {
             marketing: async () => (await Promise.resolve().then(() => __importStar(require('../agents/marketing.agent')))).marketingAgentTool(directArgs),
             legal: async () => (await Promise.resolve().then(() => __importStar(require('../agents/legal.agent')))).legalAgentTool(directArgs),
             juridique: async () => (await Promise.resolve().then(() => __importStar(require('../agents/legal.agent')))).legalAgentTool(directArgs),
-            reception: async () => (await Promise.resolve().then(() => __importStar(require('../agents/reception.agent')))).receptionAgentTool(baseArgs),
+            reception: async () => (await Promise.resolve().then(() => __importStar(require('../agents/reception.agent')))).receptionAgentTool(directArgs),
             training: async () => (await Promise.resolve().then(() => __importStar(require('../agents/training.agent')))).trainingAgentTool(directArgs),
             formation: async () => (await Promise.resolve().then(() => __importStar(require('../agents/training.agent')))).trainingAgentTool(directArgs),
-            knowledge: async () => (await Promise.resolve().then(() => __importStar(require('../agents/knowledge.agent')))).knowledgeAgentTool(baseArgs),
+            knowledge: async () => (await Promise.resolve().then(() => __importStar(require('../agents/knowledge.agent')))).knowledgeAgentTool(directArgs),
             comms: async () => (await Promise.resolve().then(() => __importStar(require('../agents/comms.agent')))).commsAgentChatTool(directArgs),
             communication: async () => (await Promise.resolve().then(() => __importStar(require('../agents/comms.agent')))).commsAgentChatTool(directArgs),
             meeting: async () => (await Promise.resolve().then(() => __importStar(require('../agents/meeting.agent')))).meetingAgentChatTool(directArgs),
@@ -140,9 +140,12 @@ async function agentSendMessage(req, res) {
             veille: async () => (await Promise.resolve().then(() => __importStar(require('../agents/news.agent')))).newsAgentTool(directArgs),
             coach: async () => (await Promise.resolve().then(() => __importStar(require('../agents/coach.agent')))).coachAgentTool(directArgs),
             it: async () => (await Promise.resolve().then(() => __importStar(require('../agents/it.agent')))).itAgentTool(directArgs),
-            datascientist: async () => (await Promise.resolve().then(() => __importStar(require('../agents/datascientist.agent')))).dataScientistAgentTool(baseArgs),
-            cybersecurity: async () => (await Promise.resolve().then(() => __importStar(require('../agents/cybersecurity.agent')))).cybersecurityAgentTool(baseArgs),
-            security: async () => (await Promise.resolve().then(() => __importStar(require('../agents/cybersecurity.agent')))).cybersecurityAgentTool(baseArgs),
+            datascientist: async () => (await Promise.resolve().then(() => __importStar(require('../agents/datascientist.agent')))).dataScientistAgentTool(directArgs),
+            cybersecurity: async () => (await Promise.resolve().then(() => __importStar(require('../agents/cybersecurity.agent')))).cybersecurityAgentTool(directArgs),
+            security: async () => (await Promise.resolve().then(() => __importStar(require('../agents/cybersecurity.agent')))).cybersecurityAgentTool(directArgs),
+            // Approval / workflow agent — core platform agent included with every $20 pack
+            approval: async () => (await Promise.resolve().then(() => __importStar(require('../agents/approval.agent')))).approvalAgentTool(baseArgs),
+            workflow: async () => (await Promise.resolve().then(() => __importStar(require('../agents/approval.agent')))).approvalAgentTool(baseArgs),
         };
         let result;
         if (targetAgent && DIRECT_AGENTS[targetAgent]) {

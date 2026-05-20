@@ -35,7 +35,14 @@ async function logSentEmail(opts: {
   }
 }
 
-const resend = new Resend(process.env['RESEND_API_KEY']);
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (_resend) return _resend;
+  const key = process.env['RESEND_API_KEY'];
+  if (!key) throw new Error('RESEND_API_KEY missing — email send unavailable');
+  _resend = new Resend(key);
+  return _resend;
+}
 
 const FROM_DEFAULT = process.env['RESEND_FROM'] ?? 'Orlode AI <noreply@music.zinakonect.com>';
 
@@ -196,6 +203,7 @@ export async function sendEmail(opts: SendEmailOptions): Promise<EmailResult> {
       content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
     }));
   }
+  const resend = getResend();
   const { data, error } = await resend.emails.send(resendPayload as unknown as Parameters<typeof resend.emails.send>[0]);
 
   if (error) {

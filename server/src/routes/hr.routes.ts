@@ -360,13 +360,19 @@ router.get('/employees', asyncHandler(async (req: AuthenticatedRequest, res: Res
 
 // GET /api/hr/onboarding/:userId
 router.get('/onboarding/:userId', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const callerCompanyId = req.user?.companyId;
+  if (!callerCompanyId) throw new AppError('Auth required', 401);
   const db = getFirestore();
 
-  // Get user name
+  // Get user name + SECURITY: cross-tenant guard
   const userDoc = await safe(async () => {
     const doc = await db.collection('users').doc(req.params.userId).get();
-    return doc.exists ? doc.data() : null;
+    if (!doc.exists) return null;
+    const data = doc.data();
+    if ((data?.['companyId'] as string) !== callerCompanyId) return null; // refuse cross-tenant read
+    return data;
   }, null);
+  if (!userDoc) throw new AppError('User not found', 404);
   const employeeName = userDoc?.['displayName'] ?? userDoc?.['email'] ?? '';
 
   // Get onboarding items
@@ -552,10 +558,16 @@ router.post('/interviews', hrAdmin, asyncHandler(async (req: AuthenticatedReques
 
 // GET /api/hr/employees/:id — detailed employee profile
 router.get('/employees/:id', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const callerCompanyId = req.user?.companyId;
+  if (!callerCompanyId) throw new AppError('Auth required', 401);
   const db = getFirestore();
   const doc = await db.collection('users').doc(req.params.id).get();
   if (!doc.exists) throw new AppError('Employee not found', 404);
   const data = doc.data()!;
+  // SECURITY: cross-tenant guard — refuse if the target user belongs to another company
+  if ((data['companyId'] as string) !== callerCompanyId) {
+    throw new AppError('Employee not found', 404);
+  }
   res.json({ success: true, data: { id: doc.id, ...data } });
 }));
 
@@ -568,6 +580,65 @@ router.get('/employees/:id/documents', asyncHandler(async (req: AuthenticatedReq
   const snap = await getFirestore().collection(`companies/${companyId}/hrDocuments`)
     .where('userId', '==', req.params.id).limit(50).get();
   res.json({ success: true, data: snap.docs.map(d => ({ id: d.id, ...d.data() })) });
+}));
+
+// PATCH /api/hr/employees/:id — update editable fields on the employee profile
+router.patch('/employees/:id', hrAdmin, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new AppError('Auth required', 401);
+  const allowed = [
+    'displayName', 'firstName', 'lastName', 'email', 'phone', 'whatsappPhone',
+    'address', 'birthDate', 'jobTitle', 'department', 'manager', 'startDate',
+    'baseSalary', 'currency', 'employmentType', 'workHours', 'emergencyContact',
+    'nationalId', 'photoUrl',
+  ];
+  const body = req.body as Record<string, unknown>;
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  for (const key of allowed) {
+    if (key in body) updates[key] = body[key];
+  }
+  if (Object.keys(updates).length === 1) throw new AppError('Aucune mise à jour valide.', 400);
+
+  const db = getFirestore();
+  // Cross-tenant guard via the user doc
+  const userDoc = await db.collection('users').doc(req.params.id).get();
+  if (!userDoc.exists || (userDoc.data()?.['companyId'] as string) !== companyId) {
+    throw new AppError('Employee not found', 404);
+  }
+  await db.collection('users').doc(req.params.id).set(updates, { merge: true });
+  // Mirror to companies/{cid}/employees/{id} so dashboard queries stay coherent
+  await db.collection(`companies/${companyId}/employees`).doc(req.params.id)
+    .set(updates, { merge: true }).catch(() => null);
+  res.json({ success: true });
+}));
+
+// GET /api/hr/employees/:id/contracts — all contracts attached to this employee
+router.get('/employees/:id/contracts', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new AppError('Auth required', 401);
+  const db = getFirestore();
+  // Resolve email to also catch contracts linked via signatoryEmail
+  const userDoc = await db.collection('users').doc(req.params.id).get();
+  const email = userDoc.exists ? (userDoc.data()?.['email'] as string | undefined) : undefined;
+
+  const colRef = db.collection(`companies/${companyId}/contracts`);
+  const [byEmployeeId, byEmail] = await Promise.all([
+    colRef.where('employeeId', '==', req.params.id).limit(100).get().catch(() => null),
+    email ? colRef.where('signatoryEmail', '==', email).limit(100).get().catch(() => null) : Promise.resolve(null),
+  ]);
+  const seen = new Set<string>();
+  const contracts: Record<string, unknown>[] = [];
+  for (const snap of [byEmployeeId, byEmail]) {
+    if (!snap) continue;
+    for (const doc of snap.docs) {
+      if (seen.has(doc.id)) continue;
+      seen.add(doc.id);
+      contracts.push({ id: doc.id, ...doc.data() });
+    }
+  }
+  // Sort by createdAt desc (string ISO comparison works for ISO format)
+  contracts.sort((a, b) => String(b['createdAt'] ?? '').localeCompare(String(a['createdAt'] ?? '')));
+  res.json({ success: true, data: contracts });
 }));
 
 // POST /api/hr/documents/certificate — generate certificate

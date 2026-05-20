@@ -16,13 +16,13 @@ else {
 }
 exports.ai = (0, genkit_1.genkit)({
     plugins,
-    model: 'googleai/gemini-3.1-flash-lite-preview',
+    model: 'googleai/gemini-2.5-flash',
 });
 // Processing rapide — OCR, classification, entités, traduction, réunions
-exports.GEMINI_FLASH = 'googleai/gemini-3.1-flash-lite-preview';
+exports.GEMINI_FLASH = 'googleai/gemini-2.5-flash';
 // Raisonnement lourd — orchestrator, complex agents
-exports.GEMINI_PRO = 'googleai/gemini-3.1-flash-lite-preview';
+exports.GEMINI_PRO = 'googleai/gemini-2.5-flash';
 // Ultra low-cost — labeling, détection de langue, tâches simples
-exports.GEMINI_FLASH_LITE = 'googleai/gemini-3.1-flash-lite-preview';
+exports.GEMINI_FLASH_LITE = 'googleai/gemini-2.5-flash';
 exports.TEXT_EMBEDDING_MODEL = 'googleai/gemini-embedding-001';
 //# sourceMappingURL=genkit.config.js.map

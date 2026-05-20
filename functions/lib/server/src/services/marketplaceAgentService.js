@@ -25,11 +25,26 @@ async function getInstalledMarketplaceAgents(companyId) {
     }
     try {
         const db = (0, firebase_config_1.getFirestore)();
+        // Pull active + trialing in one query, then filter expired trials in memory.
+        // Avoids needing a Firestore composite index on (status, trialEndsAt).
         const snap = await db.collection(`companies/${companyId}/installedAgents`)
-            .where('status', '==', 'active')
+            .where('status', 'in', ['active', 'trialing'])
             .limit(50)
             .get();
-        const agents = snap.docs.map(doc => {
+        const nowMs = Date.now();
+        const agents = snap.docs
+            .filter(doc => {
+            const d = doc.data();
+            if (d['status'] === 'active')
+                return true;
+            // Trialing agents are accessible only while the trial window is open.
+            const ends = d['trialEndsAt'];
+            const endsMs = ends instanceof Date ? ends.getTime() :
+                typeof ends?.toMillis === 'function' ? ends.toMillis() :
+                    typeof ends === 'string' ? new Date(ends).getTime() : 0;
+            return endsMs > nowMs;
+        })
+            .map(doc => {
             const d = doc.data();
             const config = d['cachedConfig'] ?? {};
             return {

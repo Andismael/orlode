@@ -66,18 +66,47 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
   // ── Handle delivery/read status updates ────────────────────────────────
   const statuses = whatsappService.parseStatuses?.(body);
   if (statuses && statuses.length > 0) {
+    // Log every status update so we can debug delivery problems quickly
+    // (e.g. failed delivery outside the 24h customer service window).
+    for (const st of statuses) {
+      logger.info('[WhatsApp] Status webhook', {
+        messageId: st.messageId,
+        status: st.status,           // sent | delivered | read | failed
+        recipient: (st as any).recipient_id ?? (st as any).recipientId,
+        errors: (st as any).errors,  // Meta error codes if status === 'failed'
+        timestamp: st.timestamp,
+      });
+    }
     setImmediate(async () => {
       try {
         const db = getFirestore();
         for (const st of statuses) {
-          // Update message status in Firestore
-          const snap = await db.collectionGroup('whatsappMessages')
-            .where('waMessageId', '==', st.messageId)
-            .limit(1).get();
+          // Update message status in Firestore. We previously used a
+          // collectionGroup query which requires a composite index — replaced
+          // by a tenant-scoped lookup so it works without admin index setup.
+          // `whatsappMessages` is per-company; we extract companyId from the
+          // outer webhook body (set by Meta) when available, fall back to a
+          // best-effort collectionGroup query.
+          let snap;
+          try {
+            snap = await db.collectionGroup('whatsappMessages')
+              .where('messageId', '==', st.messageId)
+              .limit(1).get();
+            if (snap.empty) {
+              snap = await db.collectionGroup('whatsappMessages')
+                .where('waMessageId', '==', st.messageId)
+                .limit(1).get();
+            }
+          } catch {
+            // Index missing — skip update silently; the status info is in the
+            // log above and the outbound message still appears in the inbox.
+            continue;
+          }
           if (!snap.empty) {
             await snap.docs[0].ref.update({
               deliveryStatus: st.status,
               deliveryTimestamp: new Date(st.timestamp),
+              ...(((st as any).errors) ? { deliveryErrors: (st as any).errors } : {}),
             });
           }
         }
@@ -91,7 +120,10 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
   // Allow audio messages with empty .message (we'll transcribe). Block only
   // when there's nothing to process at all.
   if (!incoming) return;
-  const hasContent = !!incoming.message || (incoming.type === 'audio' && !!incoming.audioId);
+  const hasContent =
+    !!incoming.message ||
+    (incoming.type === 'audio' && !!incoming.audioId) ||
+    (incoming.type === 'image' && !!incoming.imageId);
   if (!hasContent) return;
 
   // ── BOT-TO-BOT LOOP GUARD ──────────────────────────────────────────────
@@ -118,6 +150,25 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
     logger.warn('[WhatsApp] Loop-guard check failed (continuing)', { error: err instanceof Error ? err.message : err });
   }
 
+  // ── Rate limit + spam check (silent drop — Meta already 200-acked) ──
+  {
+    const { checkRateLimit, isSpam, isRepeatSpam } = await import('../utils/rateLimit');
+    const rlKey = `wa:${incoming.from}`;
+    const msgText = (incoming as { message?: string }).message ?? '';
+    if (!checkRateLimit(rlKey, { windowMs: 60_000, maxMessages: 25 })) {
+      logger.warn('[WhatsApp] Rate-limited', { from: incoming.from });
+      return;
+    }
+    if (isSpam(msgText)) {
+      logger.warn('[WhatsApp] Spam pattern dropped', { from: incoming.from, preview: msgText.slice(0, 40) });
+      return;
+    }
+    if (isRepeatSpam(rlKey, msgText)) {
+      logger.warn('[WhatsApp] Repeat spam dropped', { from: incoming.from });
+      return;
+    }
+  }
+
   // ── Deduplication: prefer messageId (unique per Meta) over timestamp.
   // Falls back to from+timestamp for old payloads without messageId.
   const dedupId = incoming.messageId || `${incoming.from}_${incoming.timestamp}`;
@@ -137,6 +188,31 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
       // The phoneNumberId comes from the incoming webhook payload (receiving business line)
       const phoneNumberId = incoming.phoneNumberId ?? process.env['WHATSAPP_PHONE_NUMBER_ID'] ?? '';
       const accessToken   = process.env['WHATSAPP_ACCESS_TOKEN'] ?? '';
+
+      // ── Cached owner-store lookup ─────────────────────────────────────────
+      // The webhook used to call findStoreByOwnerPhone 4-5 times per message
+      // (once per intercept). Each call = collectionGroup query, ~150-300ms.
+      // We now look up once at the top, reuse everywhere — saves 0.5-1.5s per
+      // inbound message on average. Also: scope the query to companyId (already
+      // resolved from phoneNumberId) so we avoid the collectionGroup composite
+      // index requirement entirely.
+      let _ownerStoreLookedUp = false;
+      let _ownerStore: { companyId: string; storeId: string; store: import('../agents/commerce.agent').Store } | null = null;
+      const getOwnerStore = async () => {
+        if (_ownerStoreLookedUp) return _ownerStore;
+        const { findStoreByOwnerPhone } = await import('../agents/commerce.agent');
+        // Pass companyId only if we resolved it (not 'default')
+        const scopedId = companyId !== 'default' ? companyId : undefined;
+        _ownerStore = await findStoreByOwnerPhone(incoming.from, scopedId);
+        _ownerStoreLookedUp = true;
+        return _ownerStore;
+      };
+
+      // Set to true when a previously-confirmed business action is being
+      // executed (owner replied "oui" to a confirmation prompt). Forces the
+      // brain switch to Orchestrator regardless of detection logic, since
+      // we already validated intent on the previous message.
+      let forceOrchestrator = false;
 
       // Route to the right company by matching phoneNumberId on the company doc (mirrored)
       let companyId = 'default';
@@ -331,13 +407,911 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
           const cfg = await whatsappService.getConfig(companyId).catch(() => null);
           if (cfg) {
             await whatsappService.sendMessage(cfg, incoming.from,
-              "👍 Bien noté — vous ne recevrez plus de messages marketing. Pour reprendre, écrivez-nous quand vous voulez.").catch(() => null);
+              "👍 Bien noté — vous ne recevrez plus de messages marketing. Pour reprendre, écrivez-nous quand vous voulez.", companyId).catch(() => null);
           }
           logger.info('[WhatsApp] Opted-out customer', { from: incoming.from, leadsAffected: leadsSnap.size });
         } catch (err) {
           logger.warn('[WhatsApp] opt-out processing failed (non-blocking)', { error: String(err) });
         }
         return; // skip orchestrator — don't reply with the bot
+      }
+
+      // ── Kora Standalone (B2C — dedicated WABA) ───────────────────────────
+      // If the receiving phoneNumberId matches the dedicated Kora WhatsApp
+      // Business Account, every inbound goes straight to Kora — there is no
+      // company, no commerce, no orchestrator. Identification is by phoneE164.
+      const koraStandalonePnid = process.env['KORA_STANDALONE_PHONE_NUMBER_ID'] ?? '';
+      if (finalMessage && koraStandalonePnid && phoneNumberId === koraStandalonePnid) {
+        try {
+          const { processStandaloneInbound } = await import('../services/kora/koraStandaloneService');
+          const result = await processStandaloneInbound({ phoneE164: incoming.from, message: finalMessage });
+          // Build the standalone WABA config from env vars (this WABA is owned
+          // by Orlode itself, not by a tenant — so we don't read it from Firestore).
+          const standaloneCfg = {
+            accessToken: process.env['KORA_STANDALONE_ACCESS_TOKEN'] ?? process.env['WHATSAPP_ACCESS_TOKEN'] ?? '',
+            phoneNumberId: koraStandalonePnid,
+            businessAccountId: process.env['KORA_STANDALONE_BUSINESS_ACCOUNT_ID'] ?? '',
+            webhookVerifyToken: process.env['WHATSAPP_VERIFY_TOKEN'] ?? '',
+            autoReply: true,
+            replyMode: 'text' as const,
+            ttsVoice: 'nova' as const,
+            language: 'fr',
+          };
+          try {
+            if (standaloneCfg.accessToken && result.reply) {
+              await whatsappService.sendMessage(standaloneCfg, incoming.from, result.reply, companyId).catch(() => null);
+            }
+          } catch (sendErr) {
+            logger.warn('[Kora] Standalone send failed', { error: String(sendErr) });
+          }
+          return; // Standalone fully handled — never fall through.
+        } catch (err) {
+          logger.error('[Kora] Standalone handler crashed', { error: String(err) });
+          return;
+        }
+      }
+
+      // ── Kora: personal companion (keyword-triggered) ─────────────────────
+      // Kora intercepts BEFORE Commerce so a personal "salut kora" never gets
+      // routed to the shop assistant. She only takes over for users who have
+      // opt-in (their phone is bound to a koraProfile) AND either say a trigger
+      // keyword or are already in an active Kora session (< 30 min).
+      if (finalMessage) {
+        try {
+          const { tryHandleKoraWhatsApp } = await import('../services/kora/koraWhatsAppHandler');
+          const koraOutcome = await tryHandleKoraWhatsApp({
+            companyId,
+            fromPhoneE164: incoming.from,
+            message: finalMessage,
+          });
+          if (koraOutcome.handled) {
+            if (koraOutcome.reply) {
+              const cfg = await whatsappService.getConfig(companyId).catch(() => null);
+              if (cfg) await whatsappService.sendMessage(cfg, incoming.from, koraOutcome.reply, companyId).catch(() => null);
+            }
+            return; // Kora handled this turn — skip Commerce + Orchestrator.
+          }
+        } catch (err) {
+          logger.warn('[Kora] WhatsApp handler failed (falling through)', { error: String(err) });
+        }
+      }
+
+      // ── Commerce Agent: photo + owner → product magic (the WAOUH) ────────
+      // If the sender owns a Commerce store AND sent an image (or replies "1/2/3"
+      // to a recent product creation), intercept BEFORE the regular orchestrator.
+      if (incoming.type === 'image' && incoming.imageId) {
+        logger.info('[Commerce] Image received', {
+          from: incoming.from, hasCaption: !!incoming.caption, hasAccessToken: !!accessToken, companyId,
+        });
+        try {
+          const { handleOwnerPhotoUpload, findAllStoresByOwnerPhone, detectStoreBusinessType } = await import('../agents/commerce.agent');
+          let ownerStore = await getOwnerStore();
+
+          // Multi-store disambiguation: if the owner has 2+ stores AND no
+          // clear hint (caption or recent intent), ask them where to add
+          // before downloading/processing the photo.
+          if (ownerStore) {
+            try {
+              const phoneKey0 = incoming.from.replace(/\D/g, '');
+              const sessionDoc0 = await db
+                .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/sessions/${phoneKey0}`)
+                .get()
+                .catch(() => null);
+              const sessionTarget0 = sessionDoc0?.data()?.['pendingProductBusinessType'] as string | undefined;
+              const awaitingMore0 = sessionDoc0?.data()?.['awaitingMorePhotosFor'] as string | undefined;
+              const captionTarget0 = detectStoreBusinessType(incoming.caption ?? '');
+              const hasHint = !!(sessionTarget0 || captionTarget0);
+              const allStores0 = await findAllStoresByOwnerPhone(incoming.from, ownerStore.companyId);
+              // Skip the picker if the owner is already mid-product (more
+              // photos coming for an existing article) — the photo handler
+              // will append to that product on the same store.
+              if (!hasHint && !awaitingMore0 && allStores0.length >= 2) {
+                // Save the imageId + caption so we can resume after the owner
+                // picks. Meta media IDs are valid for several hours, well
+                // within our 5-minute pending window.
+                await db
+                  .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/sessions/${phoneKey0}`)
+                  .set({
+                    pendingPhoto: {
+                      imageId: incoming.imageId,
+                      caption: incoming.caption ?? '',
+                      createdAt: new Date(),
+                      stores: allStores0.map(s => ({
+                        storeId: s.storeId,
+                        businessType: (s.store as { businessType?: string }).businessType ?? 'boutique',
+                        name: (s.store as { name?: string }).name ?? '',
+                      })),
+                    },
+                    updatedAt: new Date(),
+                  }, { merge: true });
+                const cfg0 = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+                if (cfg0) {
+                  const lines = allStores0.map((s, i) => {
+                    const bt = (s.store as { businessType?: string }).businessType ?? 'boutique';
+                    const labelMap: Record<string, string> = {
+                      boutique: '🛍 Boutique', restaurant: '🍽 Restaurant', hotel: '🏨 Hôtel',
+                      service: '💇 Salon', health: '🏥 Cabinet', realestate: '🏠 Immobilier',
+                    };
+                    return `*${i + 1}.* ${labelMap[bt] ?? bt} — ${(s.store as { name?: string }).name ?? ''}`;
+                  });
+                  await whatsappService.sendMessage(cfg0, incoming.from,
+                    `📸 Photo reçue. Tu as plusieurs packs activés — *à qui je l'ajoute ?*\n\n${lines.join('\n')}\n\n_Réponds juste avec le numéro (ex. *2*)._`, companyId);
+                }
+                logger.info('[Commerce] Photo arrived with multiple stores → asking owner to pick', {
+                  from: incoming.from, companyId: ownerStore.companyId, storeCount: allStores0.length,
+                });
+                return; // wait for owner's choice
+              }
+            } catch (err) {
+              logger.warn('[Commerce] Photo disambiguation failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+            }
+          }
+
+          logger.info('[Commerce] Owner lookup', {
+            from: incoming.from,
+            matched: !!ownerStore,
+            companyId: ownerStore?.companyId,
+            storeId: ownerStore?.storeId,
+          });
+          if (ownerStore) {
+            // Multi-store routing: if owner has multiple stores (boutique +
+            // restaurant + hotel + ...), pick the right one based on hints.
+            // Priority: 1) session.pendingProductBusinessType (saved during a
+            // conversational "ajouter au restaurant" intent earlier),
+            // 2) businessType keywords in the photo caption itself.
+            try {
+              const phoneKey = incoming.from.replace(/\D/g, '');
+              const sessionDoc = await db
+                .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/sessions/${phoneKey}`)
+                .get()
+                .catch(() => null);
+              const sessionTargetType = sessionDoc?.data()?.['pendingProductBusinessType'] as string | undefined;
+              const captionTargetType = detectStoreBusinessType(incoming.caption ?? '');
+              const targetType = sessionTargetType ?? captionTargetType ?? null;
+              const currentType = (ownerStore.store as { businessType?: string }).businessType ?? 'boutique';
+              if (targetType && targetType !== currentType) {
+                const allStores = await findAllStoresByOwnerPhone(incoming.from, ownerStore.companyId);
+                const matched = allStores.find(s => ((s.store as { businessType?: string }).businessType ?? 'boutique') === targetType);
+                if (matched) {
+                  logger.info('[Commerce] Photo routed to matching businessType store', {
+                    from: incoming.from, fromType: currentType, toType: targetType,
+                    fromStoreId: ownerStore.storeId, toStoreId: matched.storeId,
+                    source: sessionTargetType ? 'session' : 'caption',
+                  });
+                  ownerStore = { companyId: ownerStore.companyId, storeId: matched.storeId, store: matched.store };
+                }
+              }
+              // Consume the pending hint so a future random photo doesn't keep routing
+              if (sessionTargetType && sessionDoc) {
+                await sessionDoc.ref.set({ pendingProductBusinessType: null }, { merge: true });
+              }
+            } catch (err) {
+              logger.warn('[Commerce] Multi-store routing failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+            }
+            if (!accessToken) {
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (cfg) {
+                await whatsappService.sendMessage(cfg, incoming.from,
+                  '⚠️ Photo reçue, mais impossible de la télécharger (configuration serveur manquante). Le support a été notifié.', companyId);
+              }
+              logger.error('[Commerce] WHATSAPP_ACCESS_TOKEN env missing — cannot download media', { companyId: ownerStore.companyId });
+              return;
+            }
+            // ── Solution 2: immediate ACK so the merchant sees activity in <2s.
+            // Vision + Storage + Firestore can take 10-20s; user shouldn't wait
+            // in silence. Send the ack BEFORE awaiting handleOwnerPhotoUpload.
+            const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+            if (cfg) {
+              void whatsappService.sendMessage(cfg, incoming.from,
+                '📸 Photo reçue ! Je crée ton produit, ça prend 10-15 secondes…', companyId);
+            }
+            const result = await handleOwnerPhotoUpload({
+              companyId: ownerStore.companyId,
+              storeId: ownerStore.storeId,
+              ownerPhone: incoming.from,
+              imageId: incoming.imageId,
+              caption: incoming.caption,
+              accessToken,
+            });
+            if (cfg) {
+              await whatsappService.sendMessage(cfg, incoming.from, result.reply, companyId);
+              logger.info('[Commerce] Owner photo handled', {
+                companyId: ownerStore.companyId, storeId: ownerStore.storeId,
+                productId: result.productId, from: incoming.from,
+              });
+            }
+            return; // skip orchestrator — Commerce handled it
+          }
+          // Image received but no boutique matches this number → don't drop silently:
+          // log it, and let the orchestrator handle as a normal customer image.
+          logger.info('[Commerce] Image received from non-owner — falling through to orchestrator', { from: incoming.from });
+        } catch (err) {
+          logger.error('[Commerce] Owner photo handling failed', { error: err instanceof Error ? err.message : err });
+          // Fall through to orchestrator on failure rather than leave user hanging
+        }
+      }
+
+      // ── Commerce Agent: PIN setup / change via WhatsApp ────────────────
+      // "set pin 1234" / "change pin 1234" / "définis pin 5678"
+      if (incoming.type === 'text' && finalMessage) {
+        const pinSet = /^(?:set|change|d[eé]finis|d[eé]finit|nouveau)\s*pin\s+(\d{4,6})\s*$/i.exec(finalMessage.trim());
+        if (pinSet) {
+          try {
+            const ownerStore = await getOwnerStore();
+            if (ownerStore) {
+              const { isOwnerSessionValid, setStorePin, startOwnerOtp } = await import('../agents/commerce.agent');
+              const sessionOk = await isOwnerSessionValid(ownerStore.companyId, ownerStore.storeId, incoming.from);
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (!sessionOk) {
+                const code = await startOwnerOtp(ownerStore.companyId, ownerStore.storeId, incoming.from);
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  `🔒 Pour définir un PIN, valide d'abord avec ce code OTP : *${code}*\n_(5 min, ensuite session 24h)_`, companyId);
+                return;
+              }
+              const r = await setStorePin(ownerStore.companyId, ownerStore.storeId, pinSet[1]);
+              if (cfg) {
+                await whatsappService.sendMessage(cfg, incoming.from, r.ok
+                  ? `🔐 PIN enregistré (${pinSet[1].length} chiffres).\n\nIl te sera demandé pour les actions ultra-sensibles : exports, remboursements, suppressions massives.\n\n_Pour changer : tape \`change pin XXXX\`._`
+                  : `❌ ${r.reason ?? 'PIN invalide.'}`, companyId);
+              }
+              return;
+            }
+          } catch (err) {
+            logger.warn('[Commerce] PIN setup failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+          }
+        }
+      }
+
+      // ── Commerce Agent: customer asks for the address / location ───────
+      // Universal intercept (works for owner and visitors) — when anyone
+      // writes "adresse", "où êtes-vous", "comment venir", "localisation",
+      // we reply directly with the store address + Google Maps link AND a
+      // native WhatsApp location ping when GPS coords are configured.
+      // Faster than going through Clone+Gemini, and avoids the bot inventing
+      // a wrong address.
+      if (incoming.type === 'text' && finalMessage) {
+        const tAddr = finalMessage.trim().toLowerCase();
+        const wantsAddress =
+          /\b(adresse|address|localisation|location|position|gps)\b/i.test(tAddr) ||
+          /\b(o[uù]\s+(?:[eê]tes[\s-]?vous|se trouve|c'?est|vous trouvez))\b/i.test(tAddr) ||
+          /\b(comment\s+(?:venir|y\s+aller|vous\s+trouver))\b/i.test(tAddr) ||
+          /\b(c'?est\s+o[uù]|trouve[zr]?\s+vous|sit[eé]\s+o[uù])\b/i.test(tAddr) ||
+          /\b(envoie[\s-]?(?:moi)?\s+(?:l[ae'])?\s*localisation)\b/i.test(tAddr) ||
+          /\b(map|maps|carte)\b.*\b(votre|vos|ta|le|la)\b/i.test(tAddr);
+        if (wantsAddress) {
+          try {
+            // Find any store of the company that owns this WA number — the
+            // address is per-company, so the first store with one wins.
+            const storesSnap = await db.collection(`companies/${companyId}/stores`)
+              .limit(10).get().catch(() => null);
+            const storeWithAddr = storesSnap?.docs.find(d => {
+              const sd = d.data() as { address?: string; googleMapsUrl?: string; latitude?: number };
+              return !!(sd.address || sd.googleMapsUrl || typeof sd.latitude === 'number');
+            });
+            if (storeWithAddr) {
+              const sd = storeWithAddr.data() as {
+                name?: string; address?: string; googleMapsUrl?: string;
+                latitude?: number; longitude?: number;
+              };
+              const cfg = await whatsappService.getConfig(companyId).catch(() => null);
+              if (cfg) {
+                let lines = `📍 *${sd.name ?? 'Notre adresse'}*\n\n`;
+                if (sd.address) lines += `${sd.address}\n\n`;
+                const mapsUrl = sd.googleMapsUrl
+                  ?? (typeof sd.latitude === 'number' && typeof sd.longitude === 'number'
+                    ? `https://www.google.com/maps/search/?api=1&query=${sd.latitude},${sd.longitude}`
+                    : null);
+                if (mapsUrl) lines += `🗺 ${mapsUrl}`;
+                await whatsappService.sendMessage(cfg, incoming.from, lines.trim(), companyId);
+                // Also send a native WhatsApp location ping if we have coords
+                if (typeof sd.latitude === 'number' && typeof sd.longitude === 'number') {
+                  try {
+                    await whatsappService.sendLocation?.(cfg, incoming.from, {
+                      latitude: sd.latitude, longitude: sd.longitude,
+                      name: sd.name, address: sd.address,
+                    });
+                  } catch (err) {
+                    logger.warn('[Commerce] Native WA location send failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+                  }
+                }
+              }
+              logger.info('[Commerce] Address auto-reply sent', {
+                companyId, storeId: storeWithAddr.id, hasGps: typeof sd.latitude === 'number',
+              });
+              return;
+            }
+          } catch (err) {
+            logger.warn('[Commerce] Address intercept failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+          }
+        }
+      }
+
+      // ── Customer asks for photos (hotel rooms / immo properties) ───────
+      // When a visitor writes "photos chambres", "envoie image villa Cocody",
+      // "voir l'appartement", we send 2-3 native WhatsApp images of the
+      // matched item(s) + a link to the full public page. Faster + more
+      // visual than the clone's text response, and proper native render
+      // (not unreliable URL link previews).
+      if (incoming.type === 'text' && finalMessage) {
+        const tPhoto = finalMessage.trim().toLowerCase();
+        const wantsPhotos =
+          /\b(photo|photos|image|images|montre[\s-]?moi|envoie[\s-]?(?:moi)?\s+(?:la|le|les)?\s*(?:photo|image)|voir|aper[cç]u)\b/i.test(tPhoto)
+          && /\b(chambre|chambres|appart|appartement|villa|maison|bien|biens|residence|suite|studio|piece)\b/i.test(tPhoto);
+        if (wantsPhotos) {
+          try {
+            const storesSnap = await db.collection(`companies/${companyId}/stores`)
+              .where('businessType', 'in', ['hotel', 'realestate'])
+              .limit(5).get().catch(() => null);
+            if (storesSnap && !storesSnap.empty) {
+              const cfg = await whatsappService.getConfig(companyId).catch(() => null);
+              if (!cfg) return;
+              for (const storeDoc of storesSnap.docs) {
+                const sd = storeDoc.data() as { businessType?: string; slug?: string; name?: string };
+                const isHotel = sd.businessType === 'hotel';
+                // Hotel = rooms subcollection. Realestate = products subcollection.
+                const itemsSnap = isHotel
+                  ? await db.collection(`companies/${companyId}/stores/${storeDoc.id}/rooms`).limit(20).get()
+                  : await db.collection(`companies/${companyId}/stores/${storeDoc.id}/products`)
+                    .where('status', '==', 'active').limit(20).get();
+                if (itemsSnap.empty) continue;
+
+                // Match by name (or send first 2-3 if no specific name)
+                const items = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id: string }));
+                const named = items.find(it => {
+                  const name = ((it['name'] as string) ?? (it['number'] as string) ?? '').toLowerCase();
+                  return name && tPhoto.includes(name.toLowerCase());
+                });
+                const targets = named ? [named] : items.slice(0, 3);
+
+                const baseUrl = process.env['PUBLIC_APP_URL'] ?? 'https://mon-assistant-86bbd.web.app';
+                const publicUrl = sd.slug
+                  ? `${baseUrl}/${isHotel ? 'hotel' : 'biens'}/${sd.slug}`
+                  : null;
+
+                let sentAny = false;
+                for (const item of targets) {
+                  const photos: string[] = (item['imageUrls'] as string[] | undefined)?.filter(Boolean) ?? [];
+                  if (photos.length === 0 && item['imageUrl']) photos.push(item['imageUrl'] as string);
+                  if (photos.length === 0) continue;
+                  const itemName = (item['name'] as string) ?? (item['number'] as string) ?? '';
+                  const caption = `${isHotel ? '🛏' : '🏠'} *${itemName}*${publicUrl ? `\n${publicUrl}` : ''}`;
+                  // Send up to 3 images per item
+                  for (let i = 0; i < Math.min(photos.length, 3); i++) {
+                    await whatsappService.sendImage(cfg, incoming.from, photos[i],
+                      i === 0 ? caption : undefined);
+                    sentAny = true;
+                  }
+                }
+                if (sentAny && publicUrl) {
+                  await whatsappService.sendMessage(cfg, incoming.from,
+                    `Voir tout sur la page complète :\n${publicUrl}`, companyId);
+                }
+                if (sentAny) {
+                  logger.info('[Commerce] Photos sent natively', {
+                    companyId, businessType: sd.businessType, items: targets.length,
+                  });
+                  return;
+                }
+              }
+            }
+          } catch (err) {
+            logger.warn('[Commerce] Photo intercept failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+          }
+        }
+      }
+
+      // ── Commerce Agent: owner asks for shop link / share boutique ──────
+      // Quick intercept — owner says "lien boutique", "url boutique",
+      // "partage le lien", "envoie le lien"… → reply with public storefront
+      // URL directly (no Clone, no Gemini). Read-only, super fast.
+      if (incoming.type === 'text' && finalMessage) {
+        const t0 = finalMessage.trim().toLowerCase();
+        const wantsShopLink =
+          /\b(lien|url)\b.*\b(boutique|shop|magasin|catalogue|catalog)\b/i.test(t0) ||
+          /\b(partag[ezr]+|envoie?[zr]?|donne[zr]?|c'?est\s+quoi)\b.*\b(lien|url|adresse)\b.*\b(boutique|shop|magasin)?\b/i.test(t0) ||
+          /^(?:donne[\s-]?moi|envoie[\s-]?moi|partage[\s-]?moi)\b.*\b(lien|url)\b/i.test(t0) ||
+          /^(?:lien|url)\s+(?:de\s+)?(?:la|ma)\s+(?:boutique|magasin|shop)\b/i.test(t0);
+        if (wantsShopLink) {
+          try {
+            const ownerStore = await getOwnerStore();
+            if (ownerStore) {
+              const { ensureStoreSlug } = await import('../agents/commerce.agent');
+              const slug = await ensureStoreSlug(ownerStore.companyId, ownerStore.storeId, ownerStore.store);
+              const publicUrl = process.env['PUBLIC_APP_URL'] ?? 'https://mon-assistant-86bbd.web.app';
+              const shopLink = `${publicUrl}/shop/${slug}`;
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (cfg) {
+                await whatsappService.sendMessage(cfg, incoming.from,
+                  `🛍️ *Voici le lien public de ta boutique* :\n\n${shopLink}\n\n` +
+                  `Tu peux le partager partout : Instagram, Facebook, status WhatsApp, signature email…\n\n` +
+                  `Quand un client clique, il voit tes produits avec photos et un bouton *Commander* qui le ramène ici sur WhatsApp.`, companyId);
+              }
+              logger.info('[Commerce] Owner shop link sent', { companyId: ownerStore.companyId, slug });
+              return;
+            }
+          } catch (err) {
+            logger.warn('[Commerce] Shop-link intercept failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+          }
+        }
+      }
+
+      // ── Commerce Agent: variant follow-up reply ──────────────────────────
+      // After a photo→product, owner can reply "tailles S M L XL" or
+      // "couleurs rouge bleu" to add variants. Or "non" to skip. We only
+      // attempt this if the sender is a known owner — otherwise it's a
+      // customer message and goes to the orchestrator unchanged.
+      if (incoming.type === 'text' && finalMessage && !/^\s*\d{6}\s*$/.test(finalMessage)) {
+        try {
+          const { parseVariantReply, applyVariantsToLastProduct } = await import('../agents/commerce.agent');
+          const ownerStore = await getOwnerStore();
+          if (ownerStore) {
+            const parsed = parseVariantReply(finalMessage);
+            // Look up if there's a pending lastProductId — if not, no variant flow active
+            const sessionSnap = await getFirestore()
+              .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/sessions/${incoming.from.replace(/\D/g, '')}`)
+              .get().catch(() => null);
+            const hasPending = !!(sessionSnap?.exists && (sessionSnap.data() as { lastProductId?: string } | undefined)?.lastProductId);
+
+            if (hasPending && parsed) {
+              const r = await applyVariantsToLastProduct(ownerStore.companyId, ownerStore.storeId, incoming.from, parsed);
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (cfg && r.ok) {
+                const label = parsed.type === 'sizes' ? 'tailles' : 'couleurs';
+                const stockSummary = parsed.stocks
+                  ? parsed.values.map((v, i) => `${v}=${parsed.stocks![i]}`).join(', ')
+                  : parsed.values.join(', ');
+                const totalStock = parsed.stocks
+                  ? parsed.stocks.reduce((s, n) => s + n, 0)
+                  : (r.variantCount ?? 0);
+                await whatsappService.sendMessage(cfg, incoming.from,
+                  `✅ ${r.variantCount} ${label} ajoutées à *${r.productName}* (${stockSummary}). Stock total : ${totalStock}.`, companyId);
+                logger.info('[Commerce] Variants added', { companyId: ownerStore.companyId, productName: r.productName, count: r.variantCount });
+              }
+              return;
+            }
+            if (hasPending && /^(non|aucun|aucune|pas|skip|rien|c'?est bon|nope|no)\s*$/i.test(finalMessage)) {
+              // Owner skipped — clear pending and confirm
+              await getFirestore()
+                .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/sessions/${incoming.from.replace(/\D/g, '')}`)
+                .set({ lastProductId: null, updatedAt: new Date() }, { merge: true });
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (cfg) {
+                await whatsappService.sendMessage(cfg, incoming.from, '👌 Validé tel quel. Envoie une autre photo pour ajouter un nouveau produit.', companyId);
+              }
+              return;
+            }
+            // NEW: owner replied "oui/yes/ok" with pending product but no actual
+            // variant pattern → re-prompt with examples. Otherwise their "oui"
+            // would fall through to the Clone (which has no idea what's going on).
+            if (hasPending && /^(oui|yes|ok|d'?accord|vas[\s-]?y|👍)\s*$/i.test(finalMessage)) {
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (cfg) {
+                await whatsappService.sendMessage(cfg, incoming.from,
+                  `Super 👍 *Quelles variantes* ?\n\n` +
+                  `Tape par exemple :\n` +
+                  `   • _tailles S M L XL_\n` +
+                  `   • _S 2 M 3 L 5 XL 1_  _(stock par taille)_\n` +
+                  `   • _couleurs rouge bleu vert_\n\n` +
+                  `Ou tape *non* pour valider sans variantes.`, companyId);
+              }
+              return;
+            }
+            // Owner is talking but not about variants → fall through to orchestrator
+          }
+        } catch (err) {
+          logger.warn('[Commerce] Variant intercept failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+        }
+      }
+
+      // ── Commerce Agent: owner admin command intercept ────────────────────
+      // Owner can manage products via natural-language WhatsApp text:
+      //   "augmente prix Chemise à 7000"
+      //   "stock Chemise 10"
+      //   "supprime Chemise"
+      //   "archive Chemise"
+      // Requires authenticated owner session (24h after OTP verification).
+      if (incoming.type === 'text' && finalMessage && !/^\s*\d{6}\s*$/.test(finalMessage)) {
+        try {
+          const { parseOwnerCommand, executeOwnerCommand, isOwnerSessionValid, startOwnerOtp } = await import('../agents/commerce.agent');
+          const ownerStore = await getOwnerStore();
+          if (ownerStore) {
+            const cmd = parseOwnerCommand(finalMessage);
+            if (cmd) {
+              const sessionOk = await isOwnerSessionValid(ownerStore.companyId, ownerStore.storeId, incoming.from);
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (!sessionOk) {
+                // Trigger OTP — owner must verify before mutating products
+                const code = await startOwnerOtp(ownerStore.companyId, ownerStore.storeId, incoming.from);
+                if (cfg) {
+                  await whatsappService.sendMessage(cfg, incoming.from,
+                    `🔒 Pour modifier tes produits, envoie-moi ce code de validation : *${code}*\n\n_(Valide 5 minutes — ensuite ta session reste ouverte 24h.)_`, companyId);
+                }
+                logger.info('[Commerce] Owner command needs OTP', { type: cmd.type, from: incoming.from });
+                return;
+              }
+              const reply = await executeOwnerCommand(ownerStore.companyId, ownerStore.storeId, cmd);
+              if (cfg) await whatsappService.sendMessage(cfg, incoming.from, reply, companyId);
+              logger.info('[Commerce] Owner command executed', {
+                companyId: ownerStore.companyId, storeId: ownerStore.storeId,
+                type: cmd.type, productQuery: cmd.productQuery,
+              });
+              return;
+            }
+            // Owner is talking but not an admin command → fall through to orchestrator
+          }
+        } catch (err) {
+          logger.warn('[Commerce] Owner command intercept failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+        }
+      }
+
+      // ── Commerce Agent: conversational owner flow ────────────────────────
+      // Replaces the old cheat-sheet dump with a one-question-at-a-time flow.
+      // State machine via session.pendingFlow:
+      //   awaiting_create_choice → user picked help intent → ask "photo or manual?"
+      //   awaiting_manual_details → user picked "manual" → ask for "name, price, stock"
+      //
+      // Pattern: detect owner-y intent, branch on session.pendingFlow.
+      if (incoming.type === 'text' && finalMessage && !/^\s*\d{6}\s*$/.test(finalMessage)) {
+        logger.info('[Commerce-Conv] entered', {
+          type: incoming.type, preview: finalMessage.slice(0, 60), from: incoming.from,
+        });
+        try {
+          const ownerStore = await getOwnerStore();
+          logger.info('[Commerce-Conv] owner-check', { matched: !!ownerStore });
+          if (ownerStore) {
+            const t = finalMessage.trim().toLowerCase();
+            const phoneKey = incoming.from.replace(/\D/g, '');
+            const sessionRef = getFirestore()
+              .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/sessions/${phoneKey}`);
+            const sessionSnap = await sessionRef.get().catch(() => null);
+            const sessionData = sessionSnap?.data() as { pendingFlow?: string; pendingFlowAt?: { toDate?: () => Date } | Date } | undefined;
+            // Expire stale flows after 10 min
+            const flowAt = sessionData?.pendingFlowAt instanceof Date
+              ? sessionData.pendingFlowAt
+              : sessionData?.pendingFlowAt?.toDate?.();
+            const flowExpired = flowAt && Date.now() - flowAt.getTime() > 10 * 60 * 1000;
+            const pendingFlow = !flowExpired ? sessionData?.pendingFlow : undefined;
+            logger.info('[Commerce-Conv] state', {
+              pendingFlow,
+              hadSession: sessionSnap?.exists ?? false,
+              flowExpired: !!flowExpired,
+              t: t.slice(0, 60),
+            });
+
+            const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+            const setFlow = async (flow: string | null) => {
+              await sessionRef.set({
+                pendingFlow: flow,
+                pendingFlowAt: flow ? new Date() : null,
+                updatedAt: new Date(),
+              }, { merge: true });
+            };
+
+            // ── A−2. Admin Chat Mode — owner is in direct-to-orchestrator
+            // session. Every message bypasses Clone and runs through the
+            // Orchestrator. Exit on "fin", "quit", "exit", "/quit". Auto-
+            // expires after 30 min of inactivity.
+            const adminMode = sessionData ? (sessionData as Record<string, unknown>)['adminChatMode'] === true : false;
+            const adminModeAtRaw = sessionData ? (sessionData as Record<string, unknown>)['adminChatModeAt'] : undefined;
+            const adminModeAt = adminModeAtRaw instanceof Date
+              ? adminModeAtRaw
+              : (adminModeAtRaw as { toDate?: () => Date } | undefined)?.toDate?.();
+            const adminModeExpired = adminModeAt && Date.now() - adminModeAt.getTime() > 30 * 60 * 1000;
+            if (adminMode && !adminModeExpired) {
+              if (/^\s*(fin|quit|exit|sortir|stop\s*admin|\/quit|\/exit)\s*$/i.test(t)) {
+                await sessionRef.set({ adminChatMode: false, adminChatModeAt: null }, { merge: true });
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  `🔒 Mode admin désactivé. Je suis de retour en mode client (clone).\n\n_Tape *@admin* pour réactiver._`, companyId);
+                logger.info('[WhatsApp] Admin Chat Mode OFF', { companyId: ownerStore.companyId, from: incoming.from });
+                return;
+              }
+              // Refresh activity timestamp + force orchestrator for this turn
+              await sessionRef.set({ adminChatModeAt: new Date() }, { merge: true });
+              forceOrchestrator = true;
+              logger.info('[WhatsApp] Admin Chat Mode active → Orchestrator', {
+                companyId: ownerStore.companyId, from: incoming.from, preview: t.slice(0, 60),
+              });
+              // Don't return — fall through to handleMessage with brain=orchestrator
+            } else if (adminMode && adminModeExpired) {
+              // Auto-expire silently — back to clone mode
+              await sessionRef.set({ adminChatMode: false, adminChatModeAt: null }, { merge: true });
+              logger.info('[WhatsApp] Admin Chat Mode auto-expired (30min idle)', {
+                companyId: ownerStore.companyId, from: incoming.from,
+              });
+            }
+
+            // ── A−1. Owner is in multi-photo mode → "fini" closes the window
+            // After creating a product from a photo, we keep accepting more
+            // photos for the same article until the owner types "fini" /
+            // "terminé". That clears awaitingMorePhotosFor and prompts the
+            // variants step (the historical follow-up).
+            const awaitingMorePhotosFor = sessionData
+              ? (sessionData as Record<string, unknown>)['awaitingMorePhotosFor'] as string | undefined
+              : undefined;
+            if (awaitingMorePhotosFor && /^(fini|fini\.|term[ie]n[eé]|finir|c'?est tout|voil[aà]|stop)\s*$/i.test(t)) {
+              await sessionRef.set({ awaitingMorePhotosFor: null }, { merge: true });
+              const productSnap = await getFirestore()
+                .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/products/${awaitingMorePhotosFor}`)
+                .get()
+                .catch(() => null);
+              const data = productSnap?.data() as { name?: string; imageUrls?: string[] } | undefined;
+              const photoCount = data?.imageUrls?.length ?? 1;
+              if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                `✅ *${data?.name ?? 'Produit'}* finalisé avec ${photoCount} photo${photoCount > 1 ? 's' : ''}.\n\n🎯 *Variantes ?* Réponds par exemple :\n   • _tailles S M L XL_\n   • _S 2 M 3 L 5 XL 1_\n   • _couleurs rouge bleu vert_\n\nSinon réponds *non* et c'est validé.`, companyId);
+              logger.info('[Commerce] Multi-photo window closed', {
+                companyId: ownerStore.companyId, productId: awaitingMorePhotosFor, photoCount,
+              });
+              return;
+            }
+
+            // ── A0. Owner is replying to the multi-store photo picker ─────
+            // Earlier we received a photo + asked "à quel pack je l'ajoute ?
+            // 1) Boutique 2) Restaurant ...". Now they reply with a number
+            // or a keyword. Resolve and run the photo upload on the right store.
+            const pendingPhotoRaw = sessionData ? (sessionData as Record<string, unknown>)['pendingPhoto'] : undefined;
+            if (pendingPhotoRaw && typeof pendingPhotoRaw === 'object') {
+              const pp = pendingPhotoRaw as {
+                imageId?: string; caption?: string;
+                createdAt?: { toDate?: () => Date } | Date;
+                stores?: Array<{ storeId: string; businessType: string; name: string }>;
+              };
+              const created = pp.createdAt instanceof Date
+                ? pp.createdAt
+                : pp.createdAt?.toDate?.();
+              const expired = !created || Date.now() - created.getTime() > 5 * 60 * 1000;
+              if (expired) {
+                await sessionRef.set({ pendingPhoto: null }, { merge: true });
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  '⏱ La photo précédente a expiré (>5min). Renvoie-la stp.', companyId);
+                return;
+              }
+              const stores = pp.stores ?? [];
+              let picked: { storeId: string; businessType: string; name: string } | undefined;
+              const numMatch = t.match(/^\s*(\d{1,2})\s*$/);
+              if (numMatch) {
+                const idx = parseInt(numMatch[1], 10) - 1;
+                picked = stores[idx];
+              } else {
+                const { detectStoreBusinessType } = await import('../agents/commerce.agent');
+                const keyword = detectStoreBusinessType(t);
+                if (keyword) picked = stores.find(s => s.businessType === keyword);
+              }
+              if (!picked) {
+                if (cfg) {
+                  const lines = stores.map((s, i) => {
+                    const labelMap: Record<string, string> = {
+                      boutique: '🛍 Boutique', restaurant: '🍽 Restaurant', hotel: '🏨 Hôtel',
+                      service: '💇 Salon', health: '🏥 Cabinet', realestate: '🏠 Immobilier',
+                    };
+                    return `*${i + 1}.* ${labelMap[s.businessType] ?? s.businessType}`;
+                  });
+                  await whatsappService.sendMessage(cfg, incoming.from,
+                    `Je n'ai pas compris 🤔\n\n${lines.join('\n')}\n\n_Réponds juste avec le numéro (ex. *1*) ou tape *annuler*._`, companyId);
+                }
+                if (/^(annuler|cancel|stop)/i.test(t)) {
+                  await sessionRef.set({ pendingPhoto: null }, { merge: true });
+                  if (cfg) await whatsappService.sendMessage(cfg, incoming.from, '👌 Annulé.', companyId);
+                }
+                return;
+              }
+              // Clear pendingPhoto + run upload on the picked store
+              await sessionRef.set({ pendingPhoto: null }, { merge: true });
+              if (!accessToken) {
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  '⚠️ Photo reçue mais impossible de la télécharger (config serveur).', companyId);
+                return;
+              }
+              if (cfg) void whatsappService.sendMessage(cfg, incoming.from,
+                `📸 OK, je l'ajoute à *${picked.name || picked.businessType}* — 10-15s…`, companyId);
+              try {
+                const { handleOwnerPhotoUpload } = await import('../agents/commerce.agent');
+                const result = await handleOwnerPhotoUpload({
+                  companyId: ownerStore.companyId,
+                  storeId: picked.storeId,
+                  ownerPhone: incoming.from,
+                  imageId: pp.imageId ?? '',
+                  caption: pp.caption ?? '',
+                  accessToken,
+                });
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from, result.reply, companyId);
+                logger.info('[Commerce] Photo picker resolved → product created', {
+                  companyId: ownerStore.companyId, storeId: picked.storeId,
+                  type: picked.businessType, productId: result.productId,
+                });
+              } catch (err) {
+                logger.error('[Commerce] Photo picker upload failed', { error: err instanceof Error ? err.message : err });
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  `❌ Erreur pendant la création. Renvoie la photo stp.`, companyId);
+              }
+              return;
+            }
+
+            // ── A. User is in awaiting_create_choice → expect "1" or "2" ──
+            if (pendingFlow === 'awaiting_create_choice') {
+              if (/^\s*1\s*$|^(photo|avec photo|📸)/i.test(t)) {
+                await setFlow(null); // photo path is handled by image intercept naturally
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  `📸 Super 👍\n\nEnvoie-moi maintenant la photo du produit, avec en légende le *nom* et le *prix*.\n\nExemple :\n\`Chemise African - 5000\``, companyId);
+                logger.info('[Commerce] Owner chose photo flow', { companyId: ownerStore.companyId });
+                return;
+              }
+              if (/^\s*2\s*$|^(manuel|manuellement|texte|✍️)/i.test(t)) {
+                await setFlow('awaiting_manual_details');
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  `✍️ Parfait 👍\n\nDonne-moi en une seule ligne :\n*nom du produit*, *prix*, et *stock* (optionnel).\n\nExemple :\n\`Chemise African, 5000, stock 10\``, companyId);
+                logger.info('[Commerce] Owner chose manual flow', { companyId: ownerStore.companyId });
+                return;
+              }
+              // Unrecognized response, gently re-ask
+              if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                `Je n'ai pas compris 🤔\n\nRéponds juste *1* (photo) ou *2* (manuel).\n\nOu tape *annuler* pour arrêter.`, companyId);
+              if (/^(annuler|cancel|stop)/i.test(t)) {
+                await setFlow(null);
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from, `👌 Annulé.`, companyId);
+              }
+              return;
+            }
+
+            // ── B0. User is in awaiting_business_confirm → handle yes/no ──
+            // Owner previously asked something mutating ("relance les
+            // impayés"). We asked "tu veux que je m'en occupe ?" — now they
+            // reply oui/non.
+            if (pendingFlow === 'awaiting_business_confirm') {
+              const yesPattern = /^(oui|yes|ok|d'?accord|vas[\s-]?y|fais|go|🙏|👍)\b/i;
+              const noPattern  = /^(non|no|annule|stop|cancel|laisse)/i;
+              if (yesPattern.test(t)) {
+                const sessionData2 = sessionSnap?.data() as { pendingBusinessMessage?: string } | undefined;
+                const originalMsg = sessionData2?.pendingBusinessMessage;
+                if (!originalMsg) {
+                  await setFlow(null);
+                  if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                    "🤔 Je n'ai pas retrouvé ta demande. Reformule-la stp.", companyId);
+                  return;
+                }
+                // Replace finalMessage with the original business request,
+                // mark forceOrchestrator, clear flow, fall through to the
+                // orchestrator brain.
+                finalMessage = originalMsg;
+                forceOrchestrator = true;
+                await setFlow(null);
+                logger.info('[Commerce] Owner confirmed business action → escalating to Orchestrator', {
+                  companyId: ownerStore.companyId, original: originalMsg.slice(0, 80),
+                });
+                // Don't return — fall through to handleMessage below
+              } else if (noPattern.test(t)) {
+                await setFlow(null);
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from, "👌 Annulé. Si tu veux autre chose, dis-le simplement.", companyId);
+                return;
+              } else {
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  "Je n'ai pas compris 🤔 Réponds *oui* pour valider ou *non* pour annuler.", companyId);
+                return;
+              }
+            }
+
+            // ── B. User is in awaiting_manual_details → parse "name, price, stock" ──
+            if (pendingFlow === 'awaiting_manual_details') {
+              if (/^(annuler|cancel|stop)/i.test(t)) {
+                await setFlow(null);
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from, `👌 Annulé.`, companyId);
+                return;
+              }
+              // Parse: "name, price [, stock X]" — flexible
+              // Try comma-separated first
+              const parts = finalMessage.split(',').map(s => s.trim()).filter(Boolean);
+              let parsedName = '';
+              let parsedPrice = 0;
+              let parsedStock = 1;
+              if (parts.length >= 2) {
+                parsedName = parts[0];
+                const priceMatch = parts[1].match(/(\d+(?:[.,\s]\d+)*)/);
+                if (priceMatch) parsedPrice = parseInt(priceMatch[1].replace(/[.,\s]/g, ''), 10);
+                if (parts[2]) {
+                  const stockMatch = parts[2].match(/(\d+)/);
+                  if (stockMatch) parsedStock = parseInt(stockMatch[1], 10);
+                }
+              }
+              if (!parsedName || !parsedPrice || isNaN(parsedPrice) || parsedPrice <= 0) {
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  `🤔 Je n'ai pas pu lire les infos.\n\nFormat attendu :\n*nom*, *prix*, stock\n\nExemple :\n\`Chemise African, 5000, stock 10\`\n\n_Tape *annuler* pour arrêter._`, companyId);
+                return;
+              }
+              const { isOwnerSessionValid, startOwnerOtp, executeOwnerCommand } = await import('../agents/commerce.agent');
+              const sessionOk = await isOwnerSessionValid(ownerStore.companyId, ownerStore.storeId, incoming.from);
+              if (!sessionOk) {
+                const code = await startOwnerOtp(ownerStore.companyId, ownerStore.storeId, incoming.from);
+                if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                  `🔒 Pour créer ton premier produit, envoie-moi ce code : *${code}*\n_(Valide 5 min, ensuite ta session reste 24h.)_`, companyId);
+                return;
+              }
+              const reply = await executeOwnerCommand(ownerStore.companyId, ownerStore.storeId, {
+                type: 'create_product',
+                productQuery: parsedName,
+                productPrice: parsedPrice,
+                productStock: parsedStock,
+              });
+              await setFlow(null);
+              if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                `${reply}\n\n_Tu veux en ajouter un autre ? Tape *je veux ajouter un produit*._`, companyId);
+              logger.info('[Commerce] Manual product created via conversational flow', {
+                companyId: ownerStore.companyId, name: parsedName, price: parsedPrice, stock: parsedStock,
+              });
+              return;
+            }
+
+            // ── C. No active flow — detect intent to start one ────────────
+            const isCreateIntent =
+              /\b(je\s*veux|j'aimerais?|j'aimerai|je\s*voudrais|je\s*souhaite)\b.*\b(ajouter|cr[eé]er|publier|mettre|vendre)\b/i.test(t) ||
+              /\b(ajouter|publier)\b.*\b(produit|article|nouveau)\b/i.test(t);
+            const isManageIntent =
+              /\b(comment|aide|help)\b.*\b(g[eé]rer|fonctionne|marche|utiliser)\b/i.test(t) ||
+              /^(aide|help|menu)\b/i.test(t);
+            logger.info('[Commerce-Conv] intent-check', { isCreateIntent, isManageIntent });
+
+            if (isCreateIntent) {
+              // Detect target businessType (e.g. "ajoute au menu du resto" →
+              // 'restaurant'). Saved alongside pendingFlow so the photo
+              // handler can route the upload to the right store when the
+              // owner has activated multiple packs.
+              const { detectStoreBusinessType } = await import('../agents/commerce.agent');
+              const targetType = detectStoreBusinessType(t);
+              await sessionRef.set({
+                pendingFlow: 'awaiting_create_choice',
+                pendingFlowAt: new Date(),
+                pendingProductBusinessType: targetType ?? null,
+                updatedAt: new Date(),
+              }, { merge: true });
+              if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                `Parfait 👍 on va le créer ensemble.\n\nTu préfères :\n*1.* 📸 Avec une photo _(plus rapide)_\n*2.* ✍️ Manuellement\n\nRéponds juste *1* ou *2*.`, companyId);
+              logger.info('[Commerce] Owner create intent → asking choice', {
+                companyId: ownerStore.companyId, targetType,
+              });
+              return;
+            }
+
+            if (isManageIntent) {
+              if (cfg) await whatsappService.sendMessage(cfg, incoming.from,
+                `👋 Salut ! Pour gérer *${ownerStore.store.name}* depuis WhatsApp, dis-moi simplement ce que tu veux faire :\n\n• *ajouter un produit*\n• *voir mes commandes*\n• *modifier un prix*\n\nJe te guide étape par étape.`, companyId);
+              logger.info('[Commerce] Owner help intent → conversational menu', { companyId: ownerStore.companyId });
+              return;
+            }
+          }
+        } catch (err) {
+          logger.warn('[Commerce] Conversational owner flow failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+        }
+      }
+
+      // ── Commerce Agent: OTP code reply ───────────────────────────────────
+      // If a 6-digit code is sent and an owner OTP is pending, verify it.
+      if (incoming.type === 'text' && /^\s*\d{6}\s*$/.test(finalMessage)) {
+        try {
+          const { verifyOwnerOtp } = await import('../agents/commerce.agent');
+          const ownerStore = await getOwnerStore();
+          if (ownerStore) {
+            const code = finalMessage.trim();
+            const r = await verifyOwnerOtp(ownerStore.companyId, ownerStore.storeId, incoming.from, code);
+            if (r.ok) {
+              const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+              if (cfg) {
+                await whatsappService.sendMessage(cfg, incoming.from,
+                  '✅ Validé. Tu peux maintenant ajouter des produits, voir les commandes, marquer comme payé. Session valable 24h.', companyId);
+              }
+              logger.info('[Commerce] Owner OTP verified', { companyId: ownerStore.companyId, storeId: ownerStore.storeId });
+              return;
+            }
+            // Wrong/expired — let orchestrator handle gracefully (don't error out)
+            const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+            const reasonMsg = r.reason === 'expired'
+              ? '⏰ Code expiré. Renvoie une photo pour redémarrer.'
+              : r.reason === 'too_many_attempts'
+              ? '🚫 Trop de tentatives. Réessaie dans quelques minutes.'
+              : '❌ Code incorrect. Vérifie et réessaie.';
+            if (cfg) await whatsappService.sendMessage(cfg, incoming.from, reasonMsg, companyId);
+            return;
+          }
+        } catch (err) {
+          logger.warn('[Commerce] OTP check failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+        }
       }
 
       // ── Cas: transcription vocale échouée → réponse de fallback claire ───
@@ -350,7 +1324,7 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
             : "Désolé, je n'ai pas pu traiter ton message. Peux-tu reformuler ?";
           const cfg = await whatsappService.getConfig(companyId).catch(() => null);
           if (cfg && accessToken && phoneNumberId) {
-            await whatsappService.sendMessage(cfg, incoming.from, fallbackText);
+            await whatsappService.sendMessage(cfg, incoming.from, fallbackText, companyId);
             logger.info('[WhatsApp] Sent transcription-fallback reply', { to: incoming.from, type: incoming.type });
           }
         } catch (err) {
@@ -497,11 +1471,238 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
           } else {
             // If we're resuming softly after a handoff timeout, append the
             // empathy + lead-capture instruction to the system prompt.
-            const effectiveSystemPrompt = aiResumesSoftly
+            let effectiveSystemPrompt = aiResumesSoftly
               ? `${config?.systemPrompt ?? ''}${softResumeSuffix}`
               : config?.systemPrompt;
 
+            // ── Owner-aware Clone ───────────────────────────────────────────
+            // If the sender is the authenticated owner, inject context so the
+            // Clone treats them as admin (not as a customer). Avoids the bug
+            // where Clone says "Je n'ai pas de boutique" to its own owner.
+            try {
+              const ownerStoreCheck = await getOwnerStore();
+              if (ownerStoreCheck) {
+                const { isOwnerSessionValid } = await import('../agents/commerce.agent');
+                const sessionOk = await isOwnerSessionValid(
+                  ownerStoreCheck.companyId, ownerStoreCheck.storeId, incoming.from,
+                );
+                const ownerSuffix =
+                  `\n\n## 🔑 CONTEXTE — TU PARLES AU PROPRIÉTAIRE DE L'ENTREPRISE\n` +
+                  `Le numéro ${incoming.from} est l'admin de ${ownerStoreCheck.store.name}.\n` +
+                  `Session OTP: ${sessionOk ? '✅ vérifiée (peut modifier les données)' : '❌ non vérifiée (lecture seule sans OTP)'}.\n\n` +
+                  `Comportement attendu :\n` +
+                  `- C'est SON entreprise. Réponds-lui directement, pas comme à un client externe.\n` +
+                  `- Pas de "Bonjour comment puis-je vous aider" — il sait pourquoi il écrit.\n` +
+                  `- Pas de pitch commercial, pas de présentation des services.\n` +
+                  `- Pour ses questions techniques (lien boutique, ses produits, ses commandes, ses ventes) — réponds factuellement avec les vraies données via les tools.\n` +
+                  `- Si tu n'as pas un tool pour répondre, dis-le honnêtement plutôt que d'inventer ou rediriger.\n` +
+                  `- Tutoiement direct, ton de partenaire/collègue.`;
+                effectiveSystemPrompt = `${effectiveSystemPrompt ?? ''}${ownerSuffix}`;
+                logger.info('[WhatsApp] Owner-aware system prompt injected', {
+                  companyId: ownerStoreCheck.companyId, sessionOk,
+                });
+              }
+            } catch (err) {
+              logger.warn('[WhatsApp] Owner-aware injection failed (non-blocking)', {
+                error: err instanceof Error ? err.message : err,
+              });
+            }
+
             const { handleMessage } = await import('../messaging');
+
+            // ── PIN gate for ultra-sensitive owner actions ─────────────────
+            // Export tous clients, refund, suppression massive, rapport
+            // financier complet → exige PIN si pas déjà vérifié dans la
+            // session. Ce gate se déclenche AVANT le brain switch pour que
+            // ni Clone ni Orchestrator n'exécute sans validation.
+            try {
+              const { isUltraSensitive, verifyStorePin, isPinVerifiedInSession, markPinVerifiedInSession } = await import('../agents/commerce.agent');
+              const ownerStorePin = await getOwnerStore();
+              if (ownerStorePin && isUltraSensitive(finalMessage)) {
+                const alreadyVerified = await isPinVerifiedInSession(ownerStorePin.companyId, ownerStorePin.storeId, incoming.from);
+                if (!alreadyVerified) {
+                  const cfgPin = await whatsappService.getConfig(ownerStorePin.companyId).catch(() => null);
+                  // If owner sent a 4-6 digit code RIGHT BEFORE this might be the PIN
+                  // — check if the message itself IS the PIN (rare case) or fall through to ask
+                  if (/^\s*\d{4,6}\s*$/.test(finalMessage)) {
+                    const ok = await verifyStorePin(ownerStorePin.companyId, ownerStorePin.storeId, finalMessage.trim());
+                    if (ok) {
+                      await markPinVerifiedInSession(ownerStorePin.companyId, ownerStorePin.storeId, incoming.from);
+                      if (cfgPin) await whatsappService.sendMessage(cfgPin, incoming.from,
+                        `✅ PIN validé. Reformule ta demande, je l'exécute maintenant.`, companyId);
+                      return;
+                    }
+                  }
+                  // No PIN — ask for it. Save the original message so the next
+                  // PIN reply can be matched and we re-execute the original ask.
+                  const phoneKeyPin = incoming.from.replace(/\D/g, '');
+                  await getFirestore()
+                    .doc(`companies/${ownerStorePin.companyId}/stores/${ownerStorePin.storeId}/sessions/${phoneKeyPin}`)
+                    .set({
+                      pendingPinFor: finalMessage,
+                      pendingPinAt: new Date(),
+                      updatedAt: new Date(),
+                    }, { merge: true });
+                  if (cfgPin) {
+                    const hasPinSet = !!ownerStorePin.store.pinHash;
+                    await whatsappService.sendMessage(cfgPin, incoming.from, hasPinSet
+                      ? `🔐 *Action sensible détectée* — tape ton PIN à 4-6 chiffres pour valider.\n\n_(Si tu l'as oublié, change-le dans /agents/commerce → Paramètres ou tape \`change pin XXXX\`.)_`
+                      : `🔐 *Action sensible* — tu n'as pas encore défini de PIN.\n\nTape : \`set pin 1234\` (4-6 chiffres) pour en créer un.\n_Tu seras protégé contre les modifications massives._`, companyId);
+                  }
+                  logger.info('[Commerce] Ultra-sensitive action gated by PIN', {
+                    companyId: ownerStorePin.companyId, hasPinSet: !!ownerStorePin.store.pinHash,
+                  });
+                  return;
+                }
+              }
+              // Also: if user replied with a digit-only code AND there's a pending
+              // sensitive request, try the PIN
+              if (ownerStorePin && /^\s*\d{4,6}\s*$/.test(finalMessage)) {
+                const phoneKeyPin = incoming.from.replace(/\D/g, '');
+                const ssnap = await getFirestore()
+                  .doc(`companies/${ownerStorePin.companyId}/stores/${ownerStorePin.storeId}/sessions/${phoneKeyPin}`)
+                  .get().catch(() => null);
+                const pendingForReq = (ssnap?.data() as { pendingPinFor?: string } | undefined)?.pendingPinFor;
+                if (pendingForReq) {
+                  const ok = await verifyStorePin(ownerStorePin.companyId, ownerStorePin.storeId, finalMessage.trim());
+                  const cfgPin2 = await whatsappService.getConfig(ownerStorePin.companyId).catch(() => null);
+                  if (ok) {
+                    await markPinVerifiedInSession(ownerStorePin.companyId, ownerStorePin.storeId, incoming.from);
+                    // Replace message with the original sensitive request and
+                    // force orchestrator brain (sensitive = needs full agent stack)
+                    finalMessage = pendingForReq;
+                    forceOrchestrator = true;
+                    await getFirestore()
+                      .doc(`companies/${ownerStorePin.companyId}/stores/${ownerStorePin.storeId}/sessions/${phoneKeyPin}`)
+                      .set({ pendingPinFor: null, pendingPinAt: null, updatedAt: new Date() }, { merge: true });
+                    if (cfgPin2) await whatsappService.sendMessage(cfgPin2, incoming.from,
+                      `✅ PIN validé. Je traite ta demande maintenant…`, companyId);
+                    // Fall through to orchestrator
+                  } else {
+                    if (cfgPin2) await whatsappService.sendMessage(cfgPin2, incoming.from,
+                      `❌ PIN incorrect. Réessaie ou tape \`change pin XXXX\` pour en redéfinir un.`, companyId);
+                    return;
+                  }
+                }
+              }
+            } catch (err) {
+              logger.warn('[Commerce] PIN gate failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+            }
+
+            // ── @orlode / @<businessName> mention (Slack-style) ────────────
+            // Universal trigger that forces brain = 'orchestrator' and skips
+            // the "tu veux que je m'en occupe ?" confirmation (the @ mention
+            // IS the consent). Only honored for authenticated owner phones —
+            // anonymous visitors typing "@orlode" should NOT escalate.
+            try {
+              const { detectOrlodeMention } = await import('../agents/commerce.agent');
+              const ownerStoreForMention = await getOwnerStore();
+              if (ownerStoreForMention) {
+                const companyDoc = await db.doc(`companies/${ownerStoreForMention.companyId}`).get().catch(() => null);
+                const companyName = (companyDoc?.data()?.['name'] as string) ?? undefined;
+                const storeSlug = (ownerStoreForMention.store as { slug?: string }).slug;
+                const mention = detectOrlodeMention(finalMessage, {
+                  companyName,
+                  storeSlugs: storeSlug ? [storeSlug] : [],
+                });
+                if (mention.matched) {
+                  // "@admin" / "@orlode" alone → toggle Admin Chat Mode ON.
+                  // From this point, every message from this owner phone
+                  // bypasses the Clone and goes straight to the Orchestrator
+                  // (full agent roster) — like the /chat web cockpit but on
+                  // WhatsApp. Mode auto-expires after 30 min of inactivity.
+                  if (!mention.stripped || mention.stripped.length < 2) {
+                    const phoneKeyAM = incoming.from.replace(/\D/g, '');
+                    await db
+                      .doc(`companies/${ownerStoreForMention.companyId}/stores/${ownerStoreForMention.storeId}/sessions/${phoneKeyAM}`)
+                      .set({
+                        adminChatMode: true,
+                        adminChatModeAt: new Date(),
+                        updatedAt: new Date(),
+                      }, { merge: true });
+                    const cfgAM = await whatsappService.getConfig(ownerStoreForMention.companyId).catch(() => null);
+                    if (cfgAM) {
+                      await whatsappService.sendMessage(cfgAM, incoming.from,
+                        `🔓 *Mode admin activé* — ${ownerStoreForMention.store.name}\n\n` +
+                        `Tu es maintenant connecté directement à l'orchestrator (comme sur le /chat web). Toutes tes questions vont aux agents IA, pas au clone client.\n\n` +
+                        `Demande ce que tu veux :\n` +
+                        `• _mes ventes_, _combien de stores_, _mon stock_\n` +
+                        `• _envoie une promo_, _relance les impayés_\n` +
+                        `• _ajouter un produit_, _modifier un prix_\n\n` +
+                        `Tape *fin* ou *quit* pour sortir du mode admin.`, companyId);
+                    }
+                    logger.info('[WhatsApp] Admin Chat Mode ON', {
+                      companyId, from: incoming.from,
+                    });
+                    return;
+                  }
+                  // "@admin <command>" → one-shot orchestrator without
+                  // toggling mode (keeps current session behavior).
+                  finalMessage = mention.stripped;
+                  forceOrchestrator = true;
+                  logger.info('[WhatsApp] @mention → Orchestrator (skip confirm)', {
+                    companyId, from: incoming.from, preview: finalMessage.slice(0, 80),
+                  });
+                }
+              }
+            } catch (err) {
+              logger.warn('[WhatsApp] mention detection failed (non-blocking)', { error: err instanceof Error ? err.message : err });
+            }
+
+            // ── Brain switch (Clone → Orchestrator) ────────────────────────
+            // Default for whatsapp = 'clone' (customer-facing). But if the
+            // sender is the authenticated owner AND the message is a
+            // business task (relance impayés, campagne, recrutement…), route
+            // to the Orchestrator with the full agent roster.
+            //
+            // Mutating actions (envoie, relance, publie, …) require explicit
+            // owner confirmation FIRST. We send "tu veux que je m'en occupe?"
+            // and route to Orchestrator only after owner replies "oui".
+            //
+            // Read-only intents (résume, analyse, liste) bypass the confirm
+            // step — safe to run immediately.
+            //
+            // forceOrchestrator = true means owner JUST confirmed a previously
+            // pending action — we replay it through Orchestrator without
+            // re-asking.
+            let brain: 'clone' | 'orchestrator' = 'clone';
+            try {
+              if (forceOrchestrator) {
+                brain = 'orchestrator';
+              } else {
+                const { detectBusinessIntent, isMutatingBusinessAction } = await import('../agents/commerce.agent');
+                const ownerStore = await getOwnerStore();
+                if (ownerStore && detectBusinessIntent(finalMessage)) {
+                  if (isMutatingBusinessAction(finalMessage)) {
+                    // Save pending + ask confirmation, skip handleMessage
+                    const phoneKey = incoming.from.replace(/\D/g, '');
+                    const sessionRef = getFirestore()
+                      .doc(`companies/${ownerStore.companyId}/stores/${ownerStore.storeId}/sessions/${phoneKey}`);
+                    await sessionRef.set({
+                      pendingFlow: 'awaiting_business_confirm',
+                      pendingFlowAt: new Date(),
+                      pendingBusinessMessage: finalMessage,
+                      updatedAt: new Date(),
+                    }, { merge: true });
+                    const cfg2 = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
+                    if (cfg2) {
+                      await whatsappService.sendMessage(cfg2, incoming.from,
+                        `J'ai détecté une action sur ton business 👇\n\n_"${finalMessage}"_\n\nTu veux que je m'en occupe maintenant ? *oui* ou *non*.`, companyId);
+                    }
+                    logger.info('[WhatsApp] Mutating business intent → asking owner confirmation', {
+                      companyId, from: incoming.from, preview: finalMessage.slice(0, 80),
+                    });
+                    return; // wait for confirmation, no handleMessage call
+                  }
+                  // Read-only business intent — go straight to Orchestrator
+                  brain = 'orchestrator';
+                  logger.info('[WhatsApp] Owner read-only business intent → Orchestrator brain', {
+                    companyId, from: incoming.from, preview: finalMessage.slice(0, 80),
+                  });
+                }
+              }
+            } catch { /* fall through to clone */ }
+
             const msgResult = await handleMessage(
               {
                 text: finalMessage,
@@ -516,6 +1717,7 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
                 language: config?.language ?? 'fr',
                 customSystemPrompt: effectiveSystemPrompt,
                 fastReply: true,
+                brain,
               },
             );
             replyText = msgResult.messages[0] ?? 'Je n\'ai pas pu traiter votre demande.';
@@ -546,10 +1748,10 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
           if (useVoice) {
             await whatsappService.sendVoiceReply(fakeConfig, incoming.from, replyText, companyId);
           } else {
-            await whatsappService.sendMessage(fakeConfig, incoming.from, replyText);
+            await whatsappService.sendMessage(fakeConfig, incoming.from, replyText, companyId);
             // Send extra parts if the response was split (validate() returned an array)
             for (const extra of extraMessages) {
-              await whatsappService.sendMessage(fakeConfig, incoming.from, extra);
+              await whatsappService.sendMessage(fakeConfig, incoming.from, extra, companyId);
             }
           }
 
@@ -1077,8 +2279,62 @@ router.post('/send', asyncHandler(async (req: AuthenticatedRequest, res: Respons
   if (!config) throw new AppError('WhatsApp non connecté', 400);
   const { to, message } = req.body as { to: string; message: string };
   if (!to || !message) throw new AppError('to and message are required', 400);
-  const messageId = await whatsappService.sendMessage(config, to, message);
+  // sendMessage now persists outbound when companyId is provided — the inbox
+  // sees the message immediately without us needing a duplicate write here.
+  const messageId = await whatsappService.sendMessage(config, to, message, companyId, 'admin-inbox');
   res.json({ success: true, data: { messageId } });
+}));
+
+// POST /api/whatsapp/send-image — upload an image + optional caption, send
+// via Meta. Body: { to, imageBase64, imageMimeType, caption? }.
+// 1. Save base64 → Firebase Storage as a public URL
+// 2. Send via Meta with type=image
+// 3. Persist outbound as direction='outbound' with `mediaUrl` so the inbox
+//    can render the thumbnail in the conversation pane.
+router.post('/send-image', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new AppError('Company ID required', 400);
+  const config = await whatsappService.getConfig(companyId);
+  if (!config) throw new AppError('WhatsApp non connecté', 400);
+  const { to, imageBase64, imageMimeType, caption } = req.body as {
+    to: string; imageBase64?: string; imageMimeType?: string; caption?: string;
+  };
+  if (!to || !imageBase64) throw new AppError('to and imageBase64 required', 400);
+
+  const { getStorage } = await import('../config/firebase.config');
+  const buffer = Buffer.from(imageBase64.replace(/^data:image\/[^;]+;base64,/, ''), 'base64');
+  if (buffer.length > 5 * 1024 * 1024) throw new AppError('Image trop lourde (max 5 Mo).', 413);
+  const mime = imageMimeType ?? 'image/jpeg';
+  const ext = mime.split('/')[1]?.split('+')[0] ?? 'jpg';
+  const { randomBytes } = await import('crypto');
+  const fileName = `companies/${companyId}/inbox-media/${randomBytes(8).toString('hex')}.${ext}`;
+  const bucket = getStorage().bucket();
+  await bucket.file(fileName).save(buffer, { metadata: { contentType: mime }, public: true });
+  const imageUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+  const messageId = await whatsappService.sendImage(config, to, imageUrl, caption);
+  if (!messageId) throw new AppError("Meta n'a pas accepté l'image (24h window ? Domain whitelist ?)", 502);
+
+  // Persist outbound — body holds the caption (or a placeholder), mediaUrl
+  // is the resolvable Storage URL so the inbox UI can render the thumbnail.
+  try {
+    await getFirestore()
+      .collection(`companies/${companyId}/whatsappMessages`)
+      .add({
+        direction: 'outbound' as const,
+        to: String(to),
+        body: caption ?? '[image]',
+        mediaUrl: imageUrl,
+        mediaType: 'image',
+        messageId,
+        waMessageId: messageId,
+        processed: true,
+        sentFrom: 'admin-inbox',
+        createdAt: new Date(),
+      });
+  } catch { /* non-blocking */ }
+
+  res.json({ success: true, data: { messageId, imageUrl } });
 }));
 
 // PATCH /api/whatsapp/settings — paramètres conversation (voix, mode, langue, prompt, persona, handoff)
@@ -1178,6 +2434,28 @@ router.post('/templates/send', asyncHandler(async (req: AuthenticatedRequest, re
         sentAt: FieldValue.serverTimestamp(),
       });
     } catch { /* non-blocking */ }
+    // Inbox visibility: also persist a regular outbound message so the
+    // template send shows up in the conversation thread. Body is a human-
+    // readable preview "[Template: <name>] param1, param2…" so the merchant
+    // can scan recent activity at a glance.
+    if (out.messageId) {
+      try {
+        const preview = `[Template: ${templateName}]${bodyParams && bodyParams.length ? ' ' + bodyParams.join(' · ') : ''}`;
+        await getFirestore()
+          .collection(`companies/${companyId}/whatsappMessages`)
+          .add({
+            direction: 'outbound' as const,
+            to: String(r),
+            body: preview,
+            messageId: out.messageId,
+            waMessageId: out.messageId,
+            processed: true,
+            sentFrom: 'admin-template',
+            templateName,
+            createdAt: new Date(),
+          });
+      } catch { /* non-blocking */ }
+    }
   }
 
   const successCount = results.filter(r => r.messageId).length;

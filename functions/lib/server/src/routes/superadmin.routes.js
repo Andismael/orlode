@@ -661,6 +661,84 @@ router.get('/analytics', (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
         },
     });
 }));
+// ── PACKS ───────────────────────────────────────────────────────────────────
+// Pack catalog + adoption stats (count of companies that activated each pack
+// = at least one store of the matching businessType). Cross-company aggregation
+// — only super admin can see this.
+const PACK_CATALOG = [
+    { id: 'boutique', businessType: 'boutique', label: 'Boutique', pitch: 'Catalogue + commandes WhatsApp', emoji: '🛍️', color: '#0019FF', monthlyPriceUSD: 20 },
+    { id: 'restaurant', businessType: 'restaurant', label: 'Restaurant', pitch: 'Menu + commandes + reservations', emoji: '🍽️', color: '#F97316', monthlyPriceUSD: 20 },
+    { id: 'hotel', businessType: 'hotel', label: 'Hotel', pitch: 'Chambres + reservations + sejours', emoji: '🏨', color: '#3B82F6', monthlyPriceUSD: 20 },
+    { id: 'service', businessType: 'service', label: 'Salon', pitch: 'Coiffure / beaute — services + RDV', emoji: '💇', color: '#EC4899', monthlyPriceUSD: 20 },
+    { id: 'health', businessType: 'health', label: 'Sante', pitch: 'Cabinet medical — RDV + dossiers patients', emoji: '🏥', color: '#14B8A6', monthlyPriceUSD: 20 },
+    { id: 'realestate', businessType: 'realestate', label: 'Immobilier', pitch: 'Biens + visites + qualif leads', emoji: '🏠', color: '#7C3AED', monthlyPriceUSD: 20 },
+    { id: 'pme', businessType: null, label: 'PME Hub', pitch: 'CRM + comms + marketing + support (cross)', emoji: '📊', color: '#0EA5E9', monthlyPriceUSD: 0 },
+    { id: 'enterprise', businessType: null, label: 'Entreprise', pitch: 'Sales / Compta / Support / Comms — cross', emoji: '🏢', color: '#475569', monthlyPriceUSD: 0 },
+];
+router.get('/packs', (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
+    const db = (0, firebase_config_1.getFirestore)();
+    const companiesSnap = await db.collection('companies').get();
+    // Map businessType -> { companies: Set<companyId>, totalStores: number }
+    const adoption = {};
+    await Promise.all(companiesSnap.docs.map(async (cDoc) => {
+        const cid = cDoc.id;
+        const storesSnap = await db.collection(`companies/${cid}/stores`).get().catch(() => null);
+        if (!storesSnap)
+            return;
+        storesSnap.docs.forEach(sDoc => {
+            const data = sDoc.data();
+            const type = data['businessType'] ?? 'boutique';
+            if (!adoption[type])
+                adoption[type] = { companies: new Set(), stores: 0, latestActivation: null };
+            adoption[type].companies.add(cid);
+            adoption[type].stores += 1;
+            const created = data['createdAt']?.toDate?.();
+            if (created && (!adoption[type].latestActivation || created > adoption[type].latestActivation)) {
+                adoption[type].latestActivation = created;
+            }
+        });
+    }));
+    const packs = PACK_CATALOG.map(p => {
+        const stats = p.businessType ? adoption[p.businessType] : null;
+        const companies = stats ? stats.companies.size : 0;
+        return {
+            ...p,
+            companies,
+            stores: stats ? stats.stores : 0,
+            latestActivation: stats?.latestActivation?.toISOString() ?? null,
+            monthlyRevenueUSD: companies * p.monthlyPriceUSD,
+        };
+    });
+    const totalMRR = packs.reduce((s, p) => s + p.monthlyRevenueUSD, 0);
+    const totalActivations = packs.reduce((s, p) => s + p.companies, 0);
+    res.json({ success: true, data: { packs, totalMRR, totalActivations } });
+}));
+// GET /api/superadmin/packs/:packId/companies — list of companies that have this pack
+router.get('/packs/:packId/companies', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const pack = PACK_CATALOG.find(p => p.id === req.params.packId);
+    if (!pack || !pack.businessType)
+        throw new error_middleware_1.AppError('Pack not found', 404);
+    const db = (0, firebase_config_1.getFirestore)();
+    const companiesSnap = await db.collection('companies').get();
+    const results = [];
+    await Promise.all(companiesSnap.docs.map(async (cDoc) => {
+        const storesSnap = await db.collection(`companies/${cDoc.id}/stores`)
+            .where('businessType', '==', pack.businessType).get().catch(() => null);
+        if (!storesSnap)
+            return;
+        storesSnap.docs.forEach(sDoc => {
+            const sd = sDoc.data();
+            results.push({
+                companyId: cDoc.id,
+                companyName: cDoc.data()['name'] ?? '(sans nom)',
+                storeName: sd['name'] ?? '',
+                storeSlug: sd['slug'] ?? '',
+                activatedAt: sd['createdAt']?.toDate?.()?.toISOString() ?? null,
+            });
+        });
+    }));
+    res.json({ success: true, data: { pack, companies: results } });
+}));
 // ── SYSTEM HEALTH ───────────────────────────────────────────────────────────
 // GET /api/superadmin/health
 router.get('/health', (0, asyncHandler_1.asyncHandler)(async (_req, res) => {

@@ -49,8 +49,11 @@ exports.sendEmailTool = genkit_config_1.ai.defineTool({
     inputSchema: zod_1.z.object({
         to: zod_1.z.string().describe('Recipient email address'),
         subject: zod_1.z.string().describe('Email subject'),
-        body: zod_1.z.string().describe('Email body (plain text or HTML)'),
+        body: zod_1.z.string().describe('Email body (plain text or HTML). Will be auto-wrapped in a branded template.'),
         companyId: zod_1.z.string(),
+        recipientName: zod_1.z.string().optional().describe('Recipient first name for personalization (e.g. "Marie"). Highly recommended.'),
+        ctaLabel: zod_1.z.string().optional().describe('CTA button text (e.g. "Voir l\'offre", "Confirmer le RDV"). Add to make the email more actionable.'),
+        ctaUrl: zod_1.z.string().optional().describe('CTA button URL — without it, no button is rendered.'),
         attachQuoteId: zod_1.z.string().optional().describe('Quote document ID to attach as PDF'),
         attachInvoiceId: zod_1.z.string().optional().describe('Invoice document ID to attach as PDF'),
         attachContractId: zod_1.z.string().optional().describe('Employee/contract ID to attach the work contract PDF'),
@@ -58,7 +61,18 @@ exports.sendEmailTool = genkit_config_1.ai.defineTool({
     outputSchema: zod_1.z.object({ success: zod_1.z.boolean(), message: zod_1.z.string(), provider: zod_1.z.string().optional(), from: zod_1.z.string().optional(), attachmentsIncluded: zod_1.z.array(zod_1.z.string()).optional() }),
 }, async (input) => {
     try {
-        const html = input.body.includes('<') ? input.body : `<p>${input.body.replace(/\n/g, '<br>')}</p>`;
+        // Wrap the agent-generated body in a branded HTML template + plain-text
+        // alternative. Drastically reduces spam-flagging vs raw `<p>${body}</p>`.
+        const wrapped = await (0, emailService_1.wrapAgentEmail)({
+            body: input.body,
+            companyId: input.companyId,
+            recipientName: input.recipientName,
+            recipientEmail: input.to,
+            ctaLabel: input.ctaLabel,
+            ctaUrl: input.ctaUrl,
+        });
+        const html = wrapped.html;
+        const text = wrapped.text;
         // Build attachments if any *attachXxxId* was provided.
         const attachments = [];
         const attachmentsIncluded = [];
@@ -129,12 +143,48 @@ exports.sendEmailTool = genkit_config_1.ai.defineTool({
                         logger_1.logger.warn('[sendEmail] attachInvoiceId not found', { invoiceId: input.attachInvoiceId });
                     }
                 }
+                // ── Contract attachment (Wemas-managed legal contracts) ──────────
+                // Cached at companies/{cid}/contracts/{id} when createAndSendContract ran.
+                // If the cache is missing contractContent (e.g. contract created before
+                // we started caching), fall back to surfacing the signing URL only.
+                if (input.attachContractId) {
+                    const cdoc = await db.collection(`companies/${input.companyId}/contracts`).doc(input.attachContractId).get();
+                    if (cdoc.exists) {
+                        const cdata = cdoc.data() ?? {};
+                        const contractContent = cdata['contractContent'];
+                        const signingUrl = cdata['signingUrl'];
+                        const signatoryName = cdata['signatoryName'] ?? 'Signataire';
+                        const signatoryEmail = cdata['signatoryEmail'] ?? input.to;
+                        const contractType = cdata['contractType'];
+                        const verificationCode = cdata['verificationCode'];
+                        const expiresAt = cdata['expiresAt'];
+                        if (contractContent && contractContent.trim().length > 50) {
+                            const { renderWemasContractPdf } = await Promise.resolve().then(() => __importStar(require('../../services/wemas/wemasContractPdf')));
+                            const buf = await renderWemasContractPdf(input.companyId, {
+                                signatoryName, signatoryEmail, contractType, contractContent,
+                                signingUrl, verificationCode, expiresAt,
+                            });
+                            const safeName = signatoryName.replace(/[^a-zA-Z0-9]+/g, '-');
+                            attachments.push({ filename: `Contrat-${contractType ?? 'orlode'}-${safeName}.pdf`, content: buf });
+                            attachmentsIncluded.push(`contract:${input.attachContractId}`);
+                        }
+                        else {
+                            logger_1.logger.warn('[sendEmail] attachContractId has no content cached, sending signing link only', {
+                                contractId: input.attachContractId, hasSigningUrl: !!signingUrl,
+                            });
+                        }
+                    }
+                    else {
+                        logger_1.logger.warn('[sendEmail] attachContractId not found', { contractId: input.attachContractId });
+                    }
+                }
             }
             catch (attachErr) {
                 logger_1.logger.error('[sendEmail] Attachment loading failed', {
                     error: attachErr instanceof Error ? attachErr.message : String(attachErr),
                     attachQuoteId: input.attachQuoteId,
                     attachInvoiceId: input.attachInvoiceId,
+                    attachContractId: input.attachContractId,
                 });
                 // Don't fail the whole email — send without attachment but note in response.
             }
@@ -143,6 +193,7 @@ exports.sendEmailTool = genkit_config_1.ai.defineTool({
             to: input.to,
             subject: input.subject,
             html,
+            text,
             companyId: input.companyId,
             attachments: attachments.length > 0 ? attachments : undefined,
         });

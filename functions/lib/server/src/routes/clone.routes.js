@@ -287,9 +287,11 @@ router.post('/:companyId/voice-tool', (0, asyncHandler_1.asyncHandler)(async (re
         const { cloneListProductsTool, cloneFindProductTool, cloneCreateOrderDraftTool, cloneGeneratePaymentLinkTool, cloneFindOrderTool, cloneCancelOrderTool, } = await Promise.resolve().then(() => __importStar(require('../agents/tools/commerceTools')));
         const executor = {
             findAppointment: cloneFindAppointmentTool,
-            createAppointment: cloneCreateAppointmentTool,
+            createAppointment: cloneCreateAppointmentTool, // legacy key — kept for backwards-compat
+            clone_createAppointment: cloneCreateAppointmentTool,
             rescheduleAppointment: cloneRescheduleAppointmentTool,
-            addClient: cloneAddClientTool,
+            addClient: cloneAddClientTool, // legacy key
+            clone_addClient: cloneAddClientTool,
             createSupportTicket: cloneCreateSupportTicketTool,
             findReservation: cloneFindReservationTool,
             createReservation: cloneCreateReservationTool,

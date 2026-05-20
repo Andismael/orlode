@@ -45,6 +45,35 @@ async function register(req, res) {
         isActive: true,
         createdAt: new Date(),
     });
+    // Auto-install the free Welcome agent so the new account isn't empty.
+    // The user lands on a working setup with at least one agent ready to chat.
+    // If the seed agent isn't in the marketplace yet, this is a no-op (skip).
+    try {
+        const welcomeDoc = await db.collection('marketplaceAgents').doc('welcome').get();
+        if (welcomeDoc.exists) {
+            const welcome = welcomeDoc.data();
+            await db.collection(`companies/${companyId}/installedAgents`).doc('welcome').set({
+                agentId: 'welcome',
+                installedAt: new Date(),
+                installedBy: userRecord.uid,
+                status: 'active',
+                pricingModel: 'free',
+                autoInstalled: true,
+                cachedConfig: {
+                    name: welcome['name'] ?? 'Bienvenue',
+                    systemPrompt: welcome['systemPrompt'] ?? '',
+                    tools: welcome['tools'] ?? [],
+                    temperature: 0.4,
+                    model: 'flash',
+                },
+            });
+            logger_1.logger.info(`[Register] Auto-installed Welcome agent for new company ${companyId}`);
+        }
+    }
+    catch (err) {
+        // Non-blocking — registration succeeds even if the auto-install fails
+        logger_1.logger.warn(`[Register] Failed to auto-install Welcome for ${companyId}`, { error: err });
+    }
     res.status(201).json({
         success: true,
         data: {

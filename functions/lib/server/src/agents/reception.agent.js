@@ -25,6 +25,7 @@ exports.visitorRegistryTool = genkit_config_1.ai.defineTool({
         type: zod_1.z.enum(['walkin', 'appointment', 'delivery', 'vip']).optional(),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
         visitId: zod_1.z.string(),
         badgeNumber: zod_1.z.string(),
         checkInAt: zod_1.z.string(),
@@ -35,18 +36,27 @@ exports.visitorRegistryTool = genkit_config_1.ai.defineTool({
     const visitId = (0, helpers_1.generateId)();
     const badgeNumber = `V-${Date.now().toString().slice(-6)}`;
     const now = new Date();
-    await db.collection('visitors').doc(visitId).set({
-        companyId, id: visitId, name: visitorName,
-        email: visitorEmail ?? null, company: visitorCompany ?? '',
-        host: hostName, purpose: purpose ?? 'Non specifie',
-        type: type ?? 'walkin', badgeNumber,
-        status: 'checked_in',
-        checkInAt: firestore_1.FieldValue.serverTimestamp(),
-        checkOutAt: null,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    try {
+        await db.collection('visitors').doc(visitId).set({
+            companyId, id: visitId, name: visitorName,
+            email: visitorEmail ?? null, company: visitorCompany ?? '',
+            host: hostName, purpose: purpose ?? 'Non specifie',
+            type: type ?? 'walkin', badgeNumber,
+            status: 'checked_in',
+            checkInAt: firestore_1.FieldValue.serverTimestamp(),
+            checkOutAt: null,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Reception] visitor registry write failed', { error: String(err) });
+        return {
+            success: false, visitId: '', badgeNumber: '', checkInAt: now.toISOString(),
+            message: `Enregistrement du visiteur impossible: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
     return {
-        visitId, badgeNumber, checkInAt: now.toISOString(),
+        success: true, visitId, badgeNumber, checkInAt: now.toISOString(),
         message: `${visitorName} enregistre(e) pour voir ${hostName}. Badge: ${badgeNumber}.`,
     };
 });
@@ -71,7 +81,12 @@ exports.calendarCheckTool = genkit_config_1.ai.defineTool({
     const snap = await db.collection('appointments')
         .where('companyId', '==', companyId)
         .where('status', '==', 'confirmed')
-        .limit(50).get();
+        .limit(50).get().catch((err) => {
+        logger_1.logger.error('[Reception] checkAppointment read failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { hasAppointment: false };
     const match = snap.docs.map(d => d.data()).find(m => {
         const name = (m['visitorName'] ?? '').toLowerCase();
         const host = (m['host'] ?? '').toLowerCase();
@@ -113,7 +128,12 @@ exports.visitorHistoryTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     const snap = await db.collection('visitors')
         .where('companyId', '==', companyId)
-        .limit(100).get();
+        .limit(100).get().catch((err) => {
+        logger_1.logger.error('[Reception] visitor history read failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { visitors: [], total: 0 };
     const now = Date.now();
     const cutoffs = {
         today: 24 * 60 * 60 * 1000,
@@ -150,8 +170,11 @@ exports.companyInfoTool = genkit_config_1.ai.defineTool({
     }),
 }, async ({ companyId }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const doc = await db.collection('companies').doc(companyId).get();
-    const d = doc.data() ?? {};
+    const doc = await db.collection('companies').doc(companyId).get().catch((err) => {
+        logger_1.logger.error('[Reception] company info read failed', { error: String(err) });
+        return null;
+    });
+    const d = doc?.data() ?? {};
     return {
         name: d['name'] ?? 'The Company',
         address: d['address'] ?? 'Adresse non configuree',
@@ -177,8 +200,11 @@ exports.presenceStatusTool = genkit_config_1.ai.defineTool({
     const pSnap = await db.collection('presence')
         .where('companyId', '==', companyId)
         .where('date', '==', today)
-        .limit(200).get();
-    const present = pSnap.docs
+        .limit(200).get().catch((err) => {
+        logger_1.logger.error('[Reception] presence read failed', { error: String(err) });
+        return null;
+    });
+    const present = (pSnap?.docs ?? [])
         .filter(d => d.data()['status'] === 'present')
         .map(d => ({
         name: d.data()['employeeName'] ?? '',
@@ -191,7 +217,9 @@ exports.presenceStatusTool = genkit_config_1.ai.defineTool({
             .where('companyId', '==', companyId).get();
         totalEmployees = uSnap.size;
     }
-    catch { }
+    catch (err) {
+        logger_1.logger.error('[Reception] users count read failed', { error: String(err) });
+    }
     return {
         present,
         totalPresent: present.length,
@@ -213,18 +241,24 @@ exports.employeeCheckinTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     const today = new Date().toISOString().split('T')[0];
     const id = `${employeeId}_${today}`;
-    const existing = await db.collection('presence').doc(id).get();
-    if (existing.exists) {
+    const existing = await db.collection('presence').doc(id).get().catch(() => null);
+    if (existing?.exists) {
         return { success: false, message: `${employeeName} est deja pointe(e) aujourd'hui.` };
     }
-    await db.collection('presence').doc(id).set({
-        companyId, employeeId, employeeName,
-        department: department ?? '',
-        date: today,
-        checkInAt: firestore_1.FieldValue.serverTimestamp(),
-        checkOutAt: null,
-        status: 'present',
-    });
+    try {
+        await db.collection('presence').doc(id).set({
+            companyId, employeeId, employeeName,
+            department: department ?? '',
+            date: today,
+            checkInAt: firestore_1.FieldValue.serverTimestamp(),
+            checkOutAt: null,
+            status: 'present',
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Reception] employee checkin write failed', { error: String(err) });
+        return { success: false, message: 'Pointage impossible.' };
+    }
     return { success: true, message: `${employeeName} pointe(e) comme present(e).` };
 });
 exports.checkinByCodeTool = genkit_config_1.ai.defineTool({
@@ -247,8 +281,11 @@ exports.checkinByCodeTool = genkit_config_1.ai.defineTool({
         .where('companyId', '==', companyId)
         .where('employeeCode', '==', code)
         .where('codeActive', '==', true)
-        .limit(1).get();
-    if (snap.empty) {
+        .limit(1).get().catch((err) => {
+        logger_1.logger.error('[Reception] code lookup read failed', { error: String(err) });
+        return null;
+    });
+    if (!snap || snap.empty) {
         return { success: false, action: 'error', employeeName: '', message: 'Code invalide ou revoque.' };
     }
     const employee = snap.docs[0];
@@ -257,26 +294,38 @@ exports.checkinByCodeTool = genkit_config_1.ai.defineTool({
     const employeeName = empData['displayName'] ?? empData['email'] ?? '';
     const today = new Date().toISOString().split('T')[0];
     const presenceId = `${employeeId}_${today}`;
-    const existing = await db.collection('presence').doc(presenceId).get();
-    if (existing.exists) {
+    const existing = await db.collection('presence').doc(presenceId).get().catch(() => null);
+    if (existing?.exists) {
         if (existing.data()?.status === 'present') {
             const checkIn = existing.data()?.checkInAt?.toDate?.() ?? existing.data()?.checkInAt;
             const checkOut = new Date();
             const hoursWorked = checkIn ? parseFloat(((checkOut.getTime() - new Date(checkIn).getTime()) / 3600000).toFixed(2)) : 0;
-            await db.collection('presence').doc(presenceId).update({ checkOutAt: checkOut, status: 'checked_out', hoursWorked });
+            try {
+                await db.collection('presence').doc(presenceId).update({ checkOutAt: checkOut, status: 'checked_out', hoursWorked });
+            }
+            catch (err) {
+                logger_1.logger.error('[Reception] checkout update failed', { error: String(err) });
+                return { success: false, action: 'error', employeeName, message: 'Pointage de depart impossible.' };
+            }
             return { success: true, action: 'checkout', employeeName, hoursWorked, message: `${employeeName} a pointe son depart (${hoursWorked}h).` };
         }
         return { success: true, action: 'already_done', employeeName, message: `${employeeName} a deja termine sa journee.` };
     }
-    await db.collection('presence').doc(presenceId).set({
-        companyId, employeeId, employeeName,
-        employeeEmail: empData['email'] ?? '',
-        department: empData['department'] ?? '',
-        date: today,
-        checkInAt: firestore_1.FieldValue.serverTimestamp(),
-        checkOutAt: null,
-        status: 'present',
-    });
+    try {
+        await db.collection('presence').doc(presenceId).set({
+            companyId, employeeId, employeeName,
+            employeeEmail: empData['email'] ?? '',
+            department: empData['department'] ?? '',
+            date: today,
+            checkInAt: firestore_1.FieldValue.serverTimestamp(),
+            checkOutAt: null,
+            status: 'present',
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Reception] checkinByCode write failed', { error: String(err) });
+        return { success: false, action: 'error', employeeName, message: 'Pointage impossible.' };
+    }
     return { success: true, action: 'checkin', employeeName, message: `${employeeName} pointe(e) comme present(e).` };
 });
 // ── Leave Tools ──────────────────────────────────────────────────────────────
@@ -305,7 +354,12 @@ exports.leaveStatusTool = genkit_config_1.ai.defineTool({
     if (status !== 'all') {
         query = query.where('status', '==', status);
     }
-    const snap = await query.limit(100).get();
+    const snap = await query.limit(100).get().catch((err) => {
+        logger_1.logger.error('[Reception] leave requests read failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { requests: [], total: 0 };
     const requests = snap.docs.map(d => ({
         id: d.id,
         employeeName: d.data()['employeeName'] ?? '',
@@ -339,7 +393,12 @@ exports.directoryLookupTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     const snap = await db.collection('users')
         .where('companyId', '==', companyId)
-        .limit(200).get();
+        .limit(200).get().catch((err) => {
+        logger_1.logger.error('[Reception] directory lookup read failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { results: [], total: 0 };
     const q = query.toLowerCase();
     const results = snap.docs
         .map(d => d.data())
@@ -385,8 +444,8 @@ exports.createEmployeeBadgeTool = genkit_config_1.ai.defineTool({
     let empData;
     let resolvedId = employeeId;
     if (employeeId) {
-        empDoc = await db.collection('users').doc(employeeId).get();
-        if (!empDoc.exists) {
+        empDoc = await db.collection('users').doc(employeeId).get().catch(() => null);
+        if (!empDoc?.exists) {
             return { success: false, employeeName: '', department: '', jobTitle: '', message: 'Employe non trouve avec cet ID.' };
         }
         empData = empDoc.data();
@@ -394,7 +453,13 @@ exports.createEmployeeBadgeTool = genkit_config_1.ai.defineTool({
     else if (employeeName) {
         const snap = await db.collection('users')
             .where('companyId', '==', companyId)
-            .limit(200).get();
+            .limit(200).get().catch((err) => {
+            logger_1.logger.error('[Reception] badge employee lookup failed', { error: String(err) });
+            return null;
+        });
+        if (!snap) {
+            return { success: false, employeeName: employeeName ?? '', department: '', jobTitle: '', message: 'Lecture de l\'annuaire impossible.' };
+        }
         const q = employeeName.toLowerCase();
         const match = snap.docs.find(d => {
             const name = (d.data()['displayName'] ?? '').toLowerCase();
@@ -414,8 +479,11 @@ exports.createEmployeeBadgeTool = genkit_config_1.ai.defineTool({
         .where('companyId', '==', companyId)
         .where('employeeId', '==', resolvedId)
         .where('status', '==', 'active')
-        .limit(1).get();
-    if (!existingSnap.empty) {
+        .limit(1).get().catch((err) => {
+        logger_1.logger.error('[Reception] badge existence check failed', { error: String(err) });
+        return null;
+    });
+    if (existingSnap && !existingSnap.empty) {
         const existing = existingSnap.docs[0].data();
         return {
             success: true,
@@ -435,24 +503,35 @@ exports.createEmployeeBadgeTool = genkit_config_1.ai.defineTool({
     const department = empData['department'] ?? '';
     const jobTitle = empData['jobTitle'] ?? '';
     const photoURL = empData['photoURL'] ?? undefined;
-    await db.collection('employeeBadges').doc(badgeId).set({
-        companyId,
-        employeeId: resolvedId,
-        badgeNumber,
-        employeeName: name,
-        department,
-        jobTitle,
-        email: empData['email'] ?? '',
-        phone: empData['phone'] ?? '',
-        photoURL: photoURL ?? null,
-        status: 'active',
-        issuedAt: firestore_1.FieldValue.serverTimestamp(),
-        expiresAt: null,
-        createdBy: 'agent',
-    });
-    await db.collection('users').doc(resolvedId).update({
-        badgeId, badgeNumber, badgeIssuedAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    try {
+        await db.collection('employeeBadges').doc(badgeId).set({
+            companyId,
+            employeeId: resolvedId,
+            badgeNumber,
+            employeeName: name,
+            department,
+            jobTitle,
+            email: empData['email'] ?? '',
+            phone: empData['phone'] ?? '',
+            photoURL: photoURL ?? null,
+            status: 'active',
+            issuedAt: firestore_1.FieldValue.serverTimestamp(),
+            expiresAt: null,
+            createdBy: 'agent',
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Reception] badge create failed', { error: String(err) });
+        return { success: false, employeeName: name, department, jobTitle, message: 'Creation du badge impossible.' };
+    }
+    try {
+        await db.collection('users').doc(resolvedId).update({
+            badgeId, badgeNumber, badgeIssuedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.warn('[Reception] badge user update failed (non-blocking)', { error: String(err) });
+    }
     return {
         success: true,
         badgeId,
@@ -541,22 +620,33 @@ exports.preRegisterVisitorTool = genkit_config_1.ai.defineTool({
         notes: zod_1.z.string().optional(),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
         registrationId: zod_1.z.string(), qrCode: zod_1.z.string(), status: zod_1.z.string(), message: zod_1.z.string(),
     }),
 }, async ({ companyId, visitorName, visitorEmail, visitorCompany, hostName, hostEmail, purpose, scheduledDate, scheduledTime, requiresNDA, requiresParking, notes }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const id = (0, helpers_1.generateId)();
     const qrCode = `PRE-${id.slice(0, 8).toUpperCase()}`;
-    await db.collection(`companies/${companyId}/preRegistrations`).doc(id).set({
-        id, visitorName, visitorEmail, visitorCompany: visitorCompany ?? '',
-        hostName, hostEmail: hostEmail ?? '', purpose: purpose ?? '',
-        scheduledDate, scheduledTime: scheduledTime ?? '09:00',
-        requiresNDA: requiresNDA ?? false, requiresParking: requiresParking ?? false,
-        notes: notes ?? '', qrCode, status: 'pending_approval',
-        ndaSigned: false, checkedIn: false,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    try {
+        await db.collection(`companies/${companyId}/preRegistrations`).doc(id).set({
+            id, visitorName, visitorEmail, visitorCompany: visitorCompany ?? '',
+            hostName, hostEmail: hostEmail ?? '', purpose: purpose ?? '',
+            scheduledDate, scheduledTime: scheduledTime ?? '09:00',
+            requiresNDA: requiresNDA ?? false, requiresParking: requiresParking ?? false,
+            notes: notes ?? '', qrCode, status: 'pending_approval',
+            ndaSigned: false, checkedIn: false,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Reception] pre-registration write failed', { error: String(err) });
+        return {
+            success: false, registrationId: '', qrCode: '', status: 'error',
+            message: `Pre-enregistrement impossible: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
     return {
+        success: true,
         registrationId: id, qrCode, status: 'pending_approval',
         message: `Pre-enregistrement cree pour ${visitorName} le ${scheduledDate}. QR: ${qrCode}. En attente d'approbation par ${hostName}.`,
     };
@@ -573,17 +663,23 @@ exports.registerDeliveryTool = genkit_config_1.ai.defineTool({
         recipientName: zod_1.z.string(), recipientDepartment: zod_1.z.string().optional(),
         signed: zod_1.z.boolean().optional(),
     }),
-    outputSchema: zod_1.z.object({ deliveryId: zod_1.z.string(), status: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean(), deliveryId: zod_1.z.string(), status: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, carrier, trackingNumber, itemCount, description, recipientName, recipientDepartment, signed }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const id = (0, helpers_1.generateId)();
-    await db.collection(`companies/${companyId}/deliveries`).doc(id).set({
-        id, carrier, trackingNumber: trackingNumber ?? '', itemCount: itemCount ?? 1,
-        description: description ?? '', recipientName, recipientDepartment: recipientDepartment ?? '',
-        signed: signed ?? false, status: 'received',
-        receivedAt: firestore_1.FieldValue.serverTimestamp(), collectedAt: null,
-    });
-    return { deliveryId: id, status: 'received', message: `Livraison ${carrier} enregistree — ${itemCount} colis pour ${recipientName}. En attente de collecte.` };
+    try {
+        await db.collection(`companies/${companyId}/deliveries`).doc(id).set({
+            id, carrier, trackingNumber: trackingNumber ?? '', itemCount: itemCount ?? 1,
+            description: description ?? '', recipientName, recipientDepartment: recipientDepartment ?? '',
+            signed: signed ?? false, status: 'received',
+            receivedAt: firestore_1.FieldValue.serverTimestamp(), collectedAt: null,
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Reception] delivery write failed', { error: String(err) });
+        return { success: false, deliveryId: '', status: 'error', message: 'Enregistrement de la livraison impossible.' };
+    }
+    return { success: true, deliveryId: id, status: 'received', message: `Livraison ${carrier} enregistree — ${itemCount} colis pour ${recipientName}. En attente de collecte.` };
 });
 exports.getDeliveriesTool = genkit_config_1.ai.defineTool({
     name: 'rec_getDeliveries',
@@ -597,7 +693,12 @@ exports.getDeliveriesTool = genkit_config_1.ai.defineTool({
         q = q.where('status', '==', 'received');
     else if (status === 'collected')
         q = q.where('status', '==', 'collected');
-    const snap = await q.orderBy('receivedAt', 'desc').limit(50).get();
+    const snap = await q.orderBy('receivedAt', 'desc').limit(50).get().catch((err) => {
+        logger_1.logger.error('[Reception] deliveries read failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { deliveries: [], total: 0 };
     const deliveries = snap.docs.map(d => {
         const data = d.data();
         return {
@@ -626,13 +727,19 @@ exports.getEvacuationStatusTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     const today = new Date().toISOString().split('T')[0];
     // Present employees
-    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).where('status', '==', 'present').limit(500).get();
-    const employees = presSnap.docs.map(d => ({
+    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).where('status', '==', 'present').limit(500).get().catch((err) => {
+        logger_1.logger.error('[Reception] evacuation presence read failed', { error: String(err) });
+        return null;
+    });
+    const employees = (presSnap?.docs ?? []).map(d => ({
         name: d.data()['employeeName'] ?? '', department: d.data()['department'] ?? '',
     }));
     // Checked-in visitors
-    const visSnap = await db.collection('visitors').where('companyId', '==', companyId).where('status', '==', 'checked_in').limit(100).get();
-    const visitors = visSnap.docs.map(d => ({
+    const visSnap = await db.collection('visitors').where('companyId', '==', companyId).where('status', '==', 'checked_in').limit(100).get().catch((err) => {
+        logger_1.logger.error('[Reception] evacuation visitors read failed', { error: String(err) });
+        return null;
+    });
+    const visitors = (visSnap?.docs ?? []).map(d => ({
         name: d.data()['name'] ?? '', host: d.data()['host'] ?? '',
         company: d.data()['company'] ?? '',
     }));
@@ -654,6 +761,7 @@ exports.manageParkingTool = genkit_config_1.ai.defineTool({
         spotId: zod_1.z.string().optional(),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
         spots: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), status: zod_1.z.string(), occupant: zod_1.z.string(), plate: zod_1.z.string() })).optional(),
         spotId: zod_1.z.string().optional(), message: zod_1.z.string(),
     }),
@@ -661,31 +769,60 @@ exports.manageParkingTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     const col = db.collection(`companies/${companyId}/parkingSpots`);
     if (action === 'list') {
-        const snap = await col.limit(50).get();
+        const snap = await col.limit(50).get().catch((err) => {
+            logger_1.logger.error('[Reception] parking list read failed', { error: String(err) });
+            return null;
+        });
+        if (!snap)
+            return { success: false, message: 'Lecture des places de parking impossible.' };
         const spots = snap.docs.map(d => ({
             id: d.id, status: d.data()['status'] ?? 'available',
             occupant: d.data()['occupant'] ?? '', plate: d.data()['plate'] ?? '',
         }));
-        return { spots, message: `${spots.filter(s => s.status === 'available').length} place(s) disponible(s) sur ${spots.length}.` };
+        return { success: true, spots, message: `${spots.filter(s => s.status === 'available').length} place(s) disponible(s) sur ${spots.length}.` };
     }
     if (action === 'reserve') {
         // Find available spot
-        const available = await col.where('status', '==', 'available').limit(1).get();
+        const available = await col.where('status', '==', 'available').limit(1).get().catch((err) => {
+            logger_1.logger.error('[Reception] parking reserve read failed', { error: String(err) });
+            return null;
+        });
+        if (!available)
+            return { success: false, message: 'Recherche de place impossible.' };
         if (available.empty) {
             // Create new spot
-            const id = `P-${(await col.get()).size + 1}`;
-            await col.doc(id).set({ id, status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
-            return { spotId: id, message: `Place ${id} reservee pour ${visitorName ?? 'visiteur'}${plateNumber ? ` (${plateNumber})` : ''}.` };
+            try {
+                const allSnap = await col.get();
+                const id = `P-${allSnap.size + 1}`;
+                await col.doc(id).set({ id, status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
+                return { success: true, spotId: id, message: `Place ${id} reservee pour ${visitorName ?? 'visiteur'}${plateNumber ? ` (${plateNumber})` : ''}.` };
+            }
+            catch (err) {
+                logger_1.logger.error('[Reception] parking create failed', { error: String(err) });
+                return { success: false, message: 'Reservation de place impossible.' };
+            }
         }
         const spot = available.docs[0];
-        await spot.ref.update({ status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
-        return { spotId: spot.id, message: `Place ${spot.id} reservee pour ${visitorName ?? 'visiteur'}.` };
+        try {
+            await spot.ref.update({ status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
+        }
+        catch (err) {
+            logger_1.logger.error('[Reception] parking reserve update failed', { error: String(err) });
+            return { success: false, message: 'Reservation de place impossible.' };
+        }
+        return { success: true, spotId: spot.id, message: `Place ${spot.id} reservee pour ${visitorName ?? 'visiteur'}.` };
     }
     if (action === 'release' && spotId) {
-        await col.doc(spotId).update({ status: 'available', occupant: '', plate: '', reservedAt: null });
-        return { spotId, message: `Place ${spotId} liberee.` };
+        try {
+            await col.doc(spotId).update({ status: 'available', occupant: '', plate: '', reservedAt: null });
+        }
+        catch (err) {
+            logger_1.logger.error('[Reception] parking release failed', { error: String(err) });
+            return { success: false, message: 'Liberation de place impossible.' };
+        }
+        return { success: true, spotId, message: `Place ${spotId} liberee.` };
     }
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // VISITOR ANALYTICS
@@ -706,7 +843,17 @@ exports.getVisitorAnalyticsTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     const days = period === 'week' ? 7 : period === 'month' ? 30 : 90;
     const cutoff = new Date(Date.now() - days * 86400000);
-    const snap = await db.collection('visitors').where('companyId', '==', companyId).where('checkInAt', '>=', cutoff).limit(500).get();
+    const snap = await db.collection('visitors').where('companyId', '==', companyId).where('checkInAt', '>=', cutoff).limit(500).get().catch((err) => {
+        logger_1.logger.error('[Reception] visitor analytics read failed', { error: String(err) });
+        return null;
+    });
+    if (!snap) {
+        return {
+            totalVisitors: 0, avgDuration: 0,
+            peakHours: [], purposeBreakdown: [], typeBreakdown: [],
+            repeatVisitors: 0, uniqueCompanies: 0, dailyTrend: [],
+        };
+    }
     const visitors = snap.docs.map(d => d.data());
     // Peak hours
     const hourCounts = {};
@@ -773,18 +920,56 @@ const INPUT = zod_1.z.object({
     companyId: zod_1.z.string(),
     userId: zod_1.z.string().optional(),
     language: zod_1.z.string().optional().default('auto'),
+    history: zod_1.z.array(zod_1.z.object({ role: zod_1.z.enum(['user', 'model']), content: zod_1.z.string() })).optional(),
 });
 const OUTPUT = zod_1.z.object({
     response: zod_1.z.string(),
     visitId: zod_1.z.string().optional(),
     hostNotified: zod_1.z.boolean(),
 });
-exports.receptionAgentFlow = genkit_config_1.ai.defineFlow({ name: 'receptionAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, language }) => {
-    logger_1.logger.info(`[ReceptionAgent] Request: "${request.slice(0, 80)}"`);
+exports.receptionAgentFlow = genkit_config_1.ai.defineFlow({ name: 'receptionAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, language, history }) => {
+    logger_1.logger.info(`[ReceptionAgent] Request: "${request.slice(0, 80)}" (history=${history?.length ?? 0})`);
     const langInstr = language === 'auto' ? 'Reponds dans la meme langue que la demande.' : `Reponds en ${language}.`;
+    // Date anchors — visitor logs / appointments must use real dates
+    const dateAnchors = (() => {
+        const now = new Date();
+        const weekdaysFr = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+        const today = now.toISOString().slice(0, 10);
+        const todayLabel = weekdaysFr[now.getDay()];
+        const next = [];
+        for (let i = 1; i <= 7; i++) {
+            const d = new Date(now);
+            d.setDate(d.getDate() + i);
+            next.push(`${weekdaysFr[d.getDay()]} = ${d.toISOString().slice(0, 10)}`);
+        }
+        return `AUJOURD'HUI : ${today} (${todayLabel}) ${now.toTimeString().slice(0, 5)}. Semaine a venir : ${next.join(', ')}.`;
+    })();
+    // Build messages with prior history (max 20)
+    const messages = [];
+    if (history && history.length > 0) {
+        for (const h of history.slice(-20))
+            messages.push({ role: h.role, content: [{ text: h.content }] });
+    }
+    messages.push({ role: 'user', content: [{ text: request }] });
     let response = await genkit_config_1.ai.generate({
         model: genkit_config_1.GEMINI_FLASH,
         system: `Tu es l'Agent Receptionniste PRO d'une entreprise — le premier point de contact pour les visiteurs, les appels et les employes.
+
+## 📅 CONTEXTE TEMPOREL (ne jamais inventer de dates)
+${dateAnchors}
+Quand l'utilisateur dit "aujourd'hui", "demain", "tout a l'heure", utilise STRICTEMENT les dates ci-dessus. Format ISO YYYY-MM-DD pour tous les outils.
+
+## 🧠 MÉMOIRE CONVERSATIONNELLE
+Tu as l'historique des messages precedents. Quand l'utilisateur dit "ce visiteur", "lui", "elle", "ce rendez-vous", reference-toi a la personne/entree la plus recente dans l'historique. Ne redemande pas qui c'est si c'est clair dans l'historique.
+
+## 🚫 RÈGLE ABSOLUE — ZÉRO FABRICATION
+Tu ne DOIS JAMAIS pretendre avoir fait une action sans appel d'outil reussi.
+INTERDIT :
+- "J'ai notifie l'hote", "Visiteur enregistre", "Badge cree" sans avoir appele le tool correspondant
+- Inventer un visitId, un numero de badge, ou une plaque d'immatriculation
+- Confirmer un rendez-vous si tu ne l'as pas verifie via l'outil
+
+RÈGLE : APPELLE le tool. Si succes, confirme avec les vrais champs (visitId, badgeNumber). Si echec, dis la vraie raison ("le rendez-vous n'a pas ete trouve dans l'agenda"). L'utilisateur prefere un "je n'ai pas pu" honnete a une fausse confirmation.
 
 Tes responsabilites :
 - Accueillir les visiteurs, verifier les rendez-vous, enregistrer les arrivees, generer des badges
@@ -803,7 +988,7 @@ CompanyID: ${companyId}.
 Sois chaleureux, professionnel et efficace.
 Verifie toujours les rendez-vous avant d'enregistrer un visiteur.
 ${langInstr}`,
-        prompt: request,
+        messages,
         tools: ALL_TOOLS,
         config: { temperature: 0.4 },
     });

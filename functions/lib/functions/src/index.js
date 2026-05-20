@@ -85,12 +85,46 @@ const social_routes_1 = __importDefault(require("../../server/src/routes/social.
 const video_routes_1 = __importDefault(require("../../server/src/routes/video.routes"));
 const public_routes_1 = __importDefault(require("../../server/src/routes/public.routes"));
 const wemas_routes_1 = __importDefault(require("../../server/src/routes/wemas.routes"));
+const commerce_routes_1 = __importDefault(require("../../server/src/routes/commerce.routes"));
+const subscription_routes_1 = __importDefault(require("../../server/src/routes/subscription.routes"));
+const marketplace_routes_1 = __importDefault(require("../../server/src/routes/marketplace.routes"));
+const superadmin_routes_1 = __importDefault(require("../../server/src/routes/superadmin.routes"));
+const creator_routes_1 = __importDefault(require("../../server/src/routes/creator.routes"));
+const team_routes_1 = __importDefault(require("../../server/src/routes/team.routes"));
+const website_routes_1 = __importDefault(require("../../server/src/routes/website.routes"));
+const me_routes_1 = __importDefault(require("../../server/src/routes/me.routes"));
+const users_routes_1 = __importDefault(require("../../server/src/routes/users.routes"));
+const notification_routes_1 = __importDefault(require("../../server/src/routes/notification.routes"));
+const referral_routes_1 = __importDefault(require("../../server/src/routes/referral.routes"));
+const gmail_routes_1 = __importDefault(require("../../server/src/routes/gmail.routes"));
+const legal_routes_1 = __importDefault(require("../../server/src/routes/legal.routes"));
+const products_routes_1 = __importDefault(require("../../server/src/routes/products.routes"));
+const orders_routes_1 = __importDefault(require("../../server/src/routes/orders.routes"));
+const reservations_routes_1 = __importDefault(require("../../server/src/routes/reservations.routes"));
+const appointments_routes_1 = __importDefault(require("../../server/src/routes/appointments.routes"));
+const publicCommerce_routes_1 = __importDefault(require("../../server/src/routes/publicCommerce.routes"));
+const quoteRequests_routes_1 = __importDefault(require("../../server/src/routes/quoteRequests.routes"));
+const myStatus_routes_1 = __importDefault(require("../../server/src/routes/myStatus.routes"));
+const betaFeedback_routes_1 = __importDefault(require("../../server/src/routes/betaFeedback.routes"));
+const dataDeletion_routes_1 = __importDefault(require("../../server/src/routes/dataDeletion.routes"));
+const ai_routes_1 = __importDefault(require("../../server/src/routes/ai.routes"));
+const news_routes_1 = __importDefault(require("../../server/src/routes/news.routes"));
+const clone_routes_1 = __importDefault(require("../../server/src/routes/clone.routes"));
+const cloneAnalytics_routes_1 = __importDefault(require("../../server/src/routes/cloneAnalytics.routes"));
+const datascientist_routes_1 = __importDefault(require("../../server/src/routes/datascientist.routes"));
+const messaging_routes_1 = __importDefault(require("../../server/src/routes/messaging.routes"));
+const telegram_routes_1 = __importDefault(require("../../server/src/routes/telegram.routes"));
+const socialAi_routes_1 = __importDefault(require("../../server/src/routes/socialAi.routes"));
 // Genkit flows
 require("../../server/src/genkit");
 // Initialize Firebase
 (0, firebase_config_1.initFirebase)();
 (0, mcp_config_1.checkMcpAvailability)().catch(() => { });
 const app = (0, express_1.default)();
+// Cloud Run sits behind Google's front-end proxy. Tell Express to trust the
+// X-Forwarded-For header so req.ip resolves to the real client (not Cloud Run).
+// Without this, the rate limiter sees a single IP for every request → 429 storms.
+app.set('trust proxy', true);
 // Security
 app.use((0, helmet_1.default)({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 // CORS — allow Firebase Hosting domain + custom domains
@@ -149,6 +183,36 @@ app.use('/api/contracts', wemas_routes_1.default);
 app.use('/api/whatsapp', whatsapp_routes_1.default);
 app.use('/api/social', social_routes_1.default);
 app.use('/api/video', video_routes_1.default);
+app.use('/api/commerce', commerce_routes_1.default);
+app.use('/api/subscription', subscription_routes_1.default);
+app.use('/api/marketplace', marketplace_routes_1.default);
+app.use('/api/superadmin', superadmin_routes_1.default);
+app.use('/api/creator', creator_routes_1.default);
+app.use('/api/team', team_routes_1.default);
+app.use('/api/website', website_routes_1.default);
+app.use('/api/me', me_routes_1.default);
+app.use('/api/users', users_routes_1.default);
+app.use('/api/notifications', notification_routes_1.default);
+app.use('/api/referral', referral_routes_1.default);
+app.use('/api/gmail', gmail_routes_1.default);
+app.use('/api/legal', legal_routes_1.default);
+app.use('/api/products', products_routes_1.default);
+app.use('/api/orders', orders_routes_1.default);
+app.use('/api/reservations', reservations_routes_1.default);
+app.use('/api/appointments', appointments_routes_1.default);
+app.use('/api/publicCommerce', publicCommerce_routes_1.default);
+app.use('/api/quote-requests', quoteRequests_routes_1.default);
+app.use('/api/my-status', myStatus_routes_1.default);
+app.use('/api/beta-feedback', betaFeedback_routes_1.default);
+app.use('/api/data-deletion', dataDeletion_routes_1.default);
+app.use('/api/ai', ai_routes_1.default);
+app.use('/api/news', news_routes_1.default);
+app.use('/api/clone', clone_routes_1.default);
+app.use('/api/clone-analytics', cloneAnalytics_routes_1.default);
+app.use('/api/datascientist', datascientist_routes_1.default);
+app.use('/api/messaging', messaging_routes_1.default);
+app.use('/api/telegram', telegram_routes_1.default);
+app.use('/api/social-ai', socialAi_routes_1.default);
 app.use(error_middleware_1.notFoundMiddleware);
 app.use(error_middleware_1.errorMiddleware);
 // Export as Firebase Cloud Function (2nd gen) — public access

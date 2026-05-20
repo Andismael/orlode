@@ -31,6 +31,7 @@ const INPUT = zod_1.z.object({
     companyId: zod_1.z.string(),
     userId: zod_1.z.string().optional(),
     language: zod_1.z.string().optional().default('auto'),
+    history: zod_1.z.array(zod_1.z.object({ role: zod_1.z.enum(['user', 'model']), content: zod_1.z.string() })).optional(),
 });
 const OUTPUT = zod_1.z.object({
     response: zod_1.z.string(),
@@ -49,6 +50,8 @@ const prepareReadAloudTool = genkit_config_1.ai.defineTool({
         language: zod_1.z.string().optional().default('fr'),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        message: zod_1.z.string().optional(),
         readyText: zod_1.z.string().describe('Clean text optimized for speech synthesis'),
         estimatedDuration: zod_1.z.string().describe('Estimated reading time'),
         documentName: zod_1.z.string(),
@@ -57,16 +60,24 @@ const prepareReadAloudTool = genkit_config_1.ai.defineTool({
     let content = text ?? '';
     let docName = documentName ?? 'Texte';
     if (documentName && !text) {
-        const result = await (0, firestoreTools_1.readDocumentTool)({ companyId, documentName });
-        if (!result.found)
-            return { readyText: 'Document non trouvé.', estimatedDuration: '0s', documentName: docName };
-        content = result.content;
-        docName = result.name;
+        try {
+            const result = await (0, firestoreTools_1.readDocumentTool)({ companyId, documentName });
+            if (!result.found)
+                return { success: false, message: 'Document non trouvé.', readyText: 'Document non trouvé.', estimatedDuration: '0s', documentName: docName };
+            content = result.content;
+            docName = result.name;
+        }
+        catch (err) {
+            logger_1.logger.error('[Knowledge] readDocument failed', { error: String(err) });
+            return { success: false, message: `Lecture du document impossible: ${err instanceof Error ? err.message : String(err)}`, readyText: '', estimatedDuration: '0s', documentName: docName };
+        }
     }
     // Clean for TTS
-    const { text: cleaned } = await genkit_config_1.ai.generate({
-        model: genkit_config_1.GEMINI_FLASH,
-        prompt: `Prépare ce texte pour être lu à haute voix en ${language}:
+    let cleaned;
+    try {
+        const result = await genkit_config_1.ai.generate({
+            model: genkit_config_1.GEMINI_FLASH,
+            prompt: `Prépare ce texte pour être lu à haute voix en ${language}:
 - Supprime les balises markdown, URLs, codes
 - Remplace les abréviations par les mots complets (ex: "Mr." → "Monsieur", "etc." → "et cetera")
 - Ajoute des pauses naturelles (virgules) aux phrases longues
@@ -76,12 +87,18 @@ const prepareReadAloudTool = genkit_config_1.ai.defineTool({
 
 Texte:
 ${content.slice(0, 10000)}`,
-        config: { temperature: 0.1 },
-    });
+            config: { temperature: 0.1 },
+        });
+        cleaned = result.text;
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] TTS preparation failed', { error: String(err) });
+        return { success: false, message: `Préparation TTS impossible: ${err instanceof Error ? err.message : String(err)}`, readyText: content, estimatedDuration: '0s', documentName: docName };
+    }
     const wordCount = cleaned.split(/\s+/).length;
     const minutes = Math.ceil(wordCount / 150); // ~150 mots/min lecture
     const estimatedDuration = minutes >= 1 ? `${minutes} min` : `${Math.ceil(wordCount / 2.5)}s`;
-    return { readyText: cleaned, estimatedDuration, documentName: docName };
+    return { success: true, readyText: cleaned, estimatedDuration, documentName: docName };
 });
 // ── New tool: Analyze document (deep analysis) ──────────────────────────────
 const analyzeDocumentTool = genkit_config_1.ai.defineTool({
@@ -93,6 +110,8 @@ const analyzeDocumentTool = genkit_config_1.ai.defineTool({
         analysisType: zod_1.z.enum(['general', 'legal', 'financial', 'technical', 'marketing', 'hr']).optional().default('general'),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        message: zod_1.z.string().optional(),
         documentName: zod_1.z.string(),
         analysis: zod_1.z.string(),
         structure: zod_1.z.array(zod_1.z.string()),
@@ -101,15 +120,29 @@ const analyzeDocumentTool = genkit_config_1.ai.defineTool({
         recommendations: zod_1.z.array(zod_1.z.string()),
     }),
 }, async ({ companyId, documentName, analysisType }) => {
-    const result = await (0, firestoreTools_1.readDocumentTool)({ companyId, documentName });
+    let result;
+    try {
+        result = await (0, firestoreTools_1.readDocumentTool)({ companyId, documentName });
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] readDocument failed', { error: String(err) });
+        return {
+            success: false, message: `Lecture du document impossible: ${err instanceof Error ? err.message : String(err)}`,
+            documentName, analysis: 'Erreur de lecture.', structure: [], sentiment: 'N/A',
+            keyFindings: [], recommendations: [],
+        };
+    }
     if (!result.found)
         return {
+            success: false, message: 'Document non trouvé.',
             documentName, analysis: 'Document non trouvé.', structure: [], sentiment: 'N/A',
             keyFindings: [], recommendations: [],
         };
-    const { text } = await genkit_config_1.ai.generate({
-        model: genkit_config_1.GEMINI_PRO,
-        prompt: `Analyse approfondie de type "${analysisType}" pour ce document.
+    let text;
+    try {
+        const r = await genkit_config_1.ai.generate({
+            model: genkit_config_1.GEMINI_PRO,
+            prompt: `Analyse approfondie de type "${analysisType}" pour ce document.
 Retourne JSON:
 {
   "analysis": "Analyse détaillée en 3-5 paragraphes",
@@ -124,14 +157,26 @@ Contenu:
 ${result.content.slice(0, 12000)}
 
 Retourne UNIQUEMENT le JSON.`,
-        config: { temperature: 0.2 },
-    });
+            config: { temperature: 0.2 },
+        });
+        text = r.text;
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] analyze generation failed', { error: String(err) });
+        return {
+            success: false, message: `Analyse impossible: ${err instanceof Error ? err.message : String(err)}`,
+            documentName: result.name, analysis: '', structure: [], sentiment: 'N/A',
+            keyFindings: [], recommendations: [],
+        };
+    }
     try {
         const parsed = JSON.parse(text.replace(/^```json\s*/, '').replace(/\s*```$/, ''));
-        return { documentName: result.name, ...parsed };
+        return { success: true, documentName: result.name, ...parsed };
     }
-    catch {
+    catch (err) {
+        logger_1.logger.error('[Knowledge] analyze JSON parse failed', { error: String(err) });
         return {
+            success: true,
             documentName: result.name, analysis: text, structure: [], sentiment: 'N/A',
             keyFindings: [], recommendations: [],
         };
@@ -147,22 +192,33 @@ const compareDocumentsTool = genkit_config_1.ai.defineTool({
         documentName2: zod_1.z.string(),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        message: zod_1.z.string().optional(),
         similarities: zod_1.z.array(zod_1.z.string()),
         differences: zod_1.z.array(zod_1.z.string()),
         contradictions: zod_1.z.array(zod_1.z.string()),
         summary: zod_1.z.string(),
     }),
 }, async ({ companyId, documentName1, documentName2 }) => {
-    const [doc1, doc2] = await Promise.all([
-        (0, firestoreTools_1.readDocumentTool)({ companyId, documentName: documentName1 }),
-        (0, firestoreTools_1.readDocumentTool)({ companyId, documentName: documentName2 }),
-    ]);
-    if (!doc1.found || !doc2.found) {
-        return { similarities: [], differences: [], contradictions: [], summary: 'Un ou les deux documents non trouvés.' };
+    let doc1, doc2;
+    try {
+        [doc1, doc2] = await Promise.all([
+            (0, firestoreTools_1.readDocumentTool)({ companyId, documentName: documentName1 }),
+            (0, firestoreTools_1.readDocumentTool)({ companyId, documentName: documentName2 }),
+        ]);
     }
-    const { text } = await genkit_config_1.ai.generate({
-        model: genkit_config_1.GEMINI_PRO,
-        prompt: `Compare ces deux documents et retourne JSON:
+    catch (err) {
+        logger_1.logger.error('[Knowledge] readDocument compare failed', { error: String(err) });
+        return { success: false, message: `Lecture des documents impossible: ${err instanceof Error ? err.message : String(err)}`, similarities: [], differences: [], contradictions: [], summary: '' };
+    }
+    if (!doc1.found || !doc2.found) {
+        return { success: false, message: 'Un ou les deux documents non trouvés.', similarities: [], differences: [], contradictions: [], summary: 'Un ou les deux documents non trouvés.' };
+    }
+    let text;
+    try {
+        const r = await genkit_config_1.ai.generate({
+            model: genkit_config_1.GEMINI_PRO,
+            prompt: `Compare ces deux documents et retourne JSON:
 {
   "similarities": ["Point commun 1", ...],
   "differences": ["Différence 1", ...],
@@ -177,13 +233,21 @@ Document 2 (${doc2.name}):
 ${doc2.content.slice(0, 6000)}
 
 Retourne UNIQUEMENT le JSON.`,
-        config: { temperature: 0.2 },
-    });
-    try {
-        return JSON.parse(text.replace(/^```json\s*/, '').replace(/\s*```$/, ''));
+            config: { temperature: 0.2 },
+        });
+        text = r.text;
     }
-    catch {
-        return { similarities: [], differences: [], contradictions: [], summary: text };
+    catch (err) {
+        logger_1.logger.error('[Knowledge] compare generation failed', { error: String(err) });
+        return { success: false, message: `Comparaison impossible: ${err instanceof Error ? err.message : String(err)}`, similarities: [], differences: [], contradictions: [], summary: '' };
+    }
+    try {
+        const parsed = JSON.parse(text.replace(/^```json\s*/, '').replace(/\s*```$/, ''));
+        return { success: true, ...parsed };
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] compare JSON parse failed', { error: String(err) });
+        return { success: true, similarities: [], differences: [], contradictions: [], summary: text };
     }
 });
 // ── New tool: Send document via email ───────────────────────────────────────
@@ -203,7 +267,14 @@ const sendDocumentTool = genkit_config_1.ai.defineTool({
         message: zod_1.z.string(),
     }),
 }, async ({ companyId, documentName, recipientEmail, recipientName, sendType, message }) => {
-    const doc = await (0, firestoreTools_1.readDocumentTool)({ companyId, documentName });
+    let doc;
+    try {
+        doc = await (0, firestoreTools_1.readDocumentTool)({ companyId, documentName });
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] readDocument send failed', { error: String(err) });
+        return { success: false, message: `Lecture du document impossible: ${err instanceof Error ? err.message : String(err)}` };
+    }
     if (!doc.found)
         return { success: false, message: 'Document non trouvé.' };
     let contentToSend = '';
@@ -211,25 +282,37 @@ const sendDocumentTool = genkit_config_1.ai.defineTool({
         contentToSend = doc.content.slice(0, 5000);
     }
     else if (sendType === 'key_points') {
-        const summary = await (0, ragTools_1.summarizeDocumentTool)({ documentId: '', companyId, maxChunks: 10 });
-        contentToSend = `Points clés:\n${summary.keyPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
+        try {
+            const summary = await (0, ragTools_1.summarizeDocumentTool)({ documentId: '', companyId, maxChunks: 10 });
+            contentToSend = `Points clés:\n${summary.keyPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
+        }
+        catch (err) {
+            logger_1.logger.error('[Knowledge] summarize failed', { error: String(err) });
+            contentToSend = doc.summary ?? 'Résumé non disponible.';
+        }
     }
     else {
         contentToSend = doc.summary ?? 'Résumé non disponible.';
     }
     // Save as notification/share in Firestore
-    const db = (0, firebase_config_1.getFirestore)();
-    await db.collection('documentShares').add({
-        companyId,
-        documentName: doc.name,
-        recipientEmail: recipientEmail ?? '',
-        recipientName: recipientName ?? '',
-        content: contentToSend,
-        message: message ?? '',
-        sendType,
-        sharedAt: new Date(),
-        status: 'sent',
-    });
+    try {
+        const db = (0, firebase_config_1.getFirestore)();
+        await db.collection('documentShares').add({
+            companyId,
+            documentName: doc.name,
+            recipientEmail: recipientEmail ?? '',
+            recipientName: recipientName ?? '',
+            content: contentToSend,
+            message: message ?? '',
+            sendType,
+            sharedAt: new Date(),
+            status: 'sent',
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] documentShares write failed', { error: String(err) });
+        return { success: false, message: 'Sauvegarde du partage impossible.' };
+    }
     // If Gmail MCP available, send via Gmail
     if (recipientEmail && mcp_config_1.mcpAvailability.googleWorkspace) {
         try {
@@ -239,7 +322,9 @@ const sendDocumentTool = genkit_config_1.ai.defineTool({
                 body: `${message ?? 'Un document a été partagé avec vous.'}\n\n---\n\n${contentToSend}`,
             });
         }
-        catch { /* Gmail not configured */ }
+        catch (err) {
+            logger_1.logger.warn('[Knowledge] Gmail send failed (non-blocking)', { error: String(err) });
+        }
     }
     return {
         success: true,
@@ -259,36 +344,59 @@ const generateDocumentTool = genkit_config_1.ai.defineTool({
     }),
     outputSchema: zod_1.z.object({
         success: zod_1.z.boolean(),
+        message: zod_1.z.string().optional(),
         documentId: zod_1.z.string(),
         title: zod_1.z.string(),
         content: zod_1.z.string(),
         wordCount: zod_1.z.number(),
     }),
 }, async ({ companyId, title, instructions, format, language }) => {
-    const { text } = await genkit_config_1.ai.generate({
-        model: genkit_config_1.GEMINI_PRO,
-        prompt: `Rédige un document de type "${format}" en ${language}.
+    let text;
+    try {
+        const r = await genkit_config_1.ai.generate({
+            model: genkit_config_1.GEMINI_PRO,
+            prompt: `Rédige un document de type "${format}" en ${language}.
 Titre: ${title}
 Instructions: ${instructions}
 
 Rédige un document professionnel, bien structuré, avec des sections claires.
 Ne mets PAS de balises markdown type \`\`\`.`,
-        config: { temperature: 0.4 },
-    });
-    const db = (0, firebase_config_1.getFirestore)();
+            config: { temperature: 0.4 },
+        });
+        text = r.text;
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] document generation failed', { error: String(err) });
+        return {
+            success: false,
+            message: `Génération du document impossible: ${err instanceof Error ? err.message : String(err)}`,
+            documentId: '', title, content: '', wordCount: 0,
+        };
+    }
     const docId = (0, helpers_1.generateId)();
-    await db.collection('documents').doc(docId).set({
-        companyId,
-        originalName: title,
-        extractedText: text,
-        fileType: 'text/generated',
-        status: 'completed',
-        source: 'ai_generated',
-        summary: text.slice(0, 300),
-        textLength: text.length,
-        uploadedAt: new Date(),
-        createdAt: new Date(),
-    });
+    try {
+        const db = (0, firebase_config_1.getFirestore)();
+        await db.collection('documents').doc(docId).set({
+            companyId,
+            originalName: title,
+            extractedText: text,
+            fileType: 'text/generated',
+            status: 'completed',
+            source: 'ai_generated',
+            summary: text.slice(0, 300),
+            textLength: text.length,
+            uploadedAt: new Date(),
+            createdAt: new Date(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Knowledge] documents write failed', { error: String(err) });
+        return {
+            success: false,
+            message: 'Sauvegarde impossible.',
+            documentId: '', title, content: text, wordCount: text.split(/\s+/).length,
+        };
+    }
     return {
         success: true,
         documentId: docId,
@@ -303,6 +411,8 @@ const listConnectorsTool = genkit_config_1.ai.defineTool({
     description: 'List all connected data sources for this company — websites, databases, APIs, e-commerce, video, audio. Shows what knowledge the enterprise brain has access to.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        message: zod_1.z.string().optional(),
         connectors: zod_1.z.array(zod_1.z.object({
             name: zod_1.z.string(),
             type: zod_1.z.string(),
@@ -315,8 +425,11 @@ const listConnectorsTool = genkit_config_1.ai.defineTool({
     }),
 }, async ({ companyId }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const snap = await db.collection(`companies/${companyId}/connectors`).get();
-    const connectors = snap.docs.map(d => {
+    const snap = await db.collection(`companies/${companyId}/connectors`).get().catch((err) => {
+        logger_1.logger.error('[Knowledge] connectors read failed', { error: String(err) });
+        return null;
+    });
+    const connectors = (snap?.docs ?? []).map(d => {
         const data = d.data();
         return {
             name: data['name'] ?? d.id,
@@ -332,7 +445,9 @@ const listConnectorsTool = genkit_config_1.ai.defineTool({
         const chunksSnap = await db.collection(`companies/${companyId}/vectorChunks`).count().get();
         totalChunks = chunksSnap.data().count;
     }
-    catch { /* */ }
+    catch (err) {
+        logger_1.logger.warn('[Knowledge] vectorChunks count failed (non-blocking)', { error: String(err) });
+    }
     // List active MCP services
     const mcpServices = [];
     if (mcp_config_1.mcpAvailability.googleWorkspace)
@@ -341,7 +456,7 @@ const listConnectorsTool = genkit_config_1.ai.defineTool({
         mcpServices.push('Slack (messages, channels)');
     if (mcp_config_1.mcpAvailability.bigquery)
         mcpServices.push('BigQuery (SQL queries)');
-    return { connectors, totalChunks, mcpServices };
+    return { success: true, connectors, totalChunks, mcpServices };
 });
 // ── All tools ───────────────────────────────────────────────────────────────
 const ALL_TOOLS = [
@@ -403,9 +518,15 @@ const TOOL_EXECUTORS = new Map([
     ['bigquery_list_tables', (i) => (0, bigquery_1.bigqueryListTablesTool)(i)],
 ]);
 // ── The unified flow ────────────────────────────────────────────────────────
-exports.knowledgeAgentFlow = genkit_config_1.ai.defineFlow({ name: 'knowledgeAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, language }) => {
-    logger_1.logger.info(`[KnowledgeAgent] Request: "${request.slice(0, 80)}"`);
+exports.knowledgeAgentFlow = genkit_config_1.ai.defineFlow({ name: 'knowledgeAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, language, history }) => {
+    logger_1.logger.info(`[KnowledgeAgent] Request: "${request.slice(0, 80)}" (history=${history?.length ?? 0})`);
     const langInstr = language === 'auto' ? 'Reponds dans la meme langue que la demande.' : `Reponds en ${language}.`;
+    // Date anchors — citations / "rapport de la semaine" need real dates
+    const dateAnchors = (() => {
+        const now = new Date();
+        const months = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
+        return `AUJOURD'HUI : ${now.toISOString().slice(0, 10)} (${months[now.getMonth()]} ${now.getFullYear()}).`;
+    })();
     // Fetch company name + custom agent name
     const db2 = (0, firebase_config_1.getFirestore)();
     let agentName = 'Knowledge';
@@ -423,9 +544,32 @@ exports.knowledgeAgentFlow = genkit_config_1.ai.defineFlow({ name: 'knowledgeAge
     const mcpNote = mcp_config_1.mcpAvailability.googleWorkspace
         ? '\n- Tu peux aussi chercher dans Google Drive (drive_search), lire des Google Docs (docs_read) et des Sheets (sheets_read).'
         : '';
+    // Build messages with prior history (max 20)
+    const messages = [];
+    if (history && history.length > 0) {
+        for (const h of history.slice(-20))
+            messages.push({ role: h.role, content: [{ text: h.content }] });
+    }
+    messages.push({ role: 'user', content: [{ text: request }] });
     let response = await genkit_config_1.ai.generate({
         model: genkit_config_1.GEMINI_PRO,
         system: `Tu es "${agentName}" — le CERVEAU de ${companyName}.
+
+## 📅 CONTEXTE TEMPOREL (ne jamais inventer de dates)
+${dateAnchors}
+Pour resumes, citations, rapports periodiques, utilise STRICTEMENT cette date d'aujourd'hui — ne fabrique pas de dates passees.
+
+## 🧠 MÉMOIRE CONVERSATIONNELLE
+Tu as l'historique des messages precedents. Quand l'utilisateur dit "ce document", "ce passage", "lui", "elle", "le rapport", reference-toi a l'element le plus recent dans l'historique. Ne refais PAS la recherche de zero si l'utilisateur enchaine sur le meme document.
+
+## 🚫 RÈGLE ABSOLUE — ZÉRO FABRICATION
+Tu ne DOIS JAMAIS inventer de citations, de chiffres, de noms de documents.
+INTERDIT :
+- Citer un document que tu n'as pas vu via searchDocuments / readDocument
+- Inventer un extrait, une page, une section
+- Pretendre avoir envoye / partage un document si tu n'as pas appele le tool correspondant
+
+RÈGLE : si searchDocuments ne retourne rien, dis "Je n'ai pas trouve d'info sur X dans la base documentaire". Si l'info existe ailleurs (Google Drive, Slack), essaie ces sources avant de conclure. Cite TOUJOURS la source exacte avec le nom du document.
 
 Tu as acces a TOUTES les sources de donnees de l'entreprise, connectees via la page Connecteurs:
 
@@ -499,7 +643,7 @@ REGLES IMPORTANTES
 
 CompanyID: ${companyId}.
 ${langInstr}`,
-        prompt: request,
+        messages,
         tools: ALL_TOOLS,
         config: { temperature: 0.3 },
     });

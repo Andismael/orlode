@@ -188,6 +188,114 @@ router.delete('/campaigns/:id', (0, asyncHandler_1.asyncHandler)(async (req, res
     res.json({ success: true });
 }));
 // ═══════════════════════════════════════════════════════════════════════════════
+// INFLUENCERS — minimal CRM (V1). DM tracking + status pipeline.
+// Persisted at companies/{cid}/influencers/{id}.
+// ═══════════════════════════════════════════════════════════════════════════════
+const INFLUENCER_STATUSES = ['prospect', 'contacted', 'replied', 'active', 'lost'];
+router.get('/influencers', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const cid = req.user?.companyId;
+    if (!cid)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    const data = await safe(async () => {
+        let q = (0, firebase_config_1.getFirestore)().collection(`companies/${cid}/influencers`);
+        if (req.query['status'])
+            q = q.where('status', '==', req.query['status']);
+        return (await q.limit(500).get()).docs.map(serializeSnap);
+    }, []);
+    res.json({ success: true, data });
+}));
+router.post('/influencers', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const cid = req.user?.companyId;
+    if (!cid)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    const b = req.body;
+    const name = String(b['name'] ?? '').trim();
+    if (!name)
+        throw new error_middleware_1.AppError('name required', 400);
+    const id = (0, helpers_1.generateId)();
+    const doc = {
+        id, companyId: cid,
+        name,
+        handle: String(b['handle'] ?? '').trim(),
+        platform: String(b['platform'] ?? 'instagram').trim().toLowerCase(),
+        followers: Number(b['followers'] ?? 0) || 0,
+        engagement: Number(b['engagement'] ?? 0) || 0,
+        niche: String(b['niche'] ?? '').trim(),
+        email: String(b['email'] ?? '').trim(),
+        phone: String(b['phone'] ?? '').trim(),
+        status: INFLUENCER_STATUSES.includes(String(b['status'])) ? String(b['status']) : 'prospect',
+        notes: String(b['notes'] ?? '').trim(),
+        dmSentAt: null,
+        dmRepliedAt: null,
+        createdBy: req.user.uid,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    };
+    await (0, firebase_config_1.getFirestore)().collection(`companies/${cid}/influencers`).doc(id).set(doc);
+    res.status(201).json({ success: true, data: doc });
+}));
+router.post('/influencers/import', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const cid = req.user?.companyId;
+    if (!cid)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    const rows = req.body?.rows;
+    if (!Array.isArray(rows) || rows.length === 0)
+        throw new error_middleware_1.AppError('rows[] required', 400);
+    if (rows.length > 500)
+        throw new error_middleware_1.AppError('Max 500 influencers per import', 400);
+    const db = (0, firebase_config_1.getFirestore)();
+    const batch = db.batch();
+    const col = db.collection(`companies/${cid}/influencers`);
+    let imported = 0;
+    for (const r of rows) {
+        const name = String(r?.name ?? '').trim();
+        if (!name)
+            continue;
+        const id = (0, helpers_1.generateId)();
+        batch.set(col.doc(id), {
+            id, companyId: cid,
+            name,
+            handle: String(r?.handle ?? '').trim(),
+            platform: String(r?.platform ?? 'instagram').trim().toLowerCase(),
+            followers: Number(r?.followers ?? 0) || 0,
+            engagement: Number(r?.engagement ?? 0) || 0,
+            niche: String(r?.niche ?? '').trim(),
+            email: String(r?.email ?? '').trim(),
+            phone: String(r?.phone ?? '').trim(),
+            status: 'prospect',
+            notes: String(r?.notes ?? '').trim(),
+            dmSentAt: null,
+            dmRepliedAt: null,
+            createdBy: req.user.uid,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        });
+        imported++;
+    }
+    await batch.commit();
+    res.json({ success: true, data: { imported } });
+}));
+router.patch('/influencers/:id', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const cid = req.user?.companyId;
+    if (!cid)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    const patch = { ...req.body, updatedAt: new Date() };
+    // Stamp dmSentAt / dmRepliedAt when status transitions through the pipeline.
+    if (patch['status'] === 'contacted' && !patch['dmSentAt'])
+        patch['dmSentAt'] = new Date();
+    if (patch['status'] === 'replied' && !patch['dmRepliedAt'])
+        patch['dmRepliedAt'] = new Date();
+    await (0, firebase_config_1.getFirestore)().collection(`companies/${cid}/influencers`).doc(req.params.id).update(patch);
+    res.json({ success: true });
+}));
+router.delete('/influencers/:id', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const cid = req.user?.companyId;
+    if (!cid)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    await (0, firebase_config_1.getFirestore)().collection(`companies/${cid}/influencers`).doc(req.params.id).delete();
+    res.json({ success: true });
+}));
+// ═══════════════════════════════════════════════════════════════════════════════
 // CALENDAR
 // ═══════════════════════════════════════════════════════════════════════════════
 router.get('/calendar', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -247,6 +355,84 @@ router.delete('/content/:id', (0, asyncHandler_1.asyncHandler)(async (req, res) 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SEO (AI-powered)
 // ═══════════════════════════════════════════════════════════════════════════════
+// POST /api/marketing/images/generate — Gemini/Imagen image generation for posts & flyers.
+// Body: { prompt: string, style?: string, format?: '1:1'|'16:9'|'9:16'|'4:5' }
+// Returns: { url: string } where url is a public Storage URL (or a data URL fallback).
+router.post('/images/generate', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const cid = req.user?.companyId;
+    if (!cid)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    const { prompt, style, format } = req.body;
+    if (!prompt || !prompt.trim())
+        throw new error_middleware_1.AppError('prompt required', 400);
+    const aspect = format === '16:9' ? '16:9' : format === '9:16' ? '9:16' : format === '4:5' ? '4:5' : '1:1';
+    const styleHint = style === 'illustration' ? 'flat illustration, vibrant'
+        : style === 'minimalist' ? 'minimalist, lots of whitespace'
+            : style === 'cinematic' ? 'cinematic photography, dramatic lighting'
+                : 'professional photography, natural lighting, premium look';
+    const finalPrompt = `${prompt}. Style: ${styleHint}. Format: ${aspect}. No text overlay.`;
+    function extractImage(response) {
+        const r = response;
+        const candidates = [];
+        if (r.media)
+            Array.isArray(r.media) ? candidates.push(...r.media) : candidates.push(r.media);
+        for (const part of r.message?.content ?? [])
+            if (part?.media)
+                candidates.push(part.media);
+        for (const c of candidates) {
+            if (!c.url)
+                continue;
+            const match = /^data:([^;]+);base64,(.+)$/.exec(c.url);
+            if (match)
+                return { buffer: Buffer.from(match[2] ?? '', 'base64'), contentType: match[1] ?? 'image/png' };
+        }
+        return null;
+    }
+    const { ai } = await Promise.resolve().then(() => __importStar(require('../config/genkit.config')));
+    const candidates = [
+        { model: 'googleai/gemini-2.5-flash-image', config: { responseModalities: ['IMAGE', 'TEXT'] } },
+        { model: 'googleai/gemini-2.5-flash-image-preview', config: { responseModalities: ['IMAGE', 'TEXT'] } },
+        { model: 'googleai/gemini-2.0-flash-preview-image-generation', config: { responseModalities: ['IMAGE', 'TEXT'] } },
+        { model: 'googleai/imagen-3.0-generate-001', config: { numberOfImages: 1, aspectRatio: aspect } },
+    ];
+    let imageBuffer = null;
+    let contentType = 'image/png';
+    const errors = [];
+    for (const c of candidates) {
+        try {
+            const response = await ai.generate({ model: c.model, prompt: finalPrompt, config: c.config });
+            const extracted = extractImage(response);
+            if (extracted) {
+                imageBuffer = extracted.buffer;
+                contentType = extracted.contentType;
+                break;
+            }
+            errors.push(`${c.model}: no image data`);
+        }
+        catch (err) {
+            errors.push(`${c.model}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    if (!imageBuffer) {
+        throw new error_middleware_1.AppError(`Image generation unavailable. Last error: ${errors[errors.length - 1] ?? 'unknown'}`, 503);
+    }
+    try {
+        const { getStorage } = await Promise.resolve().then(() => __importStar(require('../config/firebase.config')));
+        const bucket = getStorage().bucket();
+        const ext = contentType.includes('jpeg') ? 'jpg' : 'png';
+        const storagePath = `companies/${cid}/marketing/generated/${Date.now()}.${ext}`;
+        const fileRef = bucket.file(storagePath);
+        await fileRef.save(imageBuffer, { metadata: { contentType } });
+        await fileRef.makePublic();
+        const url = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        res.json({ success: true, data: { url } });
+    }
+    catch {
+        // Fallback to data URL if Storage upload fails — image is still usable in the modal.
+        const url = `data:${contentType};base64,${imageBuffer.toString('base64')}`;
+        res.json({ success: true, data: { url } });
+    }
+}));
 router.post('/seo/analyze', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { topic } = req.body;
     if (!topic)

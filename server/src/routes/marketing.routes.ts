@@ -137,6 +137,105 @@ router.delete('/campaigns/:id', asyncHandler(async (req: AuthenticatedRequest, r
 }));
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// INFLUENCERS — minimal CRM (V1). DM tracking + status pipeline.
+// Persisted at companies/{cid}/influencers/{id}.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const INFLUENCER_STATUSES = ['prospect', 'contacted', 'replied', 'active', 'lost'] as const;
+
+router.get('/influencers', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const cid = req.user?.companyId; if (!cid) throw new AppError('Company ID required', 400);
+  const data = await safe(async () => {
+    let q = getFirestore().collection(`companies/${cid}/influencers`) as FirebaseFirestore.Query;
+    if (req.query['status']) q = q.where('status', '==', req.query['status']);
+    return (await q.limit(500).get()).docs.map(serializeSnap);
+  }, []);
+  res.json({ success: true, data });
+}));
+
+router.post('/influencers', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const cid = req.user?.companyId; if (!cid) throw new AppError('Company ID required', 400);
+  const b = req.body as Record<string, unknown>;
+  const name = String(b['name'] ?? '').trim();
+  if (!name) throw new AppError('name required', 400);
+  const id = generateId();
+  const doc = {
+    id, companyId: cid,
+    name,
+    handle: String(b['handle'] ?? '').trim(),
+    platform: String(b['platform'] ?? 'instagram').trim().toLowerCase(),
+    followers: Number(b['followers'] ?? 0) || 0,
+    engagement: Number(b['engagement'] ?? 0) || 0,
+    niche: String(b['niche'] ?? '').trim(),
+    email: String(b['email'] ?? '').trim(),
+    phone: String(b['phone'] ?? '').trim(),
+    status: (INFLUENCER_STATUSES as readonly string[]).includes(String(b['status'])) ? String(b['status']) : 'prospect',
+    notes: String(b['notes'] ?? '').trim(),
+    dmSentAt: null as Date | null,
+    dmRepliedAt: null as Date | null,
+    createdBy: req.user!.uid,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await getFirestore().collection(`companies/${cid}/influencers`).doc(id).set(doc);
+  res.status(201).json({ success: true, data: doc });
+}));
+
+router.post('/influencers/import', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const cid = req.user?.companyId; if (!cid) throw new AppError('Company ID required', 400);
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows) || rows.length === 0) throw new AppError('rows[] required', 400);
+  if (rows.length > 500) throw new AppError('Max 500 influencers per import', 400);
+
+  const db = getFirestore();
+  const batch = db.batch();
+  const col = db.collection(`companies/${cid}/influencers`);
+  let imported = 0;
+  for (const r of rows) {
+    const name = String(r?.name ?? '').trim();
+    if (!name) continue;
+    const id = generateId();
+    batch.set(col.doc(id), {
+      id, companyId: cid,
+      name,
+      handle: String(r?.handle ?? '').trim(),
+      platform: String(r?.platform ?? 'instagram').trim().toLowerCase(),
+      followers: Number(r?.followers ?? 0) || 0,
+      engagement: Number(r?.engagement ?? 0) || 0,
+      niche: String(r?.niche ?? '').trim(),
+      email: String(r?.email ?? '').trim(),
+      phone: String(r?.phone ?? '').trim(),
+      status: 'prospect',
+      notes: String(r?.notes ?? '').trim(),
+      dmSentAt: null,
+      dmRepliedAt: null,
+      createdBy: req.user!.uid,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    imported++;
+  }
+  await batch.commit();
+  res.json({ success: true, data: { imported } });
+}));
+
+router.patch('/influencers/:id', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const cid = req.user?.companyId; if (!cid) throw new AppError('Company ID required', 400);
+  const patch: Record<string, unknown> = { ...(req.body as Record<string, unknown>), updatedAt: new Date() };
+  // Stamp dmSentAt / dmRepliedAt when status transitions through the pipeline.
+  if (patch['status'] === 'contacted' && !patch['dmSentAt']) patch['dmSentAt'] = new Date();
+  if (patch['status'] === 'replied' && !patch['dmRepliedAt']) patch['dmRepliedAt'] = new Date();
+  await getFirestore().collection(`companies/${cid}/influencers`).doc(req.params.id).update(patch);
+  res.json({ success: true });
+}));
+
+router.delete('/influencers/:id', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const cid = req.user?.companyId; if (!cid) throw new AppError('Company ID required', 400);
+  await getFirestore().collection(`companies/${cid}/influencers`).doc(req.params.id).delete();
+  res.json({ success: true });
+}));
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // CALENDAR
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -193,6 +292,79 @@ router.delete('/content/:id', asyncHandler(async (req: AuthenticatedRequest, res
 // ═══════════════════════════════════════════════════════════════════════════════
 // SEO (AI-powered)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/marketing/images/generate — Gemini/Imagen image generation for posts & flyers.
+// Body: { prompt: string, style?: string, format?: '1:1'|'16:9'|'9:16'|'4:5' }
+// Returns: { url: string } where url is a public Storage URL (or a data URL fallback).
+router.post('/images/generate', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const cid = req.user?.companyId;
+  if (!cid) throw new AppError('Company ID required', 400);
+  const { prompt, style, format } = req.body as { prompt: string; style?: string; format?: string };
+  if (!prompt || !prompt.trim()) throw new AppError('prompt required', 400);
+
+  const aspect = format === '16:9' ? '16:9' : format === '9:16' ? '9:16' : format === '4:5' ? '4:5' : '1:1';
+  const styleHint = style === 'illustration' ? 'flat illustration, vibrant'
+    : style === 'minimalist' ? 'minimalist, lots of whitespace'
+    : style === 'cinematic' ? 'cinematic photography, dramatic lighting'
+    : 'professional photography, natural lighting, premium look';
+  const finalPrompt = `${prompt}. Style: ${styleHint}. Format: ${aspect}. No text overlay.`;
+
+  type MediaItem = { url?: string; contentType?: string };
+  function extractImage(response: unknown): { buffer: Buffer; contentType: string } | null {
+    const r = response as { media?: MediaItem | MediaItem[]; message?: { content?: Array<{ media?: MediaItem }> } };
+    const candidates: MediaItem[] = [];
+    if (r.media) Array.isArray(r.media) ? candidates.push(...r.media) : candidates.push(r.media);
+    for (const part of r.message?.content ?? []) if (part?.media) candidates.push(part.media);
+    for (const c of candidates) {
+      if (!c.url) continue;
+      const match = /^data:([^;]+);base64,(.+)$/.exec(c.url);
+      if (match) return { buffer: Buffer.from(match[2] ?? '', 'base64'), contentType: match[1] ?? 'image/png' };
+    }
+    return null;
+  }
+
+  const { ai } = await import('../config/genkit.config');
+  const candidates = [
+    { model: 'googleai/gemini-2.5-flash-image', config: { responseModalities: ['IMAGE', 'TEXT'] } },
+    { model: 'googleai/gemini-2.5-flash-image-preview', config: { responseModalities: ['IMAGE', 'TEXT'] } },
+    { model: 'googleai/gemini-2.0-flash-preview-image-generation', config: { responseModalities: ['IMAGE', 'TEXT'] } },
+    { model: 'googleai/imagen-3.0-generate-001', config: { numberOfImages: 1, aspectRatio: aspect } },
+  ];
+
+  let imageBuffer: Buffer | null = null;
+  let contentType = 'image/png';
+  const errors: string[] = [];
+  for (const c of candidates) {
+    try {
+      const response = await ai.generate({ model: c.model, prompt: finalPrompt, config: c.config });
+      const extracted = extractImage(response);
+      if (extracted) { imageBuffer = extracted.buffer; contentType = extracted.contentType; break; }
+      errors.push(`${c.model}: no image data`);
+    } catch (err) {
+      errors.push(`${c.model}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (!imageBuffer) {
+    throw new AppError(`Image generation unavailable. Last error: ${errors[errors.length - 1] ?? 'unknown'}`, 503);
+  }
+
+  try {
+    const { getStorage } = await import('../config/firebase.config');
+    const bucket = getStorage().bucket();
+    const ext = contentType.includes('jpeg') ? 'jpg' : 'png';
+    const storagePath = `companies/${cid}/marketing/generated/${Date.now()}.${ext}`;
+    const fileRef = bucket.file(storagePath);
+    await fileRef.save(imageBuffer, { metadata: { contentType } });
+    await fileRef.makePublic();
+    const url = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+    res.json({ success: true, data: { url } });
+  } catch {
+    // Fallback to data URL if Storage upload fails — image is still usable in the modal.
+    const url = `data:${contentType};base64,${imageBuffer.toString('base64')}`;
+    res.json({ success: true, data: { url } });
+  }
+}));
 
 router.post('/seo/analyze', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { topic } = req.body as { topic: string };

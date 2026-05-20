@@ -40,8 +40,10 @@ exports.sendSecurityAlertEmail = sendSecurityAlertEmail;
 exports.sendWeeklyReportEmail = sendWeeklyReportEmail;
 exports.sendContractEmail = sendContractEmail;
 exports.sendWelcomeEmail = sendWelcomeEmail;
+exports.sendOnboardingCompleteEmail = sendOnboardingCompleteEmail;
 exports.sendPaymentConfirmationEmail = sendPaymentConfirmationEmail;
 exports.sendReplyEmail = sendReplyEmail;
+exports.wrapAgentEmail = wrapAgentEmail;
 /**
  * Email Service — Resend
  * Domain : music.zinakonect.com
@@ -76,7 +78,16 @@ async function logSentEmail(opts) {
         logger_1.logger.warn('[EmailService] Failed to log sent email to Firestore', { err: String(err) });
     }
 }
-const resend = new resend_1.Resend(process.env['RESEND_API_KEY']);
+let _resend = null;
+function getResend() {
+    if (_resend)
+        return _resend;
+    const key = process.env['RESEND_API_KEY'];
+    if (!key)
+        throw new Error('RESEND_API_KEY missing — email send unavailable');
+    _resend = new resend_1.Resend(key);
+    return _resend;
+}
 const FROM_DEFAULT = process.env['RESEND_FROM'] ?? 'Orlode AI <noreply@music.zinakonect.com>';
 const brandingCache = new Map();
 const CACHE_TTL = 10 * 60 * 1000; // 10 min
@@ -110,6 +121,32 @@ async function getBranding(companyId) {
 }
 // ── Core send ─────────────────────────────────────────────────────────────────
 async function sendEmail(opts) {
+    // Anti-spam: respect prior opt-outs. Skip the send entirely (return a fake ID
+    // so callers don't crash) instead of sending mail to someone who unsubscribed.
+    if (opts.companyId) {
+        try {
+            const recipients = Array.isArray(opts.to) ? opts.to : [opts.to];
+            const blocked = [];
+            for (const email of recipients) {
+                const docId = Buffer.from(email.toLowerCase()).toString('base64url');
+                const doc = await (0, firebase_config_1.getFirestore)().collection(`companies/${opts.companyId}/unsubscribes`).doc(docId).get();
+                if (doc.exists)
+                    blocked.push(email);
+            }
+            if (blocked.length === recipients.length) {
+                logger_1.logger.info('[EmailService] All recipients unsubscribed — send skipped', { to: recipients });
+                return { id: `skipped_unsub_${Date.now()}`, success: true, provider: 'resend', from: 'unsubscribed' };
+            }
+            if (blocked.length > 0) {
+                // Filter out unsubscribed from the recipient list
+                opts.to = recipients.filter(r => !blocked.includes(r));
+                logger_1.logger.info('[EmailService] Some recipients unsubscribed — partial send', { skipped: blocked, kept: opts.to });
+            }
+        }
+        catch (err) {
+            logger_1.logger.warn('[EmailService] Unsubscribe check failed (proceeding anyway)', { err: String(err) });
+        }
+    }
     // Try Gmail first if company has a connection
     if (opts.companyId && !opts.forceResend) {
         try {
@@ -169,6 +206,7 @@ async function sendEmail(opts) {
             content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
         }));
     }
+    const resend = getResend();
     const { data, error } = await resend.emails.send(resendPayload);
     if (error) {
         logger_1.logger.error('[EmailService] Resend error', { error });
@@ -237,6 +275,83 @@ async function sendWelcomeEmail(opts) {
         forceResend: true,
     });
 }
+/**
+ * Onboarding complete email — sent when user finishes the wizard.
+ * Different from welcomeEmail (sent at signup): this one mentions the
+ * activated pack, the trial countdown, and concrete next-steps.
+ */
+async function sendOnboardingCompleteEmail(opts) {
+    const b = await getBranding(opts.companyId);
+    const dashUrl = opts.dashboardUrl ?? 'https://mon-assistant-86bbd.web.app/dashboard';
+    const isOnPack = !!opts.packName;
+    const heroBlock = isOnPack
+        ? `
+      <div style="background:linear-gradient(135deg,#10B981,#059669);color:#fff;padding:20px 24px;border-radius:14px;margin:0 0 20px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.85;font-weight:700;margin-bottom:6px;">
+          🎁 Essai gratuit activé
+        </div>
+        <div style="font-size:22px;font-weight:800;line-height:1.2;margin-bottom:4px;">${opts.packName}</div>
+        <div style="font-size:13px;opacity:0.92;">${opts.agentCount ?? 7} agents IA · ${opts.trialDays ?? 30} jours offerts · Sans CB</div>
+      </div>`
+        : `
+      <div style="background:#F3F4F6;border:1px solid #E5E7EB;color:#111827;padding:20px 24px;border-radius:14px;margin:0 0 20px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6B7280;font-weight:700;margin-bottom:6px;">
+          Plan Free actif
+        </div>
+        <div style="font-size:18px;font-weight:700;line-height:1.2;margin-bottom:4px;">Agent Knowledge inclus</div>
+        <div style="font-size:13px;color:#6B7280;">Active un pack métier quand tu veux — 30 jours gratuits sans CB.</div>
+      </div>`;
+    const nextSteps = isOnPack
+        ? [
+            { num: 1, label: 'Pose ta première question à un agent', desc: 'Tape "Crée un lead pour Marie" dans le chat — l\'agent Sales s\'en occupe.' },
+            { num: 2, label: 'Importe tes documents', desc: 'Glisse-dépose tes PDF, contrats, FAQ → Knowledge brain les indexe.' },
+            { num: 3, label: 'Branche WhatsApp Business', desc: 'Réponds aux clients via tes agents directement sur WhatsApp.' },
+        ]
+        : [
+            { num: 1, label: 'Importe tes premiers documents', desc: 'Knowledge agent peut répondre dès que tu lui donnes du contenu.' },
+            { num: 2, label: 'Découvre les packs métier', desc: '$20/mo · 7 agents par pack · 30 jours gratuits.' },
+            { num: 3, label: 'Configure ton clone', desc: 'Tes visiteurs peuvent te parler 24/7 via le widget chat.' },
+        ];
+    const stepsHtml = nextSteps.map(s => `
+    <tr>
+      <td style="padding:12px 0;vertical-align:top;width:36px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#7C3AED;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;">${s.num}</div>
+      </td>
+      <td style="padding:12px 0;vertical-align:top;">
+        <div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:2px;">${s.label}</div>
+        <div style="font-size:12px;color:#6B7280;line-height:1.5;">${s.desc}</div>
+      </td>
+    </tr>`).join('');
+    const html = baseWrapper(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:#111827;">${opts.companyName} est prêt 🚀</h2>
+    <p style="margin:0 0 20px;color:#6b7280;font-size:14px;line-height:1.5;">
+      Bonjour <strong>${opts.userName}</strong>, ton onboarding est terminé.
+    </p>
+    ${heroBlock}
+    <h3 style="margin:8px 0 4px;font-size:14px;color:#111827;">Tes 3 prochaines actions</h3>
+    <table cellpadding="0" cellspacing="0" style="width:100%;">
+      ${stepsHtml}
+    </table>
+    <div style="margin:24px 0 0;text-align:center;">
+      <a href="${dashUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:13px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        Ouvrir mon tableau de bord
+      </a>
+    </div>
+    <p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">
+      Besoin d'aide ? Réponds à cet email — un humain répond.
+    </p>
+  `, b);
+    return sendEmail({
+        to: opts.to,
+        subject: isOnPack
+            ? `🎉 ${opts.packName} activé — voici ta première mission`
+            : `${opts.companyName} est prêt sur Orlode AI`,
+        html,
+        tags: [{ name: 'type', value: 'onboarding-complete' }],
+        forceResend: true,
+        companyId: opts.companyId,
+    });
+}
 /** Confirmation de paiement — forced Resend (system email, not from company mailbox) */
 async function sendPaymentConfirmationEmail(opts) {
     const b = await getBranding(opts.companyId);
@@ -303,6 +418,71 @@ function baseWrapper(content, b) {
   </table>
 </body>
 </html>`;
+}
+async function wrapAgentEmail(opts) {
+    const b = await getBranding(opts.companyId);
+    // If body is already a full HTML doc (DOCTYPE / <html>), return as-is
+    // — power-users / templates have full control.
+    if (/^<!DOCTYPE|<html[\s>]/i.test(opts.body.trim())) {
+        return { html: opts.body, text: stripHtml(opts.body) };
+    }
+    // Convert plain-text body to safe HTML.
+    // We DO NOT escape user-provided HTML if it's already there — we trust the LLM
+    // (and external callers) to pass clean content.
+    const isHtml = opts.body.includes('<') && opts.body.includes('>');
+    const bodyHtml = isHtml
+        ? opts.body
+        : opts.body.split(/\n\n+/).map(p => `<p style="margin:0 0 14px;color:#374151;font-size:15px;line-height:1.6;">${p.replace(/\n/g, '<br>')}</p>`).join('');
+    const greeting = opts.recipientName
+        ? `<p style="margin:0 0 16px;color:#111827;font-size:16px;font-weight:600;">Bonjour ${opts.recipientName},</p>`
+        : '';
+    const ctaHtml = opts.ctaUrl && opts.ctaLabel
+        ? `<div style="margin:24px 0;text-align:center;">
+        <a href="${opts.ctaUrl}" style="display:inline-block;background:linear-gradient(135deg,#0019FF,#0092FF);color:#fff;text-decoration:none;padding:13px 32px;border-radius:10px;font-size:15px;font-weight:600;letter-spacing:0.2px;">
+          ${opts.ctaLabel}
+        </a>
+      </div>`
+        : '';
+    // Anti-spam compliance: unsubscribe link + physical sender info.
+    // The unsubscribe link points to a per-recipient page that records the opt-out.
+    const baseUrl = process.env['BASE_URL'] ?? 'https://orlode.com';
+    const unsubLink = opts.recipientEmail && opts.companyId
+        ? `${baseUrl}/api/public/unsubscribe?cid=${encodeURIComponent(opts.companyId)}&e=${encodeURIComponent(opts.recipientEmail)}`
+        : `${baseUrl}/api/public/unsubscribe`;
+    const content = `${greeting}${bodyHtml}${ctaHtml}`;
+    const html = baseWrapper(`${content}
+    <hr style="border:none;border-top:1px solid #eef0f5;margin:28px 0 16px;">
+    <p style="margin:0 0 6px;font-size:11px;color:#9ca3af;line-height:1.5;">
+      Cet email vous est envoyé par ${b.name}${b.website ? ` (${b.website})` : ''}.
+      Si vous ne souhaitez plus recevoir ces messages, vous pouvez
+      <a href="${unsubLink}" style="color:#9ca3af;text-decoration:underline;">vous désabonner</a>.
+    </p>`, b);
+    // Plain text fallback — many spam filters require it. Use \r\n for CRLF.
+    const textParts = [
+        opts.recipientName ? `Bonjour ${opts.recipientName},` : '',
+        stripHtml(bodyHtml),
+        opts.ctaUrl ? `\n${opts.ctaLabel ?? 'En savoir plus'} : ${opts.ctaUrl}` : '',
+        `\n--\n${b.name}${b.website ? ' · ' + b.website : ''}`,
+        `Désabonnement : ${unsubLink}`,
+    ].filter(Boolean);
+    const text = textParts.join('\n').replace(/\n{3,}/g, '\n\n');
+    return { html, text };
+}
+function stripHtml(html) {
+    return html
+        .replace(/<style[^>]*>.*?<\/style>/gis, '')
+        .replace(/<script[^>]*>.*?<\/script>/gis, '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<\/h[1-6]>/gi, '\n\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }
 function inviteTemplate(opts, b) {
     return baseWrapper(`

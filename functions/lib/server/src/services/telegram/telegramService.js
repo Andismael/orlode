@@ -10,6 +10,9 @@ exports.sendTelegramMessage = sendTelegramMessage;
 exports.sendTelegramChannelMessage = sendTelegramChannelMessage;
 exports.sendTelegramPhoto = sendTelegramPhoto;
 exports.sendTelegramDocument = sendTelegramDocument;
+exports.downloadTelegramFile = downloadTelegramFile;
+exports.sendTelegramLocation = sendTelegramLocation;
+exports.sendTelegramKeyboard = sendTelegramKeyboard;
 exports.getTelegramBotInfo = getTelegramBotInfo;
 /**
  * Telegram Bot Service — Send/receive messages via Telegram Bot API
@@ -169,6 +172,79 @@ async function sendTelegramDocument(companyId, chatId, documentUrl, caption) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: chatId || config.defaultChatId, document: documentUrl, caption, parse_mode: 'Markdown' }),
+        });
+        const data = await res.json();
+        return data.ok ? { success: true } : { success: false, error: data.description };
+    }
+    catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+/** Download a file from Telegram (photo, voice, document). Returns buffer + mimeType.
+ *  Telegram requires a 2-step process: getFile (resolves file_id → file_path),
+ *  then https://api.telegram.org/file/bot{token}/{file_path}. */
+async function downloadTelegramFile(companyId, fileId) {
+    const config = await getConfig(companyId);
+    if (!config)
+        return null;
+    try {
+        const meta = await fetch(`${TELEGRAM_API}/bot${config.botToken}/getFile?file_id=${encodeURIComponent(fileId)}`);
+        const metaJson = await meta.json();
+        const path = metaJson?.result?.file_path;
+        if (!metaJson.ok || !path)
+            return null;
+        const file = await fetch(`${TELEGRAM_API}/file/bot${config.botToken}/${path}`);
+        if (!file.ok)
+            return null;
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const ext = path.split('.').pop()?.toLowerCase() ?? '';
+        const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' :
+            ext === 'png' ? 'image/png' :
+                ext === 'webp' ? 'image/webp' :
+                    ext === 'oga' || ext === 'ogg' ? 'audio/ogg' :
+                        ext === 'mp3' ? 'audio/mpeg' :
+                            ext === 'm4a' ? 'audio/mp4' :
+                                'application/octet-stream';
+        return { buffer, mimeType };
+    }
+    catch (err) {
+        logger_1.logger.error('[Telegram] downloadTelegramFile failed', { fileId, err: String(err) });
+        return null;
+    }
+}
+/** Send a native location pin on Telegram. */
+async function sendTelegramLocation(companyId, chatId, latitude, longitude) {
+    const config = await getConfig(companyId);
+    if (!config)
+        return { success: false, error: 'Telegram not configured' };
+    try {
+        const res = await fetch(`${TELEGRAM_API}/bot${config.botToken}/sendLocation`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, latitude, longitude }),
+        });
+        const data = await res.json();
+        return data.ok ? { success: true } : { success: false, error: data.description };
+    }
+    catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+/** Send a message with inline keyboard buttons (equivalent to WhatsApp quick replies).
+ *  buttons = array of rows, each row = array of {text, callback_data?, url?}. */
+async function sendTelegramKeyboard(companyId, chatId, text, buttons, parseMode = 'Markdown') {
+    const config = await getConfig(companyId);
+    if (!config)
+        return { success: false, error: 'Telegram not configured' };
+    try {
+        const res = await fetch(`${TELEGRAM_API}/bot${config.botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId, text, parse_mode: parseMode,
+                reply_markup: { inline_keyboard: buttons },
+            }),
         });
         const data = await res.json();
         return data.ok ? { success: true } : { success: false, error: data.description };

@@ -60,6 +60,44 @@ setInterval(() => {
         if (c.resetAt < Date.now())
             ipCounters.delete(ip);
 }, 10 * 60 * 1000);
+// ── GET /api/public/unsubscribe — anti-spam compliance ───────────────────────
+// Records the opt-out and returns a friendly HTML confirmation page.
+router.get('/unsubscribe', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const cid = (req.query['cid'] ?? '').trim();
+    const email = (req.query['e'] ?? '').trim().toLowerCase();
+    if (cid && email) {
+        try {
+            const { getFirestore } = await Promise.resolve().then(() => __importStar(require('../config/firebase.config')));
+            const db = getFirestore();
+            // Idempotent — same email re-clicking just updates the timestamp
+            await db.collection(`companies/${cid}/unsubscribes`).doc(Buffer.from(email).toString('base64url')).set({
+                email,
+                unsubscribedAt: new Date(),
+                ip: req.ip ?? 'unknown',
+                userAgent: req.header('user-agent')?.slice(0, 200) ?? '',
+            }, { merge: true });
+            logger_1.logger.info('[Public] Unsubscribed', { cid, email });
+        }
+        catch (err) {
+            logger_1.logger.warn('[Public] Failed to record unsubscribe', { err: String(err), cid, email });
+        }
+    }
+    // Friendly confirmation page (no SPA involvement)
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Désabonné</title></head>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f6fb;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+  <div style="background:#fff;border-radius:16px;padding:40px;max-width:480px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+    <div style="font-size:48px;margin-bottom:12px;">✓</div>
+    <h1 style="margin:0 0 8px;font-size:22px;color:#111827;">Désabonnement confirmé</h1>
+    <p style="margin:0;color:#6b7280;font-size:14px;line-height:1.6;">
+      ${email ? `<strong>${email}</strong> ne recevra plus d'emails de cette entreprise.` : 'Tu ne recevras plus d\'emails de cette entreprise.'}<br><br>
+      Tu peux fermer cette fenêtre.
+    </p>
+  </div>
+</body></html>`);
+}));
 // ── POST /api/public/chat ─────────────────────────────────────────────────────
 router.post('/chat', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const ip = req.ip ?? 'unknown';

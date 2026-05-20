@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.websiteAgentTool = exports.websiteAgentFlow = exports.deployToFirebaseTool = exports.getEmbedCodeTool = exports.getWebsiteStatusTool = exports.updateWebsiteTool = exports.generateWebsiteTool = void 0;
+exports.generateStaticHTML = generateStaticHTML;
 /**
  * Website Builder Agent — Generate a full website from company data
  * Uses all existing Orlode data (company info, CRM, team, products)
@@ -310,7 +311,9 @@ exports.deployToFirebaseTool = genkit_config_1.ai.defineTool({
         };
     }
 });
-// Generate static HTML for deployment
+// Generate static HTML for deployment.
+// Exported so the preview route at /api/website/preview/:companyId can serve a
+// real rendered page instead of raw JSON.
 function generateStaticHTML(content, companyName, color, companyId, widgetEnabled, template) {
     const hero = content['hero'];
     const about = content['about'];

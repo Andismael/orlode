@@ -231,6 +231,36 @@ service cloud.firestore {
         allow write: if false; // Server-only
       }
 
+      // ── Commerce / Boutique WhatsApp ──────────────────────────────────────
+      // Stores belong to a company. Admins manage them; team members can read.
+      match /stores/{storeId} {
+        allow read:  if belongsToCompany(companyId);
+        allow create: if isCompanyAdmin(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        allow delete: if false; // Never delete via client (audit + orders linked)
+
+        match /products/{productId} {
+          allow read:   if belongsToCompany(companyId);
+          allow create: if belongsToCompany(companyId);
+          allow update: if belongsToCompany(companyId);
+          allow delete: if isCompanyAdmin(companyId);
+        }
+
+        match /orders/{orderId} {
+          allow read:   if belongsToCompany(companyId);
+          allow create: if belongsToCompany(companyId);
+          allow update: if isCompanyAdmin(companyId);
+          allow delete: if false; // Orders are append-only for audit
+        }
+
+        // Sessions hold OTP hashes — never readable from client.
+        // Server-only via Admin SDK.
+        match /sessions/{sessionId} {
+          allow read:  if false;
+          allow write: if false;
+        }
+      }
+
       // Catch-all for any other company subcollections — admin read/write
       match /{subcollection}/{docId} {
         allow read:  if belongsToCompany(companyId);

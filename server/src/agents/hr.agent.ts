@@ -19,17 +19,17 @@ export const leaveBalanceTool = ai.defineTool(
     name: 'hr_getLeaveBalance',
     description: 'Get employee leave balance (paid leave, sick, RTT, etc.).',
     inputSchema: z.object({ companyId: z.string(), userId: z.string() }),
-    outputSchema: z.object({ paidLeave: z.number(), sickDays: z.number(), rtt: z.number(), other: z.number(), year: z.number() }),
+    outputSchema: z.object({ success: z.boolean().optional(), message: z.string().optional(), paidLeave: z.number(), sickDays: z.number(), rtt: z.number(), other: z.number(), year: z.number() }),
   },
   async ({ companyId, userId }) => {
     const db = getFirestore();
     const year = new Date().getFullYear();
-    const doc = await db.collection(`companies/${companyId}/leaveBalances`).doc(`${userId}_${year}`).get();
-    if (doc.exists) {
+    const doc = await db.collection(`companies/${companyId}/leaveBalances`).doc(`${userId}_${year}`).get().catch(() => null);
+    if (doc?.exists) {
       const d = doc.data()!;
-      return { paidLeave: (d['paidLeave'] as number) ?? 25, sickDays: (d['sickDays'] as number) ?? 0, rtt: (d['rtt'] as number) ?? 10, other: (d['other'] as number) ?? 0, year };
+      return { success: true, paidLeave: (d['paidLeave'] as number) ?? 25, sickDays: (d['sickDays'] as number) ?? 0, rtt: (d['rtt'] as number) ?? 10, other: (d['other'] as number) ?? 0, year };
     }
-    return { paidLeave: 25, sickDays: 0, rtt: 10, other: 0, year };
+    return { success: true, paidLeave: 25, sickDays: 0, rtt: 10, other: 0, year };
   }
 );
 
@@ -42,7 +42,7 @@ export const leaveRequestTool = ai.defineTool(
       type: z.enum(['paid', 'sick', 'rtt', 'unpaid', 'other']).default('paid'),
       startDate: z.string(), endDate: z.string(), reason: z.string().optional(),
     }),
-    outputSchema: z.object({ requestId: z.string(), status: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), requestId: z.string(), status: z.string(), message: z.string() }),
   },
   async ({ companyId, userId, type, startDate, endDate, reason }) => {
     const db = getFirestore();
@@ -50,12 +50,17 @@ export const leaveRequestTool = ai.defineTool(
     // Get employee name
     let empName = '';
     try { const u = await db.collection('users').doc(userId).get(); empName = (u.data()?.['displayName'] as string) ?? ''; } catch {}
-    await db.collection(`companies/${companyId}/leaveRequests`).doc(id).set({
-      id, userId, employeeName: empName, type, startDate, endDate,
-      reason: reason ?? '', status: 'pending',
-      submittedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
-    });
-    return { requestId: id, status: 'pending', message: `Demande #${id.slice(0, 8)} soumise (${type}, ${startDate} → ${endDate}). En attente d'approbation manager.` };
+    try {
+      await db.collection(`companies/${companyId}/leaveRequests`).doc(id).set({
+        id, userId, employeeName: empName, type, startDate, endDate,
+        reason: reason ?? '', status: 'pending',
+        submittedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] submitLeaveRequest write failed', { error: String(err) });
+      return { success: false, requestId: '', status: 'error', message: 'Sauvegarde de la demande de congé impossible.' };
+    }
+    return { success: true, requestId: id, status: 'pending', message: `Demande #${id.slice(0, 8)} soumise (${type}, ${startDate} → ${endDate}). En attente d'approbation manager.` };
   }
 );
 
@@ -65,19 +70,24 @@ export const leaveStatusTool = ai.defineTool(
     description: 'Check the status of a leave request or list pending requests for a user.',
     inputSchema: z.object({ companyId: z.string(), userId: z.string(), requestId: z.string().optional() }),
     outputSchema: z.object({
+      success: z.boolean().optional(), message: z.string().optional(),
       requests: z.array(z.object({ id: z.string(), type: z.string(), startDate: z.string(), endDate: z.string(), status: z.string(), reason: z.string() })),
     }),
   },
   async ({ companyId, userId, requestId }) => {
     const db = getFirestore();
     if (requestId) {
-      const doc = await db.collection(`companies/${companyId}/leaveRequests`).doc(requestId).get();
-      if (!doc.exists) return { requests: [] };
+      const doc = await db.collection(`companies/${companyId}/leaveRequests`).doc(requestId).get().catch(() => null);
+      if (!doc?.exists) return { success: true, requests: [] };
       const d = doc.data()!;
-      return { requests: [{ id: doc.id, type: (d['type'] as string) ?? '', startDate: (d['startDate'] as string) ?? '', endDate: (d['endDate'] as string) ?? '', status: (d['status'] as string) ?? '', reason: (d['reason'] as string) ?? '' }] };
+      return { success: true, requests: [{ id: doc.id, type: (d['type'] as string) ?? '', startDate: (d['startDate'] as string) ?? '', endDate: (d['endDate'] as string) ?? '', status: (d['status'] as string) ?? '', reason: (d['reason'] as string) ?? '' }] };
     }
-    const snap = await db.collection(`companies/${companyId}/leaveRequests`).where('userId', '==', userId).orderBy('createdAt', 'desc').limit(10).get();
-    return { requests: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: (x['type'] as string) ?? '', startDate: (x['startDate'] as string) ?? '', endDate: (x['endDate'] as string) ?? '', status: (x['status'] as string) ?? '', reason: (x['reason'] as string) ?? '' }; }) };
+    const snap = await db.collection(`companies/${companyId}/leaveRequests`).where('userId', '==', userId).orderBy('createdAt', 'desc').limit(10).get().catch((err) => {
+      logger.error('[HR] getLeaveRequestStatus query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des demandes impossible.', requests: [] };
+    return { success: true, requests: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: (x['type'] as string) ?? '', startDate: (x['startDate'] as string) ?? '', endDate: (x['endDate'] as string) ?? '', status: (x['status'] as string) ?? '', reason: (x['reason'] as string) ?? '' }; }) };
   }
 );
 
@@ -95,18 +105,23 @@ export const createJobPostingTool = ai.defineTool(
       employmentType: z.enum(['full-time', 'part-time', 'contract', 'internship']).optional().default('full-time'),
       location: z.string().optional(), salary: z.string().optional(),
     }),
-    outputSchema: z.object({ jobId: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), jobId: z.string(), message: z.string() }),
   },
   async ({ companyId, title, department, description, requirements, employmentType, location, salary }) => {
     const db = getFirestore();
     const id = generateId();
-    await db.collection(`companies/${companyId}/jobPostings`).doc(id).set({
-      id, title, department: department ?? '', description, requirements: requirements ?? '',
-      employmentType, location: location ?? '', salary: salary ?? '',
-      status: 'open', applicantCount: 0,
-      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-    });
-    return { jobId: id, message: `Offre "${title}" creee (${employmentType}). Statut: ouverte.` };
+    try {
+      await db.collection(`companies/${companyId}/jobPostings`).doc(id).set({
+        id, title, department: department ?? '', description, requirements: requirements ?? '',
+        employmentType, location: location ?? '', salary: salary ?? '',
+        status: 'open', applicantCount: 0,
+        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] createJobPosting write failed', { error: String(err) });
+      return { success: false, jobId: '', message: 'Sauvegarde de l\'offre impossible.' };
+    }
+    return { success: true, jobId: id, message: `Offre "${title}" creee (${employmentType}). Statut: ouverte.` };
   }
 );
 
@@ -115,14 +130,18 @@ export const listJobsTool = ai.defineTool(
     name: 'hr_listJobs',
     description: 'List open job postings for the company.',
     inputSchema: z.object({ companyId: z.string(), status: z.enum(['open', 'closed', 'all']).optional().default('open') }),
-    outputSchema: z.object({ jobs: z.array(z.object({ id: z.string(), title: z.string(), department: z.string(), status: z.string(), applicantCount: z.number() })) }),
+    outputSchema: z.object({ success: z.boolean().optional(), message: z.string().optional(), jobs: z.array(z.object({ id: z.string(), title: z.string(), department: z.string(), status: z.string(), applicantCount: z.number() })) }),
   },
   async ({ companyId, status }) => {
     const db = getFirestore();
     let q = db.collection(`companies/${companyId}/jobPostings`) as FirebaseFirestore.Query;
     if (status !== 'all') q = q.where('status', '==', status);
-    const snap = await q.limit(50).get();
-    return { jobs: snap.docs.map(d => { const x = d.data(); return { id: d.id, title: (x['title'] as string) ?? '', department: (x['department'] as string) ?? '', status: (x['status'] as string) ?? '', applicantCount: (x['applicantCount'] as number) ?? 0 }; }) };
+    const snap = await q.limit(50).get().catch((err) => {
+      logger.error('[HR] listJobs query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des offres impossible.', jobs: [] };
+    return { success: true, jobs: snap.docs.map(d => { const x = d.data(); return { id: d.id, title: (x['title'] as string) ?? '', department: (x['department'] as string) ?? '', status: (x['status'] as string) ?? '', applicantCount: (x['applicantCount'] as number) ?? 0 }; }) };
   }
 );
 
@@ -136,7 +155,7 @@ export const addCandidateTool = ai.defineTool(
       cvSummary: z.string().optional().describe('Summary or key points from their CV'),
       notes: z.string().optional(),
     }),
-    outputSchema: z.object({ candidateId: z.string(), score: z.number().optional(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), candidateId: z.string(), score: z.number().optional(), message: z.string() }),
   },
   async ({ companyId, jobId, name, email, phone, cvSummary, notes }) => {
     const db = getFirestore();
@@ -156,20 +175,27 @@ export const addCandidateTool = ai.defineTool(
           });
           score = parseInt(text.trim()) || undefined;
         }
-      } catch {}
+      } catch (err) {
+        logger.warn('[HR] addCandidate scoring failed (non-blocking)', { error: String(err) });
+      }
     }
 
-    await db.collection(`companies/${companyId}/candidates`).doc(id).set({
-      id, jobId, name, email: email ?? '', phone: phone ?? '',
-      cvSummary: cvSummary ?? '', notes: notes ?? '',
-      score: score ?? null, status: 'new',
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/candidates`).doc(id).set({
+        id, jobId, name, email: email ?? '', phone: phone ?? '',
+        cvSummary: cvSummary ?? '', notes: notes ?? '',
+        score: score ?? null, status: 'new',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] addCandidate write failed', { error: String(err) });
+      return { success: false, candidateId: '', message: 'Sauvegarde du candidat impossible.' };
+    }
 
     // Increment applicant count
     try { await db.collection(`companies/${companyId}/jobPostings`).doc(jobId).update({ applicantCount: FieldValue.increment(1) }); } catch {}
 
-    return { candidateId: id, score, message: `Candidat "${name}" ajoute${score ? ` (score: ${score}/100)` : ''}. Statut: nouveau.` };
+    return { success: true, candidateId: id, score, message: `Candidat "${name}" ajoute${score ? ` (score: ${score}/100)` : ''}. Statut: nouveau.` };
   }
 );
 
@@ -178,12 +204,16 @@ export const listCandidatesTool = ai.defineTool(
     name: 'hr_listCandidates',
     description: 'List candidates for a job posting, with scores and status.',
     inputSchema: z.object({ companyId: z.string(), jobId: z.string() }),
-    outputSchema: z.object({ candidates: z.array(z.object({ id: z.string(), name: z.string(), email: z.string(), score: z.number().optional(), status: z.string() })) }),
+    outputSchema: z.object({ success: z.boolean().optional(), message: z.string().optional(), candidates: z.array(z.object({ id: z.string(), name: z.string(), email: z.string(), score: z.number().optional(), status: z.string() })) }),
   },
   async ({ companyId, jobId }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/candidates`).where('jobId', '==', jobId).limit(100).get();
-    return { candidates: snap.docs.map(d => { const x = d.data(); return { id: d.id, name: (x['name'] as string) ?? '', email: (x['email'] as string) ?? '', score: x['score'] as number | undefined, status: (x['status'] as string) ?? '' }; }) };
+    const snap = await db.collection(`companies/${companyId}/candidates`).where('jobId', '==', jobId).limit(100).get().catch((err) => {
+      logger.error('[HR] listCandidates query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des candidats impossible.', candidates: [] };
+    return { success: true, candidates: snap.docs.map(d => { const x = d.data(); return { id: d.id, name: (x['name'] as string) ?? '', email: (x['email'] as string) ?? '', score: x['score'] as number | undefined, status: (x['status'] as string) ?? '' }; }) };
   }
 );
 
@@ -197,7 +227,7 @@ export const scheduleInterviewTool = ai.defineTool(
       type: z.enum(['phone', 'video', 'onsite']).optional().default('video'),
       notes: z.string().optional(),
     }),
-    outputSchema: z.object({ interviewId: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), interviewId: z.string(), message: z.string() }),
   },
   async ({ companyId, candidateId, date, time, interviewer, type, notes }) => {
     const db = getFirestore();
@@ -206,16 +236,21 @@ export const scheduleInterviewTool = ai.defineTool(
     let candidateName = '';
     try { const c = await db.collection(`companies/${companyId}/candidates`).doc(candidateId).get(); candidateName = (c.data()?.['name'] as string) ?? ''; } catch {}
 
-    await db.collection(`companies/${companyId}/interviews`).doc(id).set({
-      id, candidateId, candidateName, date, time, interviewer: interviewer ?? '',
-      type, notes: notes ?? '', status: 'scheduled',
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/interviews`).doc(id).set({
+        id, candidateId, candidateName, date, time, interviewer: interviewer ?? '',
+        type, notes: notes ?? '', status: 'scheduled',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] scheduleInterview write failed', { error: String(err) });
+      return { success: false, interviewId: '', message: 'Sauvegarde de l\'entretien impossible.' };
+    }
 
     // Update candidate status
     try { await db.collection(`companies/${companyId}/candidates`).doc(candidateId).update({ status: 'interview_scheduled' }); } catch {}
 
-    return { interviewId: id, message: `Entretien ${type} planifie pour "${candidateName}" le ${date} a ${time}.` };
+    return { success: true, interviewId: id, message: `Entretien ${type} planifie pour "${candidateName}" le ${date} a ${time}.` };
   }
 );
 
@@ -229,6 +264,7 @@ export const employeeProfileTool = ai.defineTool(
     description: 'Get detailed employee profile — personal info, department, manager, start date, work mode.',
     inputSchema: z.object({ companyId: z.string(), userId: z.string().optional(), employeeName: z.string().optional() }),
     outputSchema: z.object({
+      success: z.boolean().optional(), message: z.string().optional(),
       found: z.boolean(), name: z.string(), email: z.string(), department: z.string(),
       jobTitle: z.string(), manager: z.string(), startDate: z.string(),
       employmentType: z.string(), workMode: z.string(), phone: z.string(),
@@ -239,16 +275,21 @@ export const employeeProfileTool = ai.defineTool(
     let data: Record<string, unknown> | undefined;
 
     if (userId) {
-      const doc = await db.collection('users').doc(userId).get();
-      if (doc.exists) data = doc.data() as Record<string, unknown>;
+      const doc = await db.collection('users').doc(userId).get().catch(() => null);
+      if (doc?.exists) data = doc.data() as Record<string, unknown>;
     } else if (employeeName) {
-      const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get();
-      const q = employeeName.toLowerCase();
-      const match = snap.docs.find(d => ((d.data()['displayName'] as string) ?? '').toLowerCase().includes(q));
-      if (match) data = match.data() as Record<string, unknown>;
+      const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get().catch((err) => {
+        logger.error('[HR] getEmployeeProfile query failed', { error: String(err) });
+        return null;
+      });
+      if (snap) {
+        const q = employeeName.toLowerCase();
+        const match = snap.docs.find(d => ((d.data()['displayName'] as string) ?? '').toLowerCase().includes(q));
+        if (match) data = match.data() as Record<string, unknown>;
+      }
     }
 
-    if (!data) return { found: false, name: '', email: '', department: '', jobTitle: '', manager: '', startDate: '', employmentType: '', workMode: '', phone: '' };
+    if (!data) return { success: true, found: false, name: '', email: '', department: '', jobTitle: '', manager: '', startDate: '', employmentType: '', workMode: '', phone: '' };
 
     // Convert Firestore Timestamp (object with _seconds) to ISO date string
     const toDateString = (v: unknown): string => {
@@ -264,6 +305,7 @@ export const employeeProfileTool = ai.defineTool(
     };
 
     return {
+      success: true,
       found: true,
       name: (data['displayName'] as string) ?? '',
       email: (data['email'] as string) ?? '',
@@ -287,12 +329,16 @@ export const listEmployeeDocsTool = ai.defineTool(
     name: 'hr_listEmployeeDocuments',
     description: 'List HR documents for an employee (contract, attestation, certificates, payslips).',
     inputSchema: z.object({ companyId: z.string(), userId: z.string() }),
-    outputSchema: z.object({ documents: z.array(z.object({ id: z.string(), type: z.string(), title: z.string(), date: z.string() })) }),
+    outputSchema: z.object({ success: z.boolean().optional(), message: z.string().optional(), documents: z.array(z.object({ id: z.string(), type: z.string(), title: z.string(), date: z.string() })) }),
   },
   async ({ companyId, userId }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/hrDocuments`).where('userId', '==', userId).limit(50).get();
-    return { documents: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: (x['type'] as string) ?? '', title: (x['title'] as string) ?? '', date: (x['createdAt']?.toDate?.()?.toISOString?.() ?? '') as string }; }) };
+    const snap = await db.collection(`companies/${companyId}/hrDocuments`).where('userId', '==', userId).limit(50).get().catch((err) => {
+      logger.error('[HR] listEmployeeDocuments query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des documents impossible.', documents: [] };
+    return { success: true, documents: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: (x['type'] as string) ?? '', title: (x['title'] as string) ?? '', date: (x['createdAt']?.toDate?.()?.toISOString?.() ?? '') as string }; }) };
   }
 );
 
@@ -301,37 +347,49 @@ export const generateCertificateTool = ai.defineTool(
     name: 'hr_generateEmploymentCertificate',
     description: 'Generate an employment certificate / attestation for an employee.',
     inputSchema: z.object({ companyId: z.string(), userId: z.string(), certificateType: z.enum(['employment', 'salary', 'training', 'recommendation']).optional().default('employment') }),
-    outputSchema: z.object({ documentId: z.string(), content: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), documentId: z.string(), content: z.string(), message: z.string() }),
   },
   async ({ companyId, userId, certificateType }) => {
     const db = getFirestore();
     // Get employee + company info
     const [empDoc, compDoc] = await Promise.all([
-      db.collection('users').doc(userId).get(),
-      db.collection('companies').doc(companyId).get(),
+      db.collection('users').doc(userId).get().catch(() => null),
+      db.collection('companies').doc(companyId).get().catch(() => null),
     ]);
-    const emp = empDoc.data() ?? {};
-    const comp = compDoc.data() ?? {};
+    const emp = empDoc?.data() ?? {};
+    const comp = compDoc?.data() ?? {};
 
-    const { text } = await ai.generate({
-      model: GEMINI_FLASH,
-      prompt: `Genere une attestation de type "${certificateType}" en francais, professionnelle et formelle.
+    let text: string;
+    try {
+      const result = await ai.generate({
+        model: GEMINI_FLASH,
+        prompt: `Genere une attestation de type "${certificateType}" en francais, professionnelle et formelle.
 Entreprise: ${comp['name'] ?? 'Orlode'}, ${comp['address'] ?? ''}
 Employe: ${emp['displayName'] ?? ''}, poste: ${emp['jobTitle'] ?? ''}, departement: ${emp['department'] ?? ''}
 Date d'embauche: ${emp['startDate'] ?? emp['createdAt'] ?? 'non specifiee'}
 Date du jour: ${new Date().toLocaleDateString('fr-FR')}
 
 Retourne UNIQUEMENT le texte de l'attestation, formate proprement.`,
-      config: { temperature: 0.2 },
-    });
+        config: { temperature: 0.2 },
+      });
+      text = result.text;
+    } catch (err) {
+      logger.error('[HR] generateCertificate AI generation failed', { error: String(err) });
+      return { success: false, documentId: '', content: '', message: `Génération de l'attestation impossible: ${err instanceof Error ? err.message : String(err)}` };
+    }
 
     const docId = generateId();
-    await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
-      id: docId, userId, type: certificateType, title: `Attestation ${certificateType} - ${emp['displayName'] ?? ''}`,
-      content: text, createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
+        id: docId, userId, type: certificateType, title: `Attestation ${certificateType} - ${emp['displayName'] ?? ''}`,
+        content: text, createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] generateCertificate write failed', { error: String(err) });
+      return { success: false, documentId: '', content: text, message: 'Sauvegarde de l\'attestation impossible.' };
+    }
 
-    return { documentId: docId, content: text, message: `Attestation "${certificateType}" generee pour ${emp['displayName'] ?? 'l\'employe'}.` };
+    return { success: true, documentId: docId, content: text, message: `Attestation "${certificateType}" generee pour ${emp['displayName'] ?? 'l\'employe'}.` };
   }
 );
 
@@ -356,6 +414,7 @@ export const generatePayslipTool = ai.defineTool(
       currency: z.string().optional().default('XOF'),
     }),
     outputSchema: z.object({
+      success: z.boolean().optional(),
       documentId: z.string(),
       employeeName: z.string(),
       grossTotal: z.number(),
@@ -369,17 +428,18 @@ export const generatePayslipTool = ai.defineTool(
     const db = getFirestore();
     // Check the formal employees collection first (has salary), then fall back to users
     const [empDocHR, empDocUser, compDoc] = await Promise.all([
-      db.collection(`companies/${companyId}/employees`).doc(employeeId).get(),
-      db.collection('users').doc(employeeId).get(),
-      db.collection('companies').doc(companyId).get(),
+      db.collection(`companies/${companyId}/employees`).doc(employeeId).get().catch(() => null),
+      db.collection('users').doc(employeeId).get().catch(() => null),
+      db.collection('companies').doc(companyId).get().catch(() => null),
     ]);
     // Merge: prefer HR employee data for salary, fall back to user profile for name/email
-    const emp = { ...(empDocUser.data() ?? {}), ...(empDocHR.data() ?? {}) } as Record<string, unknown>;
-    const comp = compDoc.data() ?? {};
+    const emp = { ...(empDocUser?.data() ?? {}), ...(empDocHR?.data() ?? {}) } as Record<string, unknown>;
+    const comp = compDoc?.data() ?? {};
 
     const baseSalary = grossSalary ?? (emp['baseSalary'] as number) ?? 0;
     if (baseSalary === 0) {
       return {
+        success: false,
         documentId: '',
         employeeName: (emp['displayName'] as string) ?? employeeId,
         grossTotal: 0,
@@ -435,25 +495,39 @@ export const generatePayslipTool = ai.defineTool(
       generatedAt: new Date().toISOString(),
     };
 
-    await db.collection(`companies/${companyId}/payslips`).doc(docId).set({
-      id: docId,
-      type: 'payslip',
-      ...content,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/payslips`).doc(docId).set({
+        id: docId,
+        type: 'payslip',
+        ...content,
+        createdAt: FieldValue.serverTimestamp(),
+      });
 
-    // Also add to employee documents for easy retrieval
-    await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
-      id: docId,
-      userId: employeeId,
-      type: 'payslip',
-      title: `Fiche de paie — ${monthNames[month - 1]} ${year}`,
-      period: content.period,
-      payslipId: docId,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+      // Also add to employee documents for easy retrieval
+      await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
+        id: docId,
+        userId: employeeId,
+        type: 'payslip',
+        title: `Fiche de paie — ${monthNames[month - 1]} ${year}`,
+        period: content.period,
+        payslipId: docId,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] generatePayslip write failed', { error: String(err) });
+      return {
+        success: false,
+        documentId: '',
+        employeeName: content.employee.name,
+        grossTotal: gross,
+        socialCharges,
+        netPay,
+        message: 'Sauvegarde de la fiche de paie impossible.',
+      };
+    }
 
     return {
+      success: true,
       documentId: docId,
       employeeName: content.employee.name,
       grossTotal: gross,
@@ -484,17 +558,22 @@ export const uploadEmployeeDocTool = ai.defineTool(
       fileName: z.string(),
       fileSize: z.number().optional().default(0),
     }),
-    outputSchema: z.object({ documentId: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), documentId: z.string(), message: z.string() }),
   },
   async ({ companyId, employeeEmail, employeeName, documentType, label, fileUrl, fileName, fileSize }) => {
     const db = getFirestore();
     const docId = generateId();
-    await db.collection(`companies/${companyId}/portfolioDocuments`).doc(docId).set({
-      id: docId, companyId, signatoryEmail: employeeEmail, signatoryName: employeeName,
-      documentType, label, fileUrl, fileName, fileSize: fileSize ?? 0,
-      createdAt: new Date().toISOString(),
-    });
-    return { documentId: docId, message: `Document "${label}" ajouté au portfolio de ${employeeName}.` };
+    try {
+      await db.collection(`companies/${companyId}/portfolioDocuments`).doc(docId).set({
+        id: docId, companyId, signatoryEmail: employeeEmail, signatoryName: employeeName,
+        documentType, label, fileUrl, fileName, fileSize: fileSize ?? 0,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      logger.error('[HR] uploadEmployeeDocument write failed', { error: String(err) });
+      return { success: false, documentId: '', message: 'Sauvegarde du document impossible.' };
+    }
+    return { success: true, documentId: docId, message: `Document "${label}" ajouté au portfolio de ${employeeName}.` };
   }
 );
 
@@ -504,6 +583,7 @@ export const listEmployeePortfolioTool = ai.defineTool(
     description: "List all documents in an employee's portfolio folder.",
     inputSchema: z.object({ companyId: z.string(), employeeEmail: z.string() }),
     outputSchema: z.object({
+      success: z.boolean().optional(), message: z.string().optional(),
       documents: z.array(z.object({ id: z.string(), type: z.string(), label: z.string(), fileName: z.string(), fileUrl: z.string(), createdAt: z.string() })),
       total: z.number(),
     }),
@@ -511,7 +591,11 @@ export const listEmployeePortfolioTool = ai.defineTool(
   async ({ companyId, employeeEmail }) => {
     const db = getFirestore();
     const snap = await db.collection(`companies/${companyId}/portfolioDocuments`)
-      .where('signatoryEmail', '==', employeeEmail).limit(100).get();
+      .where('signatoryEmail', '==', employeeEmail).limit(100).get().catch((err) => {
+        logger.error('[HR] listEmployeePortfolio query failed', { error: String(err) });
+        return null;
+      });
+    if (!snap) return { success: false, message: 'Lecture du portfolio impossible.', documents: [], total: 0 };
     const documents = snap.docs.map(d => {
       const x = d.data();
       return {
@@ -520,7 +604,7 @@ export const listEmployeePortfolioTool = ai.defineTool(
         createdAt: (x['createdAt'] as string) ?? '',
       };
     });
-    return { documents, total: documents.length };
+    return { success: true, documents, total: documents.length };
   }
 );
 
@@ -535,24 +619,35 @@ export const generateEmployeeUploadLinkTool = ai.defineTool(
       requestedDocs: z.array(z.string()).optional(),
       expiresInDays: z.number().optional().default(7),
     }),
-    outputSchema: z.object({ uploadUrl: z.string(), expiresAt: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), uploadUrl: z.string(), expiresAt: z.string(), message: z.string() }),
   },
   async ({ companyId, employeeEmail, employeeName, requestedDocs, expiresInDays }) => {
-    const { wemasService } = await import('../services/wemas/wemasService');
-    const request = await wemasService.createUploadRequest(companyId, {
-      signatoryEmail: employeeEmail,
-      signatoryName: employeeName,
-      requestedTypes: requestedDocs ?? ['id_card', 'rib', 'photo'],
-      message: `Merci de fournir les documents demandés pour compléter ton dossier RH.`,
-      expiresInDays: expiresInDays ?? 7,
-    });
-    const uploadUrl = `https://mon-assistant-86bbd.web.app/upload/${request.token}`;
-    const expiresDate = request.expiresAt ? new Date(request.expiresAt).toLocaleDateString('fr-FR') : 'jamais';
-    return {
-      uploadUrl,
-      expiresAt: request.expiresAt ? request.expiresAt.split('T')[0] : '',
-      message: `Lien d'upload généré pour ${employeeName} (expire le ${expiresDate}) : ${uploadUrl}`,
-    };
+    try {
+      const { wemasService } = await import('../services/wemas/wemasService');
+      const request = await wemasService.createUploadRequest(companyId, {
+        signatoryEmail: employeeEmail,
+        signatoryName: employeeName,
+        requestedTypes: requestedDocs ?? ['id_card', 'rib', 'photo'],
+        message: `Merci de fournir les documents demandés pour compléter ton dossier RH.`,
+        expiresInDays: expiresInDays ?? 7,
+      });
+      const uploadUrl = `https://mon-assistant-86bbd.web.app/upload/${request.token}`;
+      const expiresDate = request.expiresAt ? new Date(request.expiresAt).toLocaleDateString('fr-FR') : 'jamais';
+      return {
+        success: true,
+        uploadUrl,
+        expiresAt: request.expiresAt ? request.expiresAt.split('T')[0] : '',
+        message: `Lien d'upload généré pour ${employeeName} (expire le ${expiresDate}) : ${uploadUrl}`,
+      };
+    } catch (err) {
+      logger.error('[HR] generateEmployeeUploadLink failed', { error: String(err) });
+      return {
+        success: false,
+        uploadUrl: '',
+        expiresAt: '',
+        message: `Génération du lien d'upload impossible: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 );
 
@@ -579,6 +674,7 @@ export const generateContractTool = ai.defineTool(
       currency: z.string().optional().default('XOF'),
     }),
     outputSchema: z.object({
+      success: z.boolean().optional(),
       contractId: z.string(),
       employeeName: z.string(),
       contractType: z.string(),
@@ -590,10 +686,10 @@ export const generateContractTool = ai.defineTool(
     const db = getFirestore();
     // Gather employee info — check both employees/ and users/ collections
     const [empDocHR, empDocUser] = await Promise.all([
-      db.collection(`companies/${companyId}/employees`).doc(employeeId).get(),
-      db.collection('users').doc(employeeId).get(),
+      db.collection(`companies/${companyId}/employees`).doc(employeeId).get().catch(() => null),
+      db.collection('users').doc(employeeId).get().catch(() => null),
     ]);
-    const emp = { ...(empDocUser.data() ?? {}), ...(empDocHR.data() ?? {}) } as Record<string, unknown>;
+    const emp = { ...(empDocUser?.data() ?? {}), ...(empDocHR?.data() ?? {}) } as Record<string, unknown>;
 
     const contractId = generateId();
     const accessToken = generateId() + generateId(); // ~48 chars, unguessable
@@ -621,19 +717,32 @@ export const generateContractTool = ai.defineTool(
       Object.entries(contractData).filter(([, v]) => v !== undefined)
     );
 
-    await db.collection(`companies/${companyId}/contracts`).doc(contractId).set(safeContractData);
-    await db.collection(`companies/${companyId}/hrDocuments`).doc(contractId).set({
-      id: contractId,
-      userId: employeeId,
-      type: 'contract',
-      title: `Contrat ${resolvedContractType} — ${emp['displayName'] ?? 'Employé'}`,
-      contractId,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/contracts`).doc(contractId).set(safeContractData);
+      await db.collection(`companies/${companyId}/hrDocuments`).doc(contractId).set({
+        id: contractId,
+        userId: employeeId,
+        type: 'contract',
+        title: `Contrat ${resolvedContractType} — ${emp['displayName'] ?? 'Employé'}`,
+        contractId,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] generateContract write failed', { error: String(err) });
+      return {
+        success: false,
+        contractId: '',
+        employeeName: (emp['displayName'] as string) ?? 'Employé',
+        contractType: resolvedContractType,
+        pdfUrl: '',
+        message: 'Sauvegarde du contrat impossible.',
+      };
+    }
 
     const baseUrl = process.env['APP_PUBLIC_URL'] ?? 'https://mon-assistant-86bbd.web.app';
     const pdfUrl = `${baseUrl}/api/hr/contracts/${contractId}/pdf?t=${accessToken}`;
     return {
+      success: true,
       contractId,
       employeeName: (emp['displayName'] as string) ?? 'Employé',
       contractType: resolvedContractType,
@@ -664,6 +773,7 @@ export const createEmployeeTool = ai.defineTool(
       startDate: z.string().optional().describe('ISO date YYYY-MM-DD — defaults to today'),
     }),
     outputSchema: z.object({
+      success: z.boolean().optional(),
       employeeId: z.string(),
       message: z.string(),
       reusedExisting: z.boolean().optional(),
@@ -676,31 +786,37 @@ export const createEmployeeTool = ai.defineTool(
     let employeeId = generateId();
     let reused = false;
     if (email) {
-      const existing = await db.collection('users').where('email', '==', email).limit(1).get();
-      if (!existing.empty) {
+      const existing = await db.collection('users').where('email', '==', email).limit(1).get().catch(() => null);
+      if (existing && !existing.empty) {
         employeeId = existing.docs[0].id;
         reused = true;
       }
     }
 
-    await db.collection(`companies/${companyId}/employees`).doc(employeeId).set({
-      id: employeeId,
-      userId: reused ? employeeId : null,
-      displayName,
-      email: email ?? '',
-      phone: phone ?? '',
-      jobTitle: jobTitle ?? '',
-      department: department ?? '',
-      baseSalary: baseSalary ?? 0,
-      currency: currency ?? 'XOF',
-      startDate: startDate ?? new Date().toISOString().split('T')[0],
-      status: 'active',
-      source: 'hr_agent_created',
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    try {
+      await db.collection(`companies/${companyId}/employees`).doc(employeeId).set({
+        id: employeeId,
+        userId: reused ? employeeId : null,
+        displayName,
+        email: email ?? '',
+        phone: phone ?? '',
+        jobTitle: jobTitle ?? '',
+        department: department ?? '',
+        baseSalary: baseSalary ?? 0,
+        currency: currency ?? 'XOF',
+        startDate: startDate ?? new Date().toISOString().split('T')[0],
+        status: 'active',
+        source: 'hr_agent_created',
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    } catch (err) {
+      logger.error('[HR] createEmployee write failed', { error: String(err) });
+      return { success: false, employeeId: '', message: 'Création de l\'employé impossible.' };
+    }
 
     return {
+      success: true,
       employeeId,
       message: reused
         ? `${displayName} lié à son compte utilisateur existant. Employé créé.`
@@ -799,7 +915,12 @@ export const updateEmployeeTool = ai.defineTool(
     if (updatedFields.length === 0) {
       return { success: false, message: 'Aucun champ à mettre à jour.', updatedFields: [] };
     }
-    await db.collection(`companies/${companyId}/employees`).doc(employeeId).set(update, { merge: true });
+    try {
+      await db.collection(`companies/${companyId}/employees`).doc(employeeId).set(update, { merge: true });
+    } catch (err) {
+      logger.error('[HR] updateEmployee write failed', { error: String(err) });
+      return { success: false, message: 'Mise à jour impossible.', updatedFields: [] };
+    }
     return {
       success: true,
       message: `Mis à jour : ${updatedFields.join(', ')}.`,
@@ -818,6 +939,7 @@ export const teamCalendarTool = ai.defineTool(
     description: 'Get team availability — who is on leave, absent, remote, or present today/this week.',
     inputSchema: z.object({ companyId: z.string(), department: z.string().optional(), date: z.string().optional() }),
     outputSchema: z.object({
+      success: z.boolean().optional(), message: z.string().optional(),
       present: z.array(z.string()), onLeave: z.array(z.string()), remote: z.array(z.string()), absent: z.array(z.string()),
       totalEmployees: z.number(), presenceRate: z.number(),
     }),
@@ -829,17 +951,21 @@ export const teamCalendarTool = ai.defineTool(
     // Get employees
     let empQ = db.collection('users').where('companyId', '==', companyId) as FirebaseFirestore.Query;
     if (department) empQ = empQ.where('department', '==', department);
-    const empSnap = await empQ.limit(200).get();
+    const empSnap = await empQ.limit(200).get().catch((err) => {
+      logger.error('[HR] teamCalendar employees query failed', { error: String(err) });
+      return null;
+    });
+    if (!empSnap) return { success: false, message: 'Lecture des employés impossible.', present: [], onLeave: [], remote: [], absent: [], totalEmployees: 0, presenceRate: 0 };
     const empNames = new Map(empSnap.docs.map(d => [d.id, (d.data()['displayName'] as string) ?? (d.data()['email'] as string) ?? '']));
 
     // Get presence
-    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).limit(200).get();
-    const presentIds = new Set(presSnap.docs.filter(d => d.data()['status'] === 'present').map(d => (d.data()['employeeId'] as string) ?? ''));
+    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).limit(200).get().catch(() => null);
+    const presentIds = new Set(presSnap?.docs.filter(d => d.data()['status'] === 'present').map(d => (d.data()['employeeId'] as string) ?? '') ?? []);
 
     // Get leaves
-    const leaveSnap = await db.collection(`companies/${companyId}/leaveRequests`).where('status', '==', 'approved').limit(200).get();
+    const leaveSnap = await db.collection(`companies/${companyId}/leaveRequests`).where('status', '==', 'approved').limit(200).get().catch(() => null);
     const onLeaveIds = new Set<string>();
-    leaveSnap.docs.forEach(d => {
+    leaveSnap?.docs.forEach(d => {
       const data = d.data();
       if ((data['startDate'] as string) <= today && (data['endDate'] as string) >= today) {
         onLeaveIds.add((data['userId'] as string) ?? '');
@@ -858,7 +984,7 @@ export const teamCalendarTool = ai.defineTool(
     });
 
     const total = empNames.size;
-    return { present, onLeave, remote, absent, totalEmployees: total, presenceRate: total > 0 ? Math.round((present.length / total) * 100) : 0 };
+    return { success: true, present, onLeave, remote, absent, totalEmployees: total, presenceRate: total > 0 ? Math.round((present.length / total) * 100) : 0 };
   }
 );
 
@@ -867,7 +993,7 @@ export const attendanceSummaryTool = ai.defineTool(
     name: 'hr_getAttendanceSummary',
     description: 'Get attendance summary for an employee or team (hours worked, late arrivals, absences).',
     inputSchema: z.object({ companyId: z.string(), userId: z.string().optional(), period: z.enum(['today', 'week', 'month']).optional().default('week') }),
-    outputSchema: z.object({ totalHours: z.number(), daysPresent: z.number(), daysAbsent: z.number(), lateArrivals: z.number(), avgArrivalTime: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), message: z.string().optional(), totalHours: z.number(), daysPresent: z.number(), daysAbsent: z.number(), lateArrivals: z.number(), avgArrivalTime: z.string() }),
   },
   async ({ companyId, userId, period }) => {
     const db = getFirestore();
@@ -877,7 +1003,11 @@ export const attendanceSummaryTool = ai.defineTool(
 
     let q = db.collection('presence').where('companyId', '==', companyId).where('date', '>=', from) as FirebaseFirestore.Query;
     if (userId) q = q.where('employeeId', '==', userId);
-    const snap = await q.limit(500).get();
+    const snap = await q.limit(500).get().catch((err) => {
+      logger.error('[HR] attendanceSummary query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture de la présence impossible.', totalHours: 0, daysPresent: 0, daysAbsent: 0, lateArrivals: 0, avgArrivalTime: '09:00' };
 
     let totalHours = 0; let lateCount = 0; const arrivalTimes: number[] = [];
     snap.docs.forEach(d => {
@@ -895,6 +1025,7 @@ export const attendanceSummaryTool = ai.defineTool(
     const avgHour = arrivalTimes.length > 0 ? Math.round(arrivalTimes.reduce((a, b) => a + b, 0) / arrivalTimes.length) : 9;
 
     return {
+      success: true,
       totalHours: Math.round(totalHours * 10) / 10,
       daysPresent,
       daysAbsent: Math.max(0, cutoff - daysPresent),
@@ -918,16 +1049,21 @@ export const createHRTicketTool = ai.defineTool(
       category: z.enum(['question', 'complaint', 'request', 'payroll', 'benefits', 'other']).optional().default('question'),
       priority: z.enum(['low', 'medium', 'high']).optional().default('medium'),
     }),
-    outputSchema: z.object({ ticketId: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), ticketId: z.string(), message: z.string() }),
   },
   async ({ companyId, userId, subject, description, category, priority }) => {
     const db = getFirestore();
     const id = generateId();
-    await db.collection(`companies/${companyId}/hrTickets`).doc(id).set({
-      id, userId, subject, description, category, priority,
-      status: 'open', createdAt: FieldValue.serverTimestamp(),
-    });
-    return { ticketId: id, message: `Ticket RH #${id.slice(0, 8)} cree: "${subject}" (${category}, priorite ${priority}).` };
+    try {
+      await db.collection(`companies/${companyId}/hrTickets`).doc(id).set({
+        id, userId, subject, description, category, priority,
+        status: 'open', createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[HR] createTicket write failed', { error: String(err) });
+      return { success: false, ticketId: '', message: 'Sauvegarde du ticket impossible.' };
+    }
+    return { success: true, ticketId: id, message: `Ticket RH #${id.slice(0, 8)} cree: "${subject}" (${category}, priorite ${priority}).` };
   }
 );
 
@@ -946,6 +1082,7 @@ export const publishJobTool = ai.defineTool(
       customMessage: z.string().optional().describe('Optional custom intro or message to add'),
     }),
     outputSchema: z.object({
+      success: z.boolean().optional(),
       results: z.array(z.object({ platform: z.string(), success: z.boolean(), url: z.string().optional(), error: z.string().optional() })),
       postContent: z.string(),
       message: z.string(),
@@ -955,8 +1092,8 @@ export const publishJobTool = ai.defineTool(
     const db = getFirestore();
 
     // Get job details
-    const jobDoc = await db.collection(`companies/${companyId}/jobPostings`).doc(jobId).get();
-    if (!jobDoc.exists) return { results: [], postContent: '', message: 'Offre non trouvee.' };
+    const jobDoc = await db.collection(`companies/${companyId}/jobPostings`).doc(jobId).get().catch(() => null);
+    if (!jobDoc?.exists) return { success: false, results: [], postContent: '', message: 'Offre non trouvee.' };
     const job = jobDoc.data()!;
 
     // Get company name
@@ -964,9 +1101,11 @@ export const publishJobTool = ai.defineTool(
     try { const c = await db.collection('companies').doc(companyId).get(); companyName = (c.data()?.['name'] as string) ?? companyName; } catch {}
 
     // Generate attractive social post
-    const { text: postContent } = await ai.generate({
-      model: GEMINI_FLASH,
-      prompt: `Genere un post de recrutement attractif pour les reseaux sociaux (LinkedIn, Facebook).
+    let postContent: string;
+    try {
+      const result = await ai.generate({
+        model: GEMINI_FLASH,
+        prompt: `Genere un post de recrutement attractif pour les reseaux sociaux (LinkedIn, Facebook).
 
 Entreprise: ${companyName}
 Poste: ${job['title']}
@@ -985,8 +1124,13 @@ Regles:
 - Ajoute 3-5 hashtags pertinents (#recrutement #emploi etc.)
 - Maximum 300 mots
 - Ton professionnel mais engageant`,
-      config: { temperature: 0.5 },
-    });
+        config: { temperature: 0.5 },
+      });
+      postContent = result.text;
+    } catch (err) {
+      logger.error('[HR] publishJobPosting AI generation failed', { error: String(err) });
+      return { success: false, results: [], postContent: '', message: `Génération du post impossible: ${err instanceof Error ? err.message : String(err)}` };
+    }
 
     // Publish to social platforms
     const socialPlatforms = platforms.filter(p => p !== 'website') as Array<'linkedin' | 'facebook' | 'twitter' | 'instagram'>;
@@ -1022,6 +1166,7 @@ Regles:
 
     const successCount = results.filter(r => r.success).length;
     return {
+      success: true,
       results,
       postContent,
       message: `Offre "${job['title']}" publiee sur ${successCount}/${results.length} plateforme(s).`,
@@ -1035,16 +1180,20 @@ export const policySearchTool = ai.defineTool(
     name: 'hr_searchPolicy',
     description: 'Search HR policies, employee handbook, internal rules.',
     inputSchema: z.object({ companyId: z.string(), query: z.string() }),
-    outputSchema: z.object({ results: z.array(z.object({ title: z.string(), content: z.string() })) }),
+    outputSchema: z.object({ success: z.boolean().optional(), message: z.string().optional(), results: z.array(z.object({ title: z.string(), content: z.string() })) }),
   },
   async ({ companyId, query }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/hrPolicies`).limit(20).get();
+    const snap = await db.collection(`companies/${companyId}/hrPolicies`).limit(20).get().catch((err) => {
+      logger.error('[HR] searchPolicy query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des politiques impossible.', results: [] };
     const kw = query.toLowerCase().split(/\s+/);
     const results = snap.docs.map(d => ({ title: (d.data()['title'] as string) ?? '', content: (d.data()['content'] as string) ?? '' }))
       .filter(r => kw.some(k => r.content.toLowerCase().includes(k) || r.title.toLowerCase().includes(k)));
     if (results.length === 0) results.push({ title: 'Politique RH generale', content: 'Contactez votre responsable RH ou consultez le handbook de l\'entreprise.' });
-    return { results };
+    return { success: true, results };
   }
 );
 
@@ -1053,14 +1202,14 @@ export const onboardingChecklistTool = ai.defineTool(
     name: 'hr_getOnboardingChecklist',
     description: 'Get or create onboarding checklist for a new employee.',
     inputSchema: z.object({ companyId: z.string(), userId: z.string(), department: z.string().optional() }),
-    outputSchema: z.object({ steps: z.array(z.object({ step: z.string(), category: z.string(), completed: z.boolean() })), completionPct: z.number() }),
+    outputSchema: z.object({ success: z.boolean().optional(), message: z.string().optional(), steps: z.array(z.object({ step: z.string(), category: z.string(), completed: z.boolean() })), completionPct: z.number() }),
   },
   async ({ companyId, userId, department }) => {
     const db = getFirestore();
-    const doc = await db.collection(`companies/${companyId}/onboarding`).doc(userId).get();
-    if (doc.exists) {
+    const doc = await db.collection(`companies/${companyId}/onboarding`).doc(userId).get().catch(() => null);
+    if (doc?.exists) {
       const steps = (doc.data()!['steps'] as Array<{ step: string; category: string; completed: boolean }>) ?? [];
-      return { steps, completionPct: steps.length > 0 ? Math.round(steps.filter(s => s.completed).length / steps.length * 100) : 0 };
+      return { success: true, steps, completionPct: steps.length > 0 ? Math.round(steps.filter(s => s.completed).length / steps.length * 100) : 0 };
     }
     const steps = [
       { step: 'Paperasse RH', category: 'Admin', completed: false },
@@ -1071,7 +1220,7 @@ export const onboardingChecklistTool = ai.defineTool(
       { step: 'Check-in J+30', category: 'Management', completed: false },
       ...(department ? [{ step: `Orientation ${department}`, category: 'Onboarding', completed: false }] : []),
     ];
-    return { steps, completionPct: 0 };
+    return { success: true, steps, completionPct: 0 };
   }
 );
 
@@ -1081,6 +1230,7 @@ export const employeeDirectoryTool = ai.defineTool(
     description: 'Search the unified people directory: merges employees, team members (invited users), and Firestore users. Use this BEFORE refusing to act on a person — they may exist under a different collection.',
     inputSchema: z.object({ companyId: z.string(), query: z.string().optional(), department: z.string().optional() }),
     outputSchema: z.object({
+      success: z.boolean().optional(), message: z.string().optional(),
       employees: z.array(z.object({
         id: z.string(),
         name: z.string(),
@@ -1098,9 +1248,9 @@ export const employeeDirectoryTool = ai.defineTool(
 
     // Run 3 queries in parallel — we merge results after
     const [employeesSnap, membersSnap, usersSnap] = await Promise.all([
-      db.collection(`companies/${companyId}/employees`).limit(100).get(),
-      db.collection(`companies/${companyId}/members`).limit(100).get(),
-      db.collection('users').where('companyId', '==', companyId).limit(100).get(),
+      db.collection(`companies/${companyId}/employees`).limit(100).get().catch(() => null),
+      db.collection(`companies/${companyId}/members`).limit(100).get().catch(() => null),
+      db.collection('users').where('companyId', '==', companyId).limit(100).get().catch(() => null),
     ]);
 
     // Dedupe by email (or id if no email) — employees take priority, then members, then users
@@ -1108,7 +1258,7 @@ export const employeeDirectoryTool = ai.defineTool(
     const keyOf = (email: string | undefined, id: string) => (email ? email.toLowerCase() : `id:${id}`);
 
     // 1. Employees (priority source — they have payroll data)
-    employeesSnap.docs.forEach(d => {
+    (employeesSnap?.docs ?? []).forEach(d => {
       const x = d.data();
       const email = x['email'] as string | undefined;
       byKey.set(keyOf(email, d.id), {
@@ -1123,7 +1273,7 @@ export const employeeDirectoryTool = ai.defineTool(
     });
 
     // 2. Members (if not already in employees — missing baseSalary/jobTitle but we know who they are)
-    membersSnap.docs.forEach(d => {
+    (membersSnap?.docs ?? []).forEach(d => {
       const x = d.data();
       const email = x['email'] as string | undefined;
       const k = keyOf(email, d.id);
@@ -1141,7 +1291,7 @@ export const employeeDirectoryTool = ai.defineTool(
     });
 
     // 3. Users (last fallback — someone who signed in but isn't yet a formal member)
-    usersSnap.docs.forEach(d => {
+    (usersSnap?.docs ?? []).forEach(d => {
       const x = d.data();
       const email = x['email'] as string | undefined;
       const k = keyOf(email, d.id);
@@ -1170,7 +1320,7 @@ export const employeeDirectoryTool = ai.defineTool(
         ),
       );
     }
-    return { employees: all, total: all.length };
+    return { success: true, employees: all, total: all.length };
   }
 );
 
@@ -1188,13 +1338,18 @@ export const getOrgChartTool = ai.defineTool(
     description: 'Get organizational hierarchy — departments, managers, reporting lines, headcount.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean().optional(), message: z.string().optional(),
       departments: z.array(z.object({ name: z.string(), headcount: z.number(), manager: z.string(), members: z.array(z.object({ name: z.string(), title: z.string(), role: z.string() })) })),
       totalEmployees: z.number(), totalDepartments: z.number(),
     }),
   },
   async ({ companyId }) => {
     const db = getFirestore();
-    const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get();
+    const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get().catch((err) => {
+      logger.error('[HR] getOrgChart query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture de l\'organigramme impossible.', departments: [], totalEmployees: 0, totalDepartments: 0 };
     const deptMap = new Map<string, { manager: string; members: { name: string; title: string; role: string }[] }>();
     snap.docs.forEach(d => {
       const u = d.data();
@@ -1207,6 +1362,7 @@ export const getOrgChartTool = ai.defineTool(
       if (role === 'manager' || role === 'admin') entry.manager = name;
     });
     return {
+      success: true,
       departments: Array.from(deptMap.entries()).map(([name, d]) => ({ name, headcount: d.members.length, manager: d.manager || (d.members[0]?.name ?? ''), members: d.members })),
       totalEmployees: snap.size, totalDepartments: deptMap.size,
     };
@@ -1228,6 +1384,7 @@ export const createPerformanceReviewTool = ai.defineTool(
       rating: z.number().optional(), feedback: z.string().optional(), reviewerId: z.string().optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean().optional(),
       reviews: z.array(z.object({ id: z.string(), employeeName: z.string(), period: z.string(), rating: z.number(), status: z.string(), goalsCount: z.number() })).optional(),
       reviewId: z.string().optional(), message: z.string(),
     }),
@@ -1235,21 +1392,30 @@ export const createPerformanceReviewTool = ai.defineTool(
   async ({ companyId, action, employeeId, period, goals, rating, feedback, reviewerId }) => {
     const db = getFirestore();
     if (action === 'list') {
-      const snap = await db.collection(`companies/${companyId}/performanceReviews`).orderBy('createdAt', 'desc').limit(50).get();
-      return { reviews: snap.docs.map(d => { const data = d.data(); return { id: d.id, employeeName: (data['employeeName'] as string) ?? '', period: (data['period'] as string) ?? '', rating: (data['rating'] as number) ?? 0, status: (data['status'] as string) ?? 'draft', goalsCount: ((data['goals'] as unknown[]) ?? []).length }; }), message: `${snap.size} evaluations trouvees.` };
+      const snap = await db.collection(`companies/${companyId}/performanceReviews`).orderBy('createdAt', 'desc').limit(50).get().catch((err) => {
+        logger.error('[HR] createPerformanceReview list failed', { error: String(err) });
+        return null;
+      });
+      if (!snap) return { success: false, message: 'Lecture des évaluations impossible.' };
+      return { success: true, reviews: snap.docs.map(d => { const data = d.data(); return { id: d.id, employeeName: (data['employeeName'] as string) ?? '', period: (data['period'] as string) ?? '', rating: (data['rating'] as number) ?? 0, status: (data['status'] as string) ?? 'draft', goalsCount: ((data['goals'] as unknown[]) ?? []).length }; }), message: `${snap.size} evaluations trouvees.` };
     }
     if (action === 'create' && employeeId) {
       const id = generateId();
-      const empDoc = await db.collection('users').doc(employeeId).get();
-      const empName = (empDoc.data()?.['displayName'] as string) ?? '';
-      await db.collection(`companies/${companyId}/performanceReviews`).doc(id).set({
-        id, employeeId, employeeName: empName, period: period ?? `Q${Math.ceil((new Date().getMonth() + 1) / 3)} ${new Date().getFullYear()}`,
-        goals: goals ?? [], rating: rating ?? 0, feedback: feedback ?? '', reviewerId: reviewerId ?? '',
-        status: 'draft', createdAt: FieldValue.serverTimestamp(),
-      });
-      return { reviewId: id, message: `Evaluation creee pour ${empName}.` };
+      const empDoc = await db.collection('users').doc(employeeId).get().catch(() => null);
+      const empName = (empDoc?.data()?.['displayName'] as string) ?? '';
+      try {
+        await db.collection(`companies/${companyId}/performanceReviews`).doc(id).set({
+          id, employeeId, employeeName: empName, period: period ?? `Q${Math.ceil((new Date().getMonth() + 1) / 3)} ${new Date().getFullYear()}`,
+          goals: goals ?? [], rating: rating ?? 0, feedback: feedback ?? '', reviewerId: reviewerId ?? '',
+          status: 'draft', createdAt: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        logger.error('[HR] createPerformanceReview write failed', { error: String(err) });
+        return { success: false, message: 'Sauvegarde de l\'évaluation impossible.' };
+      }
+      return { success: true, reviewId: id, message: `Evaluation creee pour ${empName}.` };
     }
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
   }
 );
 
@@ -1265,7 +1431,7 @@ export const offboardingTool = ai.defineTool(
       companyId: z.string(), action: z.enum(['start', 'get', 'update_item']),
       employeeId: z.string(), itemId: z.string().optional(), completed: z.boolean().optional(),
     }),
-    outputSchema: z.object({ checklistId: z.string().optional(), items: z.array(z.object({ id: z.string(), category: z.string(), task: z.string(), completed: z.boolean() })).optional(), progress: z.number().optional(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean().optional(), checklistId: z.string().optional(), items: z.array(z.object({ id: z.string(), category: z.string(), task: z.string(), completed: z.boolean() })).optional(), progress: z.number().optional(), message: z.string() }),
   },
   async ({ companyId, action, employeeId, itemId, completed }) => {
     const db = getFirestore();
@@ -1285,31 +1451,41 @@ export const offboardingTool = ai.defineTool(
         { id: 'off-11', category: 'RH', task: 'Enquete de sortie envoyee', completed: false },
         { id: 'off-12', category: 'RH', task: 'Fin de contrat enregistree', completed: false },
       ];
-      await docRef.set({ employeeId, items, status: 'in_progress', startedAt: FieldValue.serverTimestamp() });
+      try {
+        await docRef.set({ employeeId, items, status: 'in_progress', startedAt: FieldValue.serverTimestamp() });
+      } catch (err) {
+        logger.error('[HR] offboarding start failed', { error: String(err) });
+        return { success: false, message: 'Démarrage de l\'offboarding impossible.' };
+      }
 
       // Cross-agent: notify Security to revoke access
       const { createNotification } = await import('../services/notificationService');
       createNotification({ companyId, type: 'security_alert', title: 'Offboarding: revocation acces requise', message: `Un employe quitte l'entreprise. Revoquer tous les acces IT et securite.`, actionUrl: '/security/access', icon: 'UserX', severity: 'warning' }).catch(() => {});
 
-      return { checklistId: employeeId, items, progress: 0, message: 'Offboarding demarre — 12 etapes a completer.' };
+      return { success: true, checklistId: employeeId, items, progress: 0, message: 'Offboarding demarre — 12 etapes a completer.' };
     }
     if (action === 'get') {
-      const doc = await docRef.get();
-      if (!doc.exists) return { message: 'Aucun offboarding en cours pour cet employe.' };
+      const doc = await docRef.get().catch(() => null);
+      if (!doc?.exists) return { success: false, message: 'Aucun offboarding en cours pour cet employe.' };
       const items = (doc.data()!['items'] as { id: string; category: string; task: string; completed: boolean }[]) ?? [];
       const progress = items.length > 0 ? Math.round(items.filter(i => i.completed).length / items.length * 100) : 0;
-      return { checklistId: employeeId, items, progress, message: `Offboarding ${progress}% complete.` };
+      return { success: true, checklistId: employeeId, items, progress, message: `Offboarding ${progress}% complete.` };
     }
     if (action === 'update_item' && itemId != null) {
-      const doc = await docRef.get();
-      if (!doc.exists) return { message: 'Offboarding non trouve.' };
+      const doc = await docRef.get().catch(() => null);
+      if (!doc?.exists) return { success: false, message: 'Offboarding non trouve.' };
       const items = (doc.data()!['items'] as { id: string; category: string; task: string; completed: boolean }[]) ?? [];
       const updated = items.map(i => i.id === itemId ? { ...i, completed: completed ?? true } : i);
-      await docRef.update({ items: updated });
+      try {
+        await docRef.update({ items: updated });
+      } catch (err) {
+        logger.error('[HR] offboarding update_item failed', { error: String(err) });
+        return { success: false, message: 'Mise à jour de l\'étape impossible.' };
+      }
       const progress = Math.round(updated.filter(i => i.completed).length / updated.length * 100);
-      return { items: updated, progress, message: `Etape mise a jour (${progress}%).` };
+      return { success: true, items: updated, progress, message: `Etape mise a jour (${progress}%).` };
     }
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
   }
 );
 
@@ -1323,6 +1499,7 @@ export const employeeAnalyticsTool = ai.defineTool(
     description: 'HR analytics — headcount by department, turnover, seniority, role distribution.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean().optional(), message: z.string().optional(),
       totalEmployees: z.number(),
       byDepartment: z.array(z.object({ department: z.string(), count: z.number() })),
       byRole: z.array(z.object({ role: z.string(), count: z.number() })),
@@ -1332,7 +1509,11 @@ export const employeeAnalyticsTool = ai.defineTool(
   },
   async ({ companyId }) => {
     const db = getFirestore();
-    const snap = await db.collection('users').where('companyId', '==', companyId).limit(500).get();
+    const snap = await db.collection('users').where('companyId', '==', companyId).limit(500).get().catch((err) => {
+      logger.error('[HR] employeeAnalytics query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des analytics impossible.', totalEmployees: 0, byDepartment: [], byRole: [], avgSeniorityMonths: 0, recentHires: 0, recentDepartures: 0 };
     const users = snap.docs.map(d => d.data());
     const byDept: Record<string, number> = {};
     const byRole: Record<string, number> = {};
@@ -1349,6 +1530,7 @@ export const employeeAnalyticsTool = ai.defineTool(
     });
 
     return {
+      success: true,
       totalEmployees: users.length,
       byDepartment: Object.entries(byDept).map(([d, c]) => ({ department: d, count: c })).sort((a, b) => b.count - a.count),
       byRole: Object.entries(byRole).map(([r, c]) => ({ role: r, count: c })).sort((a, b) => b.count - a.count),
@@ -1372,6 +1554,7 @@ export const employeeSurveyTool = ai.defineTool(
       surveyId: z.string().optional(), answers: z.array(z.object({ question: z.string(), answer: z.string(), score: z.number().optional() })).optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean().optional(),
       surveys: z.array(z.object({ id: z.string(), title: z.string(), responseCount: z.number(), status: z.string(), avgScore: z.number() })).optional(),
       surveyId: z.string().optional(), message: z.string(),
     }),
@@ -1379,23 +1562,37 @@ export const employeeSurveyTool = ai.defineTool(
   async ({ companyId, action, title, questions, surveyId, answers }) => {
     const db = getFirestore();
     if (action === 'list') {
-      const snap = await db.collection(`companies/${companyId}/hrSurveys`).orderBy('createdAt', 'desc').limit(20).get();
-      return { surveys: snap.docs.map(d => { const data = d.data(); return { id: d.id, title: (data['title'] as string) ?? '', responseCount: (data['responseCount'] as number) ?? 0, status: (data['status'] as string) ?? 'active', avgScore: (data['avgScore'] as number) ?? 0 }; }), message: `${snap.size} enquete(s).` };
+      const snap = await db.collection(`companies/${companyId}/hrSurveys`).orderBy('createdAt', 'desc').limit(20).get().catch((err) => {
+        logger.error('[HR] manageSurvey list failed', { error: String(err) });
+        return null;
+      });
+      if (!snap) return { success: false, message: 'Lecture des enquêtes impossible.' };
+      return { success: true, surveys: snap.docs.map(d => { const data = d.data(); return { id: d.id, title: (data['title'] as string) ?? '', responseCount: (data['responseCount'] as number) ?? 0, status: (data['status'] as string) ?? 'active', avgScore: (data['avgScore'] as number) ?? 0 }; }), message: `${snap.size} enquete(s).` };
     }
     if (action === 'create') {
       const id = generateId();
       const defaultQuestions = questions ?? ['Comment evaluez-vous votre satisfaction au travail ? (1-10)', 'Recommanderiez-vous cette entreprise ? (1-10)', 'Comment evaluez-vous votre manager ? (1-10)', 'Avez-vous les outils necessaires ? (1-10)', 'Suggestion d\'amelioration ?'];
-      await db.collection(`companies/${companyId}/hrSurveys`).doc(id).set({ id, title: title ?? 'Enquete satisfaction', questions: defaultQuestions, status: 'active', responseCount: 0, avgScore: 0, anonymous: true, createdAt: FieldValue.serverTimestamp() });
-      return { surveyId: id, message: `Enquete "${title ?? 'Enquete satisfaction'}" creee avec ${defaultQuestions.length} questions.` };
+      try {
+        await db.collection(`companies/${companyId}/hrSurveys`).doc(id).set({ id, title: title ?? 'Enquete satisfaction', questions: defaultQuestions, status: 'active', responseCount: 0, avgScore: 0, anonymous: true, createdAt: FieldValue.serverTimestamp() });
+      } catch (err) {
+        logger.error('[HR] manageSurvey create failed', { error: String(err) });
+        return { success: false, message: 'Création de l\'enquête impossible.' };
+      }
+      return { success: true, surveyId: id, message: `Enquete "${title ?? 'Enquete satisfaction'}" creee avec ${defaultQuestions.length} questions.` };
     }
     if (action === 'submit_response' && surveyId && answers) {
-      await db.collection(`companies/${companyId}/hrSurveys/${surveyId}/responses`).doc(generateId()).set({ answers, submittedAt: FieldValue.serverTimestamp() });
-      const scores = answers.filter(a => a.score != null).map(a => a.score!);
-      const avgResponse = scores.length > 0 ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length * 10) / 10 : 0;
-      await db.collection(`companies/${companyId}/hrSurveys`).doc(surveyId).update({ responseCount: FieldValue.increment(1), avgScore: avgResponse });
-      return { message: 'Reponse enregistree. Merci !' };
+      try {
+        await db.collection(`companies/${companyId}/hrSurveys/${surveyId}/responses`).doc(generateId()).set({ answers, submittedAt: FieldValue.serverTimestamp() });
+        const scores = answers.filter(a => a.score != null).map(a => a.score!);
+        const avgResponse = scores.length > 0 ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length * 10) / 10 : 0;
+        await db.collection(`companies/${companyId}/hrSurveys`).doc(surveyId).update({ responseCount: FieldValue.increment(1), avgScore: avgResponse });
+      } catch (err) {
+        logger.error('[HR] manageSurvey submit_response failed', { error: String(err) });
+        return { success: false, message: 'Enregistrement de la réponse impossible.' };
+      }
+      return { success: true, message: 'Reponse enregistree. Merci !' };
     }
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
   }
 );
 
@@ -1441,10 +1638,10 @@ export const sendContractForSignatureTool = ai.defineTool(
 
     // Resolve employee
     const [empDocHR, empDocUser] = await Promise.all([
-      db.collection(`companies/${companyId}/employees`).doc(employeeId).get(),
-      db.collection('users').doc(employeeId).get(),
+      db.collection(`companies/${companyId}/employees`).doc(employeeId).get().catch(() => null),
+      db.collection('users').doc(employeeId).get().catch(() => null),
     ]);
-    const emp = { ...(empDocUser.data() ?? {}), ...(empDocHR.data() ?? {}) } as Record<string, unknown>;
+    const emp = { ...(empDocUser?.data() ?? {}), ...(empDocHR?.data() ?? {}) } as Record<string, unknown>;
     if (!emp || Object.keys(emp).length === 0) {
       return { success: false, message: `Employé ${employeeId} introuvable. Crée-le d'abord avec hr_createEmployee.` };
     }
@@ -1456,8 +1653,8 @@ export const sendContractForSignatureTool = ai.defineTool(
     }
 
     // Resolve company branding
-    const companyDoc = await db.collection('companies').doc(companyId).get();
-    const company = companyDoc.data() ?? {};
+    const companyDoc = await db.collection('companies').doc(companyId).get().catch(() => null);
+    const company = companyDoc?.data() ?? {};
     const companyName = (company['name'] as string) ?? 'Notre entreprise';
 
     // Build contract content (plain-text — Wemas wraps it in their signing UI)

@@ -63,10 +63,10 @@ router.get('/status', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         if (changed) {
             await db.collection('companies').doc(companyId).update({ selectedAgents: normalized, updatedAt: new Date() }).catch(() => { });
         }
-        const selectedAgentIds = normalized;
-        if (selectedAgentIds.length === 0) {
-            return res.json({ success: true, data: [] });
-        }
+        // Core agents are always-on for every tenant — surface them in the agent
+        // monitor / picker even if the company hasn't explicitly selected them.
+        const ALWAYS_ON_CORE = ['orchestrator', 'knowledge', 'wildcard', 'kora'];
+        const selectedAgentIds = Array.from(new Set([...normalized, ...ALWAYS_ON_CORE]));
         // Get agent catalog for display names
         const { AGENT_CATALOG } = await Promise.resolve().then(() => __importStar(require('../config/agentCatalog')));
         const catalogMap = new Map(AGENT_CATALOG.map(a => [a.id, a]));

@@ -569,6 +569,40 @@ publicContractRouter.post('/contract/:uniqueLink/sign', asyncHandler(async (req:
     req.ip ?? undefined, req.headers['user-agent'] ?? undefined,
     signingLink,
   );
+
+  // Fire-and-forget confirmation email (with embedded signature image).
+  // Pulls fresh contract state to get signedAt + signatureData saved by signContract().
+  if (result.success) {
+    void (async () => {
+      try {
+        const fresh = await wemasService.getContract(contract.companyId, contract.id);
+        if (!fresh) return;
+        const { renderSignedConfirmationEmail } = await import('../agents/legal.agent');
+        const { sendEmail } = await import('../services/email/emailService');
+        const PUBLIC_APP_URL = process.env['PUBLIC_APP_URL'] ?? 'https://mon-assistant-86bbd.web.app';
+        const html = renderSignedConfirmationEmail({
+          signatoryName: fresh.signatoryName,
+          signatoryEmail: fresh.signatoryEmail,
+          senderName: fresh.senderName ?? 'Orlode',
+          contractType: fresh.contractType,
+          signedAt: fresh.signedAt ?? new Date().toISOString(),
+          signatureData: fresh.signatureData ?? signatureData,
+          contractContent: fresh.contractContent,
+          contractLink: `${PUBLIC_APP_URL}/sign/${fresh.uniqueLink}`,
+        });
+        await sendEmail({
+          companyId: contract.companyId,
+          to: fresh.signatoryEmail,
+          subject: `Votre contrat a été signé avec succès`,
+          html,
+        });
+      } catch (err) {
+        // Non-blocking — signature is saved, email is bonus.
+        // (logger imported at top of file)
+      }
+    })();
+  }
+
   res.json({ success: result.success, data: result });
 }));
 

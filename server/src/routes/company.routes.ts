@@ -55,6 +55,8 @@ router.patch('/', adminOnlyMiddleware, asyncHandler(async (req: AuthenticatedReq
     'phone', 'whatsapp', 'email', 'supportEmail',
     'linkedin', 'twitter', 'facebook', 'instagram',
     'settings',
+    // Domain + brand identity (visible on public pages and tenant emails)
+    'customDomain', 'subdomain', 'proEmails', 'theme', 'tagline',
   ];
 
   const updates: Record<string, unknown> = {};
@@ -71,6 +73,84 @@ router.patch('/', adminOnlyMiddleware, asyncHandler(async (req: AuthenticatedReq
   }
 
   res.json({ success: true, data: updates });
+}));
+
+// POST /api/company/upload-logo — upload a logo image (base64) → Firebase Storage public URL
+router.post('/upload-logo', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new AppError('Company ID required', 400);
+  const { imageBase64, imageMimeType } = req.body as { imageBase64?: string; imageMimeType?: string };
+  if (!imageBase64) throw new AppError('imageBase64 required', 400);
+  const { getStorage } = await import('../config/firebase.config');
+  const buffer = Buffer.from(imageBase64.replace(/^data:image\/[^;]+;base64,/, ''), 'base64');
+  if (buffer.length > 4 * 1024 * 1024) throw new AppError('Logo trop lourd (max 4 Mo).', 413);
+  const mime = imageMimeType ?? 'image/png';
+  const ext = mime.split('/')[1]?.split('+')[0] ?? 'png';
+  const { randomBytes } = await import('crypto');
+  const fileName = `companies/${companyId}/branding/logo-${randomBytes(6).toString('hex')}.${ext}`;
+  const bucket = getStorage().bucket();
+  await bucket.file(fileName).save(buffer, { metadata: { contentType: mime }, public: true });
+  const url = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+  await getFirestore().collection('companies').doc(companyId).set({ logoUrl: url, updatedAt: new Date() }, { merge: true });
+  res.json({ success: true, data: { url } });
+}));
+
+// GET /api/company/domain/verify?domain=<host>
+// Performs a real DNS A-record lookup via Google's public DNS-over-HTTPS resolver
+// and tells the user whether their domain currently points at the Firebase Hosting
+// edge IPs. No side effect on the company doc — purely a checker.
+router.get('/domain/verify', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new AppError('Company ID required', 400);
+  const domain = String((req.query as any).domain ?? '').trim().toLowerCase();
+  if (!domain || !/^[a-z0-9][a-z0-9.-]{1,253}[a-z0-9]$/.test(domain)) {
+    throw new AppError('Domaine invalide', 400);
+  }
+
+  // Firebase Hosting global IPs (stable since 2019).
+  const FIREBASE_IPS = ['199.36.158.100'];
+  const FIREBASE_CNAME_TARGET = 'mon-assistant-86bbd.web.app';
+
+  try {
+    const dnsRes = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=A`);
+    const dnsJson = (await dnsRes.json()) as { Answer?: Array<{ data: string; type: number }> };
+    const answers = dnsJson.Answer ?? [];
+    const aRecords = answers.filter(a => a.type === 1).map(a => a.data);
+
+    // CNAME lookup (separate query because dns.google returns CNAME chain as type 5)
+    const cnameRes = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=CNAME`);
+    const cnameJson = (await cnameRes.json()) as { Answer?: Array<{ data: string; type: number }> };
+    const cnames = (cnameJson.Answer ?? []).filter(a => a.type === 5).map(a => a.data.replace(/\.$/, ''));
+
+    const pointsToFirebase = aRecords.some(ip => FIREBASE_IPS.includes(ip))
+      || cnames.some(c => c === FIREBASE_CNAME_TARGET || c.endsWith('.web.app') || c.endsWith('.firebaseapp.com'));
+
+    // Update domain status on the company doc so the UI can reflect verified state.
+    const status: 'active' | 'verifying' | 'failed' = pointsToFirebase ? 'active' : 'verifying';
+    await getFirestore().collection('companies').doc(companyId).set({
+      customDomain: domain, customStatus: status, customLastCheckedAt: new Date(),
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      data: {
+        domain,
+        aRecords,
+        cnames,
+        expectedIps: FIREBASE_IPS,
+        expectedCnameTarget: FIREBASE_CNAME_TARGET,
+        verified: pointsToFirebase,
+        nextStep: pointsToFirebase
+          ? 'Ajoute le domaine côté Firebase Hosting (console) — Orlode délivrera le SSL automatiquement sous 24h.'
+          : `Pointe ${domain} sur l'IP ${FIREBASE_IPS[0]} (record A) ou crée un CNAME vers ${FIREBASE_CNAME_TARGET}, puis re-vérifie.`,
+      },
+    });
+  } catch (e: any) {
+    res.json({
+      success: false,
+      data: { domain, verified: false, error: String(e?.message ?? e) },
+    });
+  }
 }));
 
 // PATCH /api/company/onboarding/step — save onboarding progress

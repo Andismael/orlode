@@ -58,6 +58,8 @@ const prepareReadAloudTool = ai.defineTool(
       language: z.string().optional().default('fr'),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       readyText: z.string().describe('Clean text optimized for speech synthesis'),
       estimatedDuration: z.string().describe('Estimated reading time'),
       documentName: z.string(),
@@ -68,16 +70,23 @@ const prepareReadAloudTool = ai.defineTool(
     let docName = documentName ?? 'Texte';
 
     if (documentName && !text) {
-      const result = await readDocumentTool({ companyId, documentName });
-      if (!result.found) return { readyText: 'Document non trouvé.', estimatedDuration: '0s', documentName: docName };
-      content = result.content;
-      docName = result.name;
+      try {
+        const result = await readDocumentTool({ companyId, documentName });
+        if (!result.found) return { success: false, message: 'Document non trouvé.', readyText: 'Document non trouvé.', estimatedDuration: '0s', documentName: docName };
+        content = result.content;
+        docName = result.name;
+      } catch (err) {
+        logger.error('[Knowledge] readDocument failed', { error: String(err) });
+        return { success: false, message: `Lecture du document impossible: ${err instanceof Error ? err.message : String(err)}`, readyText: '', estimatedDuration: '0s', documentName: docName };
+      }
     }
 
     // Clean for TTS
-    const { text: cleaned } = await ai.generate({
-      model: GEMINI_FLASH,
-      prompt: `Prépare ce texte pour être lu à haute voix en ${language}:
+    let cleaned: string;
+    try {
+      const result = await ai.generate({
+        model: GEMINI_FLASH,
+        prompt: `Prépare ce texte pour être lu à haute voix en ${language}:
 - Supprime les balises markdown, URLs, codes
 - Remplace les abréviations par les mots complets (ex: "Mr." → "Monsieur", "etc." → "et cetera")
 - Ajoute des pauses naturelles (virgules) aux phrases longues
@@ -87,14 +96,19 @@ const prepareReadAloudTool = ai.defineTool(
 
 Texte:
 ${content.slice(0, 10000)}`,
-      config: { temperature: 0.1 },
-    });
+        config: { temperature: 0.1 },
+      });
+      cleaned = result.text;
+    } catch (err) {
+      logger.error('[Knowledge] TTS preparation failed', { error: String(err) });
+      return { success: false, message: `Préparation TTS impossible: ${err instanceof Error ? err.message : String(err)}`, readyText: content, estimatedDuration: '0s', documentName: docName };
+    }
 
     const wordCount = cleaned.split(/\s+/).length;
     const minutes = Math.ceil(wordCount / 150); // ~150 mots/min lecture
     const estimatedDuration = minutes >= 1 ? `${minutes} min` : `${Math.ceil(wordCount / 2.5)}s`;
 
-    return { readyText: cleaned, estimatedDuration, documentName: docName };
+    return { success: true, readyText: cleaned, estimatedDuration, documentName: docName };
   }
 );
 
@@ -110,6 +124,8 @@ const analyzeDocumentTool = ai.defineTool(
       analysisType: z.enum(['general', 'legal', 'financial', 'technical', 'marketing', 'hr']).optional().default('general'),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       documentName: z.string(),
       analysis: z.string(),
       structure: z.array(z.string()),
@@ -119,15 +135,28 @@ const analyzeDocumentTool = ai.defineTool(
     }),
   },
   async ({ companyId, documentName, analysisType }) => {
-    const result = await readDocumentTool({ companyId, documentName });
+    let result;
+    try {
+      result = await readDocumentTool({ companyId, documentName });
+    } catch (err) {
+      logger.error('[Knowledge] readDocument failed', { error: String(err) });
+      return {
+        success: false, message: `Lecture du document impossible: ${err instanceof Error ? err.message : String(err)}`,
+        documentName, analysis: 'Erreur de lecture.', structure: [], sentiment: 'N/A',
+        keyFindings: [], recommendations: [],
+      };
+    }
     if (!result.found) return {
+      success: false, message: 'Document non trouvé.',
       documentName, analysis: 'Document non trouvé.', structure: [], sentiment: 'N/A',
       keyFindings: [], recommendations: [],
     };
 
-    const { text } = await ai.generate({
-      model: GEMINI_PRO,
-      prompt: `Analyse approfondie de type "${analysisType}" pour ce document.
+    let text: string;
+    try {
+      const r = await ai.generate({
+        model: GEMINI_PRO,
+        prompt: `Analyse approfondie de type "${analysisType}" pour ce document.
 Retourne JSON:
 {
   "analysis": "Analyse détaillée en 3-5 paragraphes",
@@ -142,14 +171,25 @@ Contenu:
 ${result.content.slice(0, 12000)}
 
 Retourne UNIQUEMENT le JSON.`,
-      config: { temperature: 0.2 },
-    });
+        config: { temperature: 0.2 },
+      });
+      text = r.text;
+    } catch (err) {
+      logger.error('[Knowledge] analyze generation failed', { error: String(err) });
+      return {
+        success: false, message: `Analyse impossible: ${err instanceof Error ? err.message : String(err)}`,
+        documentName: result.name, analysis: '', structure: [], sentiment: 'N/A',
+        keyFindings: [], recommendations: [],
+      };
+    }
 
     try {
       const parsed = JSON.parse(text.replace(/^```json\s*/, '').replace(/\s*```$/, ''));
-      return { documentName: result.name, ...parsed };
-    } catch {
+      return { success: true, documentName: result.name, ...parsed };
+    } catch (err) {
+      logger.error('[Knowledge] analyze JSON parse failed', { error: String(err) });
       return {
+        success: true,
         documentName: result.name, analysis: text, structure: [], sentiment: 'N/A',
         keyFindings: [], recommendations: [],
       };
@@ -169,6 +209,8 @@ const compareDocumentsTool = ai.defineTool(
       documentName2: z.string(),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       similarities: z.array(z.string()),
       differences: z.array(z.string()),
       contradictions: z.array(z.string()),
@@ -176,18 +218,26 @@ const compareDocumentsTool = ai.defineTool(
     }),
   },
   async ({ companyId, documentName1, documentName2 }) => {
-    const [doc1, doc2] = await Promise.all([
-      readDocumentTool({ companyId, documentName: documentName1 }),
-      readDocumentTool({ companyId, documentName: documentName2 }),
-    ]);
-
-    if (!doc1.found || !doc2.found) {
-      return { similarities: [], differences: [], contradictions: [], summary: 'Un ou les deux documents non trouvés.' };
+    let doc1, doc2;
+    try {
+      [doc1, doc2] = await Promise.all([
+        readDocumentTool({ companyId, documentName: documentName1 }),
+        readDocumentTool({ companyId, documentName: documentName2 }),
+      ]);
+    } catch (err) {
+      logger.error('[Knowledge] readDocument compare failed', { error: String(err) });
+      return { success: false, message: `Lecture des documents impossible: ${err instanceof Error ? err.message : String(err)}`, similarities: [], differences: [], contradictions: [], summary: '' };
     }
 
-    const { text } = await ai.generate({
-      model: GEMINI_PRO,
-      prompt: `Compare ces deux documents et retourne JSON:
+    if (!doc1.found || !doc2.found) {
+      return { success: false, message: 'Un ou les deux documents non trouvés.', similarities: [], differences: [], contradictions: [], summary: 'Un ou les deux documents non trouvés.' };
+    }
+
+    let text: string;
+    try {
+      const r = await ai.generate({
+        model: GEMINI_PRO,
+        prompt: `Compare ces deux documents et retourne JSON:
 {
   "similarities": ["Point commun 1", ...],
   "differences": ["Différence 1", ...],
@@ -202,13 +252,20 @@ Document 2 (${doc2.name}):
 ${doc2.content.slice(0, 6000)}
 
 Retourne UNIQUEMENT le JSON.`,
-      config: { temperature: 0.2 },
-    });
+        config: { temperature: 0.2 },
+      });
+      text = r.text;
+    } catch (err) {
+      logger.error('[Knowledge] compare generation failed', { error: String(err) });
+      return { success: false, message: `Comparaison impossible: ${err instanceof Error ? err.message : String(err)}`, similarities: [], differences: [], contradictions: [], summary: '' };
+    }
 
     try {
-      return JSON.parse(text.replace(/^```json\s*/, '').replace(/\s*```$/,''));
-    } catch {
-      return { similarities: [], differences: [], contradictions: [], summary: text };
+      const parsed = JSON.parse(text.replace(/^```json\s*/, '').replace(/\s*```$/,''));
+      return { success: true, ...parsed };
+    } catch (err) {
+      logger.error('[Knowledge] compare JSON parse failed', { error: String(err) });
+      return { success: true, similarities: [], differences: [], contradictions: [], summary: text };
     }
   }
 );
@@ -233,32 +290,48 @@ const sendDocumentTool = ai.defineTool(
     }),
   },
   async ({ companyId, documentName, recipientEmail, recipientName, sendType, message }) => {
-    const doc = await readDocumentTool({ companyId, documentName });
+    let doc;
+    try {
+      doc = await readDocumentTool({ companyId, documentName });
+    } catch (err) {
+      logger.error('[Knowledge] readDocument send failed', { error: String(err) });
+      return { success: false, message: `Lecture du document impossible: ${err instanceof Error ? err.message : String(err)}` };
+    }
     if (!doc.found) return { success: false, message: 'Document non trouvé.' };
 
     let contentToSend = '';
     if (sendType === 'full_text') {
       contentToSend = doc.content.slice(0, 5000);
     } else if (sendType === 'key_points') {
-      const summary = await summarizeDocumentTool({ documentId: '', companyId, maxChunks: 10 });
-      contentToSend = `Points clés:\n${summary.keyPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
+      try {
+        const summary = await summarizeDocumentTool({ documentId: '', companyId, maxChunks: 10 });
+        contentToSend = `Points clés:\n${summary.keyPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
+      } catch (err) {
+        logger.error('[Knowledge] summarize failed', { error: String(err) });
+        contentToSend = doc.summary ?? 'Résumé non disponible.';
+      }
     } else {
       contentToSend = doc.summary ?? 'Résumé non disponible.';
     }
 
     // Save as notification/share in Firestore
-    const db = getFirestore();
-    await db.collection('documentShares').add({
-      companyId,
-      documentName: doc.name,
-      recipientEmail: recipientEmail ?? '',
-      recipientName: recipientName ?? '',
-      content: contentToSend,
-      message: message ?? '',
-      sendType,
-      sharedAt: new Date(),
-      status: 'sent',
-    });
+    try {
+      const db = getFirestore();
+      await db.collection('documentShares').add({
+        companyId,
+        documentName: doc.name,
+        recipientEmail: recipientEmail ?? '',
+        recipientName: recipientName ?? '',
+        content: contentToSend,
+        message: message ?? '',
+        sendType,
+        sharedAt: new Date(),
+        status: 'sent',
+      });
+    } catch (err) {
+      logger.error('[Knowledge] documentShares write failed', { error: String(err) });
+      return { success: false, message: 'Sauvegarde du partage impossible.' };
+    }
 
     // If Gmail MCP available, send via Gmail
     if (recipientEmail && mcpAvailability.googleWorkspace) {
@@ -268,7 +341,9 @@ const sendDocumentTool = ai.defineTool(
           subject: `Document partagé : ${doc.name}`,
           body: `${message ?? 'Un document a été partagé avec vous.'}\n\n---\n\n${contentToSend}`,
         });
-      } catch { /* Gmail not configured */ }
+      } catch (err) {
+        logger.warn('[Knowledge] Gmail send failed (non-blocking)', { error: String(err) });
+      }
     }
 
     return {
@@ -293,6 +368,7 @@ const generateDocumentTool = ai.defineTool(
     }),
     outputSchema: z.object({
       success: z.boolean(),
+      message: z.string().optional(),
       documentId: z.string(),
       title: z.string(),
       content: z.string(),
@@ -300,31 +376,51 @@ const generateDocumentTool = ai.defineTool(
     }),
   },
   async ({ companyId, title, instructions, format, language }) => {
-    const { text } = await ai.generate({
-      model: GEMINI_PRO,
-      prompt: `Rédige un document de type "${format}" en ${language}.
+    let text: string;
+    try {
+      const r = await ai.generate({
+        model: GEMINI_PRO,
+        prompt: `Rédige un document de type "${format}" en ${language}.
 Titre: ${title}
 Instructions: ${instructions}
 
 Rédige un document professionnel, bien structuré, avec des sections claires.
 Ne mets PAS de balises markdown type \`\`\`.`,
-      config: { temperature: 0.4 },
-    });
+        config: { temperature: 0.4 },
+      });
+      text = r.text;
+    } catch (err) {
+      logger.error('[Knowledge] document generation failed', { error: String(err) });
+      return {
+        success: false,
+        message: `Génération du document impossible: ${err instanceof Error ? err.message : String(err)}`,
+        documentId: '', title, content: '', wordCount: 0,
+      };
+    }
 
-    const db = getFirestore();
     const docId = generateId();
-    await db.collection('documents').doc(docId).set({
-      companyId,
-      originalName: title,
-      extractedText: text,
-      fileType: 'text/generated',
-      status: 'completed',
-      source: 'ai_generated',
-      summary: text.slice(0, 300),
-      textLength: text.length,
-      uploadedAt: new Date(),
-      createdAt: new Date(),
-    });
+    try {
+      const db = getFirestore();
+      await db.collection('documents').doc(docId).set({
+        companyId,
+        originalName: title,
+        extractedText: text,
+        fileType: 'text/generated',
+        status: 'completed',
+        source: 'ai_generated',
+        summary: text.slice(0, 300),
+        textLength: text.length,
+        uploadedAt: new Date(),
+        createdAt: new Date(),
+      });
+    } catch (err) {
+      logger.error('[Knowledge] documents write failed', { error: String(err) });
+      return {
+        success: false,
+        message: 'Sauvegarde impossible.',
+        documentId: '', title, content: text, wordCount: text.split(/\s+/).length,
+      };
+    }
 
     return {
       success: true,
@@ -344,6 +440,8 @@ const listConnectorsTool = ai.defineTool(
     description: 'List all connected data sources for this company — websites, databases, APIs, e-commerce, video, audio. Shows what knowledge the enterprise brain has access to.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       connectors: z.array(z.object({
         name: z.string(),
         type: z.string(),
@@ -357,8 +455,11 @@ const listConnectorsTool = ai.defineTool(
   },
   async ({ companyId }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/connectors`).get();
-    const connectors = snap.docs.map(d => {
+    const snap = await db.collection(`companies/${companyId}/connectors`).get().catch((err) => {
+      logger.error('[Knowledge] connectors read failed', { error: String(err) });
+      return null;
+    });
+    const connectors = (snap?.docs ?? []).map(d => {
       const data = d.data();
       return {
         name: (data['name'] as string) ?? d.id,
@@ -374,7 +475,9 @@ const listConnectorsTool = ai.defineTool(
     try {
       const chunksSnap = await db.collection(`companies/${companyId}/vectorChunks`).count().get();
       totalChunks = chunksSnap.data().count;
-    } catch { /* */ }
+    } catch (err) {
+      logger.warn('[Knowledge] vectorChunks count failed (non-blocking)', { error: String(err) });
+    }
 
     // List active MCP services
     const mcpServices: string[] = [];
@@ -382,7 +485,7 @@ const listConnectorsTool = ai.defineTool(
     if (mcpAvailability.slack) mcpServices.push('Slack (messages, channels)');
     if (mcpAvailability.bigquery) mcpServices.push('BigQuery (SQL queries)');
 
-    return { connectors, totalChunks, mcpServices };
+    return { success: true, connectors, totalChunks, mcpServices };
   }
 );
 

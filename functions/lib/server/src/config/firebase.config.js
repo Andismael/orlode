@@ -45,8 +45,21 @@ function getFirebaseAdmin() {
     }
     return firebaseApp;
 }
+// Cache the configured Firestore instance — settings() can only be called once
+// per app and must be called before any other Firestore method.
+let _firestore = null;
 function getFirestore() {
-    return getFirebaseAdmin().firestore();
+    if (_firestore)
+        return _firestore;
+    const fs = getFirebaseAdmin().firestore();
+    // Allow `undefined` fields in writes — they're stripped instead of throwing.
+    // Required because optional fields like signatoryPhone often arrive as undefined.
+    try {
+        fs.settings({ ignoreUndefinedProperties: true });
+    }
+    catch { /* already set */ }
+    _firestore = fs;
+    return fs;
 }
 function getStorage() {
     return getFirebaseAdmin().storage();

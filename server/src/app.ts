@@ -50,6 +50,8 @@ import marketplaceRoutes from './routes/marketplace.routes';
 import teamRoutes from './routes/team.routes';
 import referralRoutes from './routes/referral.routes';
 import websiteRoutes from './routes/website.routes';
+import commerceRoutes from './routes/commerce.routes';
+import publicCommerceRoutes from './routes/publicCommerce.routes';
 import creatorRoutes from './routes/creator.routes';
 import superadminRoutes from './routes/superadmin.routes';
 import meRoutes from './routes/me.routes';
@@ -68,6 +70,8 @@ import cloneAnalyticsRoutes from './routes/cloneAnalytics.routes';
 import myStatusRoutes from './routes/myStatus.routes';
 import azureRoutes from './routes/azure.routes';
 import msOauthRoutes from './routes/msOauth.routes';
+import dataScientistRoutes from './routes/datascientist.routes';
+import koraRoutes from './routes/kora.routes';
 
 // Genkit flows — import to register all flows with the Genkit runtime
 import './genkit';
@@ -188,6 +192,8 @@ app.use('/api/clone-analytics', cloneAnalyticsRoutes);
 app.use('/api/my-status', myStatusRoutes);
 app.use('/api/azure', azureRoutes);
 app.use('/api/ms-oauth', msOauthRoutes);
+app.use('/api/datascientist', dataScientistRoutes);
+app.use('/api/kora', koraRoutes);
 app.use('/api/reception', receptionRoutes);
 app.use('/api/agents', agentsRoutes);
 app.use('/api/support', supportRoutes);
@@ -209,14 +215,16 @@ import cloneRoutes from './routes/clone.routes';
 app.use('/api/clone', cloneRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/public', publicContractRouter);
+app.use('/api/public', publicCommerceRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/website', websiteRoutes);
+app.use('/api/commerce', commerceRoutes);
 
 // Public visitor booking (no auth)
 import { publicBookingHandler } from './routes/reception.routes';
 app.post('/api/public/book/:companyId', publicBookingHandler);
-app.use('/api/contracts', wemasRoutes);
+app.use('/api/contracts', wemasRoutes);  // legacy direct-Firestore (used by ContractDashboard / PortfolioNotes / templates / comments)
 app.use('/api/legal', legalRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/beta-feedback', betaFeedbackRoutes);
@@ -224,7 +232,11 @@ import dataDeletionRoutes from './routes/dataDeletion.routes';
 app.use('/api', dataDeletionRoutes);
 app.use('/api/social/ai', socialAiRoutes);
 app.use('/api/social', socialRoutes);
-app.use('/api/contracts', contractsRoutes);
+// Wemas bridge mounted at /api/wemas to avoid path collision with the legacy
+// /api/contracts router above (which still serves ContractDashboard etc.).
+// New e-signature features (HR/Sales sendForSignature, ContractsPage admin) all
+// hit /api/wemas/*. Legacy callers continue to work as before.
+app.use('/api/wemas', contractsRoutes);
 app.use('/api/video', videoRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/subscription', subscriptionRoutes);

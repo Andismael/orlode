@@ -95,34 +95,61 @@ const INPUT = zod_1.z.object({
     companyId: zod_1.z.string(),
     userId: zod_1.z.string().optional(),
     language: zod_1.z.string().optional().default('auto'),
+    history: zod_1.z.array(zod_1.z.object({ role: zod_1.z.enum(['user', 'model']), content: zod_1.z.string() })).optional(),
 });
 const OUTPUT = zod_1.z.object({
     response: zod_1.z.string(),
     toolsUsed: zod_1.z.array(zod_1.z.string()),
 });
-exports.wildcardAgentFlow = genkit_config_1.ai.defineFlow({ name: 'wildcardAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, userId, language }) => {
+exports.wildcardAgentFlow = genkit_config_1.ai.defineFlow({ name: 'wildcardAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, userId, language, history }) => {
     try {
-        logger_1.logger.info(`[WildcardAgent] Request: "${request.slice(0, 80)}"`);
-        const langInstr = language === 'auto' ? 'Respond in the same language as the request.' : `Respond in ${language}.`;
+        logger_1.logger.info(`[WildcardAgent] Request: "${request.slice(0, 80)}" (history=${history?.length ?? 0})`);
+        const langInstr = language === 'auto' ? 'Réponds dans la même langue que la demande (français par défaut).' : `Réponds en ${language}.`;
+        const dateAnchors = (() => {
+            const now = new Date();
+            const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+            return `AUJOURD'HUI : ${now.toISOString().slice(0, 10)} (${months[now.getMonth()]} ${now.getFullYear()}).`;
+        })();
+        const messages = [];
+        if (history && history.length > 0) {
+            for (const h of history.slice(-20))
+                messages.push({ role: h.role, content: [{ text: h.content }] });
+        }
+        messages.push({ role: 'user', content: [{ text: request }] });
         let response = await genkit_config_1.ai.generate({
             model: genkit_config_1.GEMINI_FLASH,
-            system: `You are the Wildcard Agent — the universal Swiss Army knife of Orlode.
-You handle ANY task that doesn't fit a specialized agent.
+            system: `Tu es le Wildcard Agent — couteau suisse universel de Orlode.
+Tu gères TOUTE tâche qui ne correspond pas à un agent spécialisé.
 CompanyID: ${companyId}. UserID: ${userId ?? 'unknown'}.
 
-GUARDRAILS (IMPORTANT):
-1. READ-ONLY by default — prefer reading/searching/listing over creating/modifying
-2. SUGGESTION MODE — for write actions, PROPOSE the action first:
-   "Je propose de creer un ticket IT pour ce probleme. Voulez-vous que je continue ?"
-   Do NOT auto-execute write operations without framing them as a suggestion.
-3. NO CRITICAL ACTIONS — never delete data, never send emails without confirmation, never modify security settings
-4. ALWAYS LOG — mention which tools you used in your response
-5. If unsure, ask for clarification rather than guessing
+## 📅 CONTEXTE TEMPOREL (ne jamais inventer de dates)
+${dateAnchors}
+Pour toute tâche impliquant une date / planification / recherche temporelle, utilise cette ancre.
 
-You have access to tools from ALL departments: Documents, IT, Security, Marketing, Data.
-Be resourceful but SAFE. Propose, don't impose.
+## 🧠 MÉMOIRE CONVERSATIONNELLE
+Tu as l'historique des messages précédents. Quand l'utilisateur dit "ça", "ce ticket", "lui", référence-toi à l'élément le plus récent. Ne repars PAS à zéro si le contexte est clair.
+
+## 🚫 RÈGLE ABSOLUE — ZÉRO FABRICATION
+Tu ne DOIS JAMAIS prétendre avoir fait une action sans appel d'outil réussi.
+INTERDIT :
+- Pretendre avoir routé vers un agent qui n'existe pas
+- Affirmer une action faite sans tool
+- Inventer un résultat de tool
+RÈGLE : APPELLE le tool. Si succès → confirme avec les vrais champs. Si échec → dis la vraie raison. L'utilisateur préfère "je n'ai pas pu" honnête à une fausse confirmation.
+
+GARDE-FOUS (IMPORTANT) :
+1. READ-ONLY par défaut — préfère lire/chercher/lister plutôt que créer/modifier
+2. MODE SUGGESTION — pour les actions d'écriture, PROPOSE l'action d'abord :
+   "Je propose de créer un ticket IT pour ce problème. Voulez-vous que je continue ?"
+   N'auto-exécute PAS les opérations d'écriture sans les formuler comme suggestion.
+3. PAS D'ACTIONS CRITIQUES — jamais supprimer de données, jamais envoyer d'emails sans confirmation, jamais modifier les paramètres de sécurité
+4. TOUJOURS LOGGUER — mentionne les tools utilisés dans ta réponse
+5. Si incertain, demande clarification plutôt que deviner
+
+Tu as accès aux tools de TOUS les départements : Documents, IT, Sécurité, Marketing, Data.
+Sois ingénieux mais SÛR. Propose, n'impose pas.
 ${langInstr}`,
-            prompt: request,
+            messages,
             tools: WILDCARD_TOOLS,
             config: { temperature: 0.5 },
         });

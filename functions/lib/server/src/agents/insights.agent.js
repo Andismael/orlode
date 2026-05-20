@@ -55,6 +55,7 @@ const INPUT = zod_1.z.object({
     mode: zod_1.z.enum(['full', 'quick', 'documents', 'meetings', 'conversations'])
         .optional().default('full'),
     maxInsights: zod_1.z.number().optional().default(5),
+    history: zod_1.z.array(zod_1.z.object({ role: zod_1.z.enum(['user', 'model']), content: zod_1.z.string() })).optional(),
 });
 const OUTPUT = zod_1.z.object({
     insightsGenerated: zod_1.z.number(),
@@ -67,10 +68,30 @@ const OUTPUT = zod_1.z.object({
     summary: zod_1.z.string(),
 });
 // ── The flow (loop pattern) ───────────────────────────────────────────────────
-exports.insightsAgentFlow = genkit_config_1.ai.defineFlow({ name: 'insightsAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ companyId, mode, maxInsights }) => {
-    logger_1.logger.info(`[InsightsAgent] Starting ${mode} analysis for company ${companyId}`);
-    const systemPrompt = `You are a proactive business intelligence analyst for a corporate AI platform.
-Your job is to analyze company data and generate actionable insights.
+exports.insightsAgentFlow = genkit_config_1.ai.defineFlow({ name: 'insightsAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ companyId, mode, maxInsights, history }) => {
+    logger_1.logger.info(`[InsightsAgent] Starting ${mode} analysis for company ${companyId} (history=${history?.length ?? 0})`);
+    const dateAnchors = (() => {
+        const now = new Date();
+        const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+        return `AUJOURD'HUI : ${now.toISOString().slice(0, 10)} (${months[now.getMonth()]} ${now.getFullYear()}).`;
+    })();
+    const systemPrompt = `Tu es un analyste BI proactif pour une plateforme IA d'entreprise.
+Ton rôle : analyser les données de l'entreprise et générer des insights actionnables.
+
+## 📅 CONTEXTE TEMPOREL (ne jamais inventer de dates)
+${dateAnchors}
+Pour les fenêtres temporelles ("cette semaine", "ce mois"), calcule à partir de cette ancre — ne fabrique jamais de dates passées.
+
+## 🧠 MÉMOIRE CONVERSATIONNELLE
+Tu as l'historique des messages précédents. Quand l'utilisateur dit "cet insight", "cette anomalie", "ça", référence-toi à l'élément le plus récent. Ne repars PAS à zéro si le contexte est clair.
+
+## 🚫 RÈGLE ABSOLUE — ZÉRO FABRICATION
+Tu ne DOIS JAMAIS prétendre avoir fait une action sans appel d'outil réussi.
+INTERDIT :
+- Inventer des chiffres / KPI / tendances sans appel tool
+- Affirmer qu'une corrélation existe sans données
+- Pretendre avoir détecté une anomalie sans calcul
+RÈGLE : APPELLE le tool. Si succès → confirme avec les vrais champs. Si échec → dis la vraie raison. L'utilisateur préfère "je n'ai pas pu" honnête à une fausse confirmation.
 
 Use the available tools to gather data, then generate insights of these types:
 - trend: Positive or notable patterns you observe
@@ -98,13 +119,20 @@ After saving all insights, provide a brief executive summary.`;
         conversations: [firestoreTools_1.getConversationsTool, firestoreTools_1.saveInsightTool],
     };
     const tools = toolsByMode[mode ?? 'full'] ?? allTools;
+    const initialPrompt = `Analyze all available data for company ${companyId} and generate insights.
+Start by gathering data with the available tools, then analyze patterns, and save your insights.
+Focus on: document indexing health, conversation patterns, meeting productivity, and team engagement.`;
+    const messages = [];
+    if (history && history.length > 0) {
+        for (const h of history.slice(-20))
+            messages.push({ role: h.role, content: [{ text: h.content }] });
+    }
+    messages.push({ role: 'user', content: [{ text: initialPrompt }] });
     // ── Agentic loop: keep running until agent stops calling tools ────────
     let response = await genkit_config_1.ai.generate({
         model: genkit_config_1.GEMINI_PRO,
         system: systemPrompt,
-        prompt: `Analyze all available data for company ${companyId} and generate insights.
-Start by gathering data with the available tools, then analyze patterns, and save your insights.
-Focus on: document indexing health, conversation patterns, meeting productivity, and team engagement.`,
+        messages,
         tools,
         config: { temperature: 0.3 },
     });

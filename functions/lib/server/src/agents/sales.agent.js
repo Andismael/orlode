@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.salesAgentTool = exports.salesAgentFlow = exports.salesAutomationTool = exports.createEmailSequenceTool = exports.teamPerformanceTool = exports.winLossAnalysisTool = exports.dealInsightsTool = exports.aiScoreLeadTool = exports.forecastRevenueTool = exports.getStatsTool = exports.autoFollowUpTool = exports.getPendingFollowUpsTool = exports.scheduleFollowUpTool = exports.sendWhatsAppTool = exports.sendEmailTool = exports.convertQuoteToSaleTool = exports.sendQuoteTool = exports.updateQuoteTool = exports.createQuoteTool = exports.updateDealStageTool = exports.getPipelineTool = exports.updateLeadStatusTool = exports.scoreLeadTool = exports.getClientHistoryTool = exports.getClientTool = exports.getLeadsTool = exports.createClientTool = exports.createLeadTool = void 0;
+exports.salesAgentTool = exports.salesAgentFlow = exports.sendQuoteForSignatureTool = exports.salesAutomationTool = exports.createEmailSequenceTool = exports.teamPerformanceTool = exports.winLossAnalysisTool = exports.dealInsightsTool = exports.aiScoreLeadTool = exports.forecastRevenueTool = exports.getStatsTool = exports.autoFollowUpTool = exports.getPendingFollowUpsTool = exports.scheduleFollowUpTool = exports.sendWhatsAppTool = exports.sendEmailTool = exports.convertQuoteToSaleTool = exports.sendQuoteTool = exports.updateQuoteTool = exports.createQuoteTool = exports.updateDealStageTool = exports.getPipelineTool = exports.updateLeadStatusTool = exports.scoreLeadTool = exports.getClientHistoryTool = exports.getClientTool = exports.getLeadsTool = exports.createClientTool = exports.createLeadTool = void 0;
 /**
  * Sales Agent PRO — Agent Commercial Complet
  * Mission : Transformer un prospect en client, puis en revenu.
@@ -1109,6 +1109,119 @@ exports.salesAutomationTool = genkit_config_1.ai.defineTool({
     }
     return { actions, message: actions.length > 0 ? `${actions.length} action(s) executee(s).` : 'Aucune action necessaire.' };
 });
+// ══════════════════════════════════════════════════════════════════════════════
+// E-SIGNATURE — send a quote/devis for client signature via Wemas
+// ══════════════════════════════════════════════════════════════════════════════
+exports.sendQuoteForSignatureTool = genkit_config_1.ai.defineTool({
+    name: 'sales_sendQuoteForSignature',
+    description: 'Envoie un devis au client pour signature électronique via Wemas. Récupère le devis (par quoteId), le client + son email, génère le contenu du devis, push vers Wemas, et envoie le lien de signature au client par email. Utilise APRÈS sales_createQuote. Le devis devient "signed" automatiquement quand le client signe.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        quoteId: zod_1.z.string().describe('Quote UUID returned by sales_createQuote'),
+        senderName: zod_1.z.string().optional().describe('Salesperson name — defaults to company name'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        contractId: zod_1.z.string().optional(),
+        signingUrl: zod_1.z.string().optional(),
+        verificationCode: zod_1.z.string().optional(),
+        message: zod_1.z.string(),
+    }),
+}, async ({ companyId, quoteId, senderName }) => {
+    const db = (0, firebase_config_1.getFirestore)();
+    const { isWemasConfigured, createAndSendContract } = await Promise.resolve().then(() => __importStar(require('../services/wemas/wemasBridge')));
+    if (!isWemasConfigured()) {
+        return {
+            success: false,
+            message: 'Signature électronique non disponible : Wemas n\'est pas configuré. Le devis doit être signé manuellement.',
+        };
+    }
+    const quoteDoc = await db.collection(`companies/${companyId}/quotes`).doc(quoteId).get();
+    if (!quoteDoc.exists) {
+        return { success: false, message: `Devis ${quoteId} introuvable. Vérifie l'ID.` };
+    }
+    const quote = quoteDoc.data() ?? {};
+    const clientName = quote['clientName'] ?? 'Client';
+    const clientEmail = quote['clientEmail'] ?? '';
+    if (!clientEmail) {
+        return { success: false, message: `Le devis n'a pas d'email client. Mets-le à jour avec sales_updateQuote.` };
+    }
+    const companyDoc = await db.collection('companies').doc(companyId).get();
+    const company = companyDoc.data() ?? {};
+    const companyName = company['name'] ?? 'Notre entreprise';
+    // Build a clean text version of the quote for Wemas display
+    const items = Array.isArray(quote['items']) ? quote['items'] : [];
+    const itemsLines = items.map(it => {
+        const desc = String(it['description'] ?? it['name'] ?? 'Article');
+        const qty = Number(it['quantity'] ?? 1);
+        const unit = Number(it['unitPrice'] ?? it['price'] ?? 0);
+        return `- ${desc} × ${qty} = ${(qty * unit).toLocaleString()}`;
+    }).join('\n');
+    const total = Number(quote['totalTTC'] ?? quote['total'] ?? 0);
+    const currency = quote['currency'] ?? 'XOF';
+    const validUntil = quote['validUntil'] ?? '30 jours';
+    const quoteNumber = quote['quoteNumber'] ?? quoteId;
+    const contractContent = `DEVIS N° ${quoteNumber}
+
+Émis par ${companyName}
+À l'attention de ${clientName}
+
+OBJET
+Proposition commerciale détaillée ci-dessous.
+
+DÉTAIL
+${itemsLines || '(détail à compléter)'}
+
+TOTAL TTC : ${total.toLocaleString()} ${currency}
+
+VALIDITÉ
+${validUntil === '30 jours' ? 'Ce devis est valable 30 jours à compter de sa date d\'émission.' : `Ce devis est valable jusqu'au ${validUntil}.`}
+
+ACCEPTATION
+En signant ce devis électroniquement, le Client accepte les termes et conditions ci-dessus, et autorise ${companyName} à procéder à la prestation/livraison décrite.
+
+CONDITIONS GÉNÉRALES
+Paiement à 30 jours net à réception de la facture, sauf accord contraire.
+Tout retard de paiement entraîne l'application de pénalités au taux légal en vigueur.
+
+Fait à ${company['city'] ?? '____________'}, le ${new Date().toISOString().slice(0, 10)}.
+
+Le Prestataire                         Le Client
+${companyName}                         ${clientName}`;
+    try {
+        const result = await createAndSendContract({
+            companyId,
+            signatoryName: clientName,
+            signatoryEmail: clientEmail,
+            contractContent,
+            contractType: 'prestation_services',
+            senderName: senderName ?? companyName,
+            sendNow: true,
+        });
+        // Cross-link Wemas contract back to the quote
+        await quoteDoc.ref.update({
+            wemasContractId: result.id,
+            wemasSigningUrl: result.signingUrl,
+            wemasVerificationCode: result.verificationCode,
+            status: 'sent_for_signature',
+            sentForSignatureAt: new Date(),
+        }).catch(() => { });
+        return {
+            success: true,
+            contractId: result.id,
+            signingUrl: result.signingUrl,
+            verificationCode: result.verificationCode,
+            message: `Devis ${quoteNumber} envoyé à ${clientName} (${clientEmail}) pour signature. Code de vérification : ${result.verificationCode}. URL : ${result.signingUrl}.`,
+        };
+    }
+    catch (err) {
+        logger_1.logger.error('[Sales] sendQuoteForSignature failed', { err: String(err), quoteId });
+        return {
+            success: false,
+            message: `Échec envoi à Wemas : ${err.message ?? String(err)}.`,
+        };
+    }
+});
 const ALL_TOOLS = [
     exports.createLeadTool, exports.createClientTool, exports.getLeadsTool, exports.getClientTool, exports.getClientHistoryTool,
     exports.scoreLeadTool, exports.updateLeadStatusTool,
@@ -1117,6 +1230,8 @@ const ALL_TOOLS = [
     exports.sendEmailTool, exports.sendWhatsAppTool,
     exports.scheduleFollowUpTool, exports.getPendingFollowUpsTool, exports.autoFollowUpTool,
     exports.getStatsTool, exports.forecastRevenueTool,
+    // E-signature via Wemas
+    exports.sendQuoteForSignatureTool,
     // PRO tools
     exports.aiScoreLeadTool, exports.dealInsightsTool, exports.winLossAnalysisTool, exports.teamPerformanceTool,
     exports.createEmailSequenceTool, exports.salesAutomationTool,

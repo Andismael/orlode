@@ -20,7 +20,9 @@ export async function uploadDocument(req: AuthenticatedRequest, res: Response): 
   if (!req.file) throw new AppError('No file uploaded', 400);
   if (!req.user) throw new AppError('Not authenticated', 401);
 
-  const companyId = (req.body as { companyId?: string }).companyId ?? req.user.companyId;
+  // SECURITY: companyId is ALWAYS derived from the JWT — never from request body
+  // (a malicious user could otherwise upload a document attributed to another tenant).
+  const companyId = req.user.companyId;
   if (!companyId) throw new AppError('Company ID required', 400);
 
   const { file } = req;
@@ -186,7 +188,8 @@ async function processDocumentAsync(
 // ── GET /api/data/documents ───────────────────────────────────────────────────
 
 export async function getDocuments(req: AuthenticatedRequest, res: Response): Promise<void> {
-  const companyId = (req.query['companyId'] as string | undefined) ?? req.user?.companyId;
+  // SECURITY: companyId from JWT only — never trust the query param.
+  const companyId = req.user?.companyId;
   if (!companyId) throw new AppError('Company ID required', 400);
 
   const db = getFirestore();
@@ -254,6 +257,7 @@ export async function deleteDocument(req: AuthenticatedRequest, res: Response): 
 
 export async function getDocumentStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
+  if (!req.user?.companyId) throw new AppError('Auth required', 401);
   const db = getFirestore();
   const doc = await db.collection('documents').doc(id).get();
   if (!doc.exists) throw new AppError('Document not found', 404);
@@ -265,6 +269,11 @@ export async function getDocumentStatus(req: AuthenticatedRequest, res: Response
     classification?: string;
     confidentiality?: string;
   };
+
+  // SECURITY: cross-tenant guard — refuse if doc belongs to another company
+  if (data.companyId !== req.user.companyId) {
+    throw new AppError('Document not found', 404);
+  }
 
   res.json({
     success: true,

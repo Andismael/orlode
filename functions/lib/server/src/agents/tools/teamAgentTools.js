@@ -1,6 +1,39 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.mentionTeamMemberTool = exports.readTeamChannelMessagesTool = exports.sendTeamDirectMessageTool = exports.sendTeamChannelMessageTool = exports.listTeamMembersTool = exports.listTeamChannelsTool = void 0;
+exports.proposeClientReplyTool = exports.sendWhatsAppProductTool = exports.getTopWhatsAppProductsTool = exports.captureWhatsAppLeadTool = exports.createTeamTaskTool = exports.mentionTeamMemberTool = exports.readTeamChannelMessagesTool = exports.sendTeamDirectMessageTool = exports.sendTeamChannelMessageTool = exports.listTeamMembersTool = exports.listTeamChannelsTool = void 0;
 /**
  * Team Agent Tools — let agents post in the in-house Equipe (Slack-clone).
  *
@@ -472,6 +505,342 @@ exports.mentionTeamMemberTool = genkit_config_1.ai.defineTool({
     }
     catch (err) {
         logger_1.logger.error('[TeamAgentTools] mention failed', { error: err });
+        return { success: false, message: `Échec: ${err.message}` };
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// createTeamTask — record a task in companies/{cid}/tasks so the team has a
+// trackable item. Use when the user says things like "@orlode crée une tâche
+// pour faire X" or "rappelle-moi de Y".
+// ─────────────────────────────────────────────────────────────────────────────
+exports.createTeamTaskTool = genkit_config_1.ai.defineTool({
+    name: 'createTeamTask',
+    description: 'Create a trackable task for the team. Use when the user asks to create, log, or remember a to-do (e.g. "@orlode crée une tâche pour appeler le client", "rappelle-moi de relancer Mr Loba"). Returns the task ID.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        title: zod_1.z.string().describe('Short task title (under 100 chars). Imperative form: "Appeler le client", "Préparer le devis".'),
+        description: zod_1.z.string().optional().describe('Optional longer description / context.'),
+        assigneeQuery: zod_1.z.string().optional().describe('Optional assignee — userId, email, or displayName. Leave empty to leave unassigned.'),
+        dueDate: zod_1.z.string().optional().describe('Optional ISO date (YYYY-MM-DD) when this task is due.'),
+        priority: zod_1.z.enum(['low', 'normal', 'high', 'urgent']).optional().default('normal'),
+        sourceChannel: zod_1.z.string().optional().describe('Optional channel name where the task was requested, for context.'),
+        agentName: zod_1.z.string().optional().default('Orlode'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        message: zod_1.z.string(),
+        taskId: zod_1.z.string().optional(),
+        assignedTo: zod_1.z.object({ userId: zod_1.z.string(), displayName: zod_1.z.string() }).optional(),
+    }),
+}, async (input) => {
+    try {
+        const author = makeAuthor(input.agentName ?? 'Orlode');
+        const db = (0, firebase_config_1.getFirestore)();
+        let assignee = null;
+        if (input.assigneeQuery) {
+            assignee = await resolveMember(input.companyId, input.assigneeQuery);
+        }
+        const taskRef = db.collection(`companies/${input.companyId}/tasks`).doc();
+        await taskRef.set({
+            title: input.title.trim().slice(0, 200),
+            description: input.description ?? null,
+            status: 'open',
+            priority: input.priority ?? 'normal',
+            assigneeId: assignee?.userId ?? null,
+            assigneeName: assignee?.displayName ?? null,
+            dueDate: input.dueDate ?? null,
+            createdBy: author.authorId,
+            createdByName: author.authorName,
+            createdByType: 'agent',
+            sourceChannel: input.sourceChannel ?? null,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        await logAgentActivity(input.companyId, 'agent_message_sent', author.agentName, {
+            type: 'task_created',
+            taskId: taskRef.id,
+            title: input.title,
+            assigneeId: assignee?.userId,
+            assigneeName: assignee?.displayName,
+        });
+        const assignedNote = assignee ? ` (assignée à ${assignee.displayName})` : '';
+        return {
+            success: true,
+            message: `Tâche créée: « ${input.title} »${assignedNote}.`,
+            taskId: taskRef.id,
+            assignedTo: assignee ?? undefined,
+        };
+    }
+    catch (err) {
+        logger_1.logger.error('[TeamAgentTools] createTeamTask failed', { error: err });
+        return { success: false, message: `Échec: ${err.message}` };
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// captureWhatsAppLead — store a structured lead when a WhatsApp customer
+// gives their info during a soft-resume after handoff timeout. The lead is
+// surfaced in the WhatsApp admin page so the human can follow up.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.captureWhatsAppLeadTool = genkit_config_1.ai.defineTool({
+    name: 'captureWhatsAppLead',
+    description: 'Capture a WhatsApp customer\'s info as a lead. Use ONLY when a customer is in handoff-timeout mode and gives their name / need / urgency so a human can call them back. Never use during a normal conversation.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        customerPhone: zod_1.z.string().describe('Customer phone number (digits only or +xxx).'),
+        name: zod_1.z.string().optional().describe('Customer name if given.'),
+        need: zod_1.z.string().optional().describe('What they need / their request, in the customer\'s own words.'),
+        urgency: zod_1.z.enum(['low', 'normal', 'high', 'urgent']).optional().default('normal'),
+        notes: zod_1.z.string().optional().describe('Any extra context (preferred contact time, language, etc.).'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        leadId: zod_1.z.string().optional(),
+        message: zod_1.z.string(),
+    }),
+}, async (input) => {
+    try {
+        const { captureWhatsAppLead } = await Promise.resolve().then(() => __importStar(require('../../services/whatsapp/humanHandoffService')));
+        const id = await captureWhatsAppLead(input.companyId, {
+            customerPhone: input.customerPhone,
+            name: input.name,
+            need: input.need,
+            urgency: input.urgency ?? 'normal',
+            notes: input.notes,
+            source: 'handoff_timeout',
+            status: 'new',
+        });
+        if (!id)
+            return { success: false, message: 'Échec stockage lead' };
+        // If this customer arrived via a Meta ad, propagate the referral onto
+        // the lead and bump the campaign's leadsCreated counter. This is what
+        // powers the per-campaign performance dashboard.
+        try {
+            const phoneKey = input.customerPhone.replace(/\D/g, '');
+            const convoDoc = await (0, firebase_config_1.getFirestore)()
+                .collection(`companies/${input.companyId}/whatsappConversations`).doc(phoneKey).get();
+            const convo = convoDoc.exists ? convoDoc.data() : null;
+            const referral = convo?.['adReferral'];
+            if (referral?.['source_id']) {
+                await (0, firebase_config_1.getFirestore)()
+                    .collection(`companies/${input.companyId}/whatsappLeads`).doc(id)
+                    .update({
+                    source: 'meta_ad',
+                    adCampaignId: referral['source_id'],
+                    adReferral: referral,
+                }).catch(() => null);
+                await (0, firebase_config_1.getFirestore)()
+                    .collection(`companies/${input.companyId}/whatsappAdCampaigns`).doc(referral['source_id'])
+                    .set({
+                    leadsCreated: firestore_1.FieldValue.increment(1),
+                    updatedAt: firestore_1.FieldValue.serverTimestamp(),
+                }, { merge: true });
+            }
+        }
+        catch { /* best-effort */ }
+        return { success: true, leadId: id, message: `Lead enregistré pour ${input.customerPhone}` };
+    }
+    catch (err) {
+        logger_1.logger.error('[Tools] captureWhatsAppLead failed', { error: String(err) });
+        return { success: false, message: `Échec: ${err.message}` };
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// getTopWhatsAppProducts — returns the company's catalog products ranked by
+// score = (won / sent) * revenue. Use BEFORE sendWhatsAppProduct so you pick
+// the product most likely to convert. Also useful when a previous product
+// didn't get a reply: pick the next-best ranked product as alternative.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.getTopWhatsAppProductsTool = genkit_config_1.ai.defineTool({
+    name: 'getTopWhatsAppProducts',
+    description: 'Get the top-ranked catalog products by conversion score (revenue × win rate). Call this FIRST when the customer shows buying intent so you can pick the product most likely to convert. Also call it when a previous product send didn\'t convert — to pick a different one.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        limit: zod_1.z.number().optional().default(5).describe('Max products to return (default 5).'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        products: zod_1.z.array(zod_1.z.object({
+            retailerId: zod_1.z.string(),
+            name: zod_1.z.string().optional(),
+            price: zod_1.z.string().optional(),
+            currency: zod_1.z.string().optional(),
+            sent: zod_1.z.number(),
+            won: zod_1.z.number(),
+            revenue: zod_1.z.number(),
+            score: zod_1.z.number(),
+        })).optional(),
+        message: zod_1.z.string().optional(),
+    }),
+}, async (input) => {
+    try {
+        const { whatsappService } = await Promise.resolve().then(() => __importStar(require('../../services/whatsapp/whatsappService')));
+        const products = await whatsappService.listCatalogProducts(input.companyId);
+        if (products.length === 0)
+            return { success: false, message: 'Aucun produit dans le catalogue.' };
+        const db = (0, firebase_config_1.getFirestore)();
+        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const [sendsSnap, leadsSnap] = await Promise.all([
+            db.collection(`companies/${input.companyId}/whatsappCatalogSends`).where('sentAt', '>=', since).limit(1000).get().catch(() => null),
+            db.collection(`companies/${input.companyId}/whatsappLeads`).where('status', '==', 'closed_won').limit(500).get().catch(() => null),
+        ]);
+        const scored = products.map((p) => {
+            const id = p.retailer_id;
+            let sent = 0, won = 0, revenue = 0;
+            if (sendsSnap)
+                for (const d of sendsSnap.docs)
+                    if (d.data()['productRetailerId'] === id)
+                        sent++;
+            if (leadsSnap)
+                for (const d of leadsSnap.docs) {
+                    const ld = d.data();
+                    if (ld['lastProductRetailerId'] === id) {
+                        won++;
+                        if (typeof ld['revenue'] === 'number')
+                            revenue += ld['revenue'];
+                    }
+                }
+            const score = sent > 0 ? Math.round((won / sent) * revenue) : 0;
+            return {
+                retailerId: id,
+                name: p.name,
+                price: p.price,
+                currency: p.currency,
+                sent, won, revenue, score,
+            };
+        });
+        scored.sort((a, b) => (b.score - a.score) || (b.revenue - a.revenue) || (b.won - a.won));
+        return { success: true, products: scored.slice(0, input.limit ?? 5) };
+    }
+    catch (err) {
+        logger_1.logger.error('[Tools] getTopWhatsAppProducts failed', { error: String(err) });
+        return { success: false, message: `Échec: ${err.message}` };
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// sendWhatsAppProduct — pushes a Meta Catalog product card to a customer in
+// WhatsApp. Use when the customer expresses buying intent ("c'est combien ?",
+// "intéressé", "je veux acheter", "tu as ça en stock ?"). The card is
+// interactive (image + price + View button). Auto-attributes to the lead.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.sendWhatsAppProductTool = genkit_config_1.ai.defineTool({
+    name: 'sendWhatsAppProduct',
+    description: 'Send a Meta Catalog product card to a WhatsApp customer. Use ONLY when the customer shows clear buying intent (asks about a product, says "how much", "interested", "buy", "in stock", etc.). The card includes image, price, and a "View" button. Returns the messageId.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        customerPhone: zod_1.z.string().describe('Customer phone with country code (e.g. +2250701234567)'),
+        productRetailerId: zod_1.z.string().describe('The retailer_id of the product in the Meta catalog (NOT the internal Meta product id). Look it up via the catalog list if you don\'t know.'),
+        bodyText: zod_1.z.string().describe('Short message accompanying the product card (≤ 1024 chars). Be enthusiastic but concise.'),
+        footerText: zod_1.z.string().optional().describe('Optional small footer text (≤ 60 chars).'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        messageId: zod_1.z.string().optional(),
+        message: zod_1.z.string(),
+    }),
+}, async (input) => {
+    try {
+        const { whatsappService } = await Promise.resolve().then(() => __importStar(require('../../services/whatsapp/whatsappService')));
+        const config = await whatsappService.getConfig(input.companyId);
+        if (!config)
+            return { success: false, message: 'WhatsApp non connecté.' };
+        const catalogId = await whatsappService.getCatalogId(input.companyId);
+        if (!catalogId)
+            return { success: false, message: 'Aucun catalogue Meta lié.' };
+        const out = await whatsappService.sendProductMessage(config, input.customerPhone, catalogId, input.productRetailerId, input.bodyText, input.footerText);
+        if (!out.messageId) {
+            return { success: false, message: `Échec: ${out.error ?? 'unknown'}` };
+        }
+        // Audit + lead linking — same logic as the route handler.
+        const db = (0, firebase_config_1.getFirestore)();
+        const phoneDigits = input.customerPhone.replace(/\D/g, '');
+        let relatedLeadId = null;
+        try {
+            const leadSnap = await db.collection(`companies/${input.companyId}/whatsappLeads`)
+                .where('customerPhone', 'in', [input.customerPhone, phoneDigits, `+${phoneDigits}`])
+                .orderBy('createdAt', 'desc').limit(1).get().catch(() => null);
+            if (leadSnap && !leadSnap.empty) {
+                relatedLeadId = leadSnap.docs[0].id;
+                await leadSnap.docs[0].ref.update({
+                    lastProductRetailerId: input.productRetailerId,
+                    lastProductSentAt: firestore_1.FieldValue.serverTimestamp(),
+                    updatedAt: firestore_1.FieldValue.serverTimestamp(),
+                }).catch(() => null);
+            }
+        }
+        catch { /* best-effort */ }
+        await db.collection(`companies/${input.companyId}/whatsappCatalogSends`).add({
+            to: input.customerPhone,
+            productRetailerId: input.productRetailerId,
+            catalogId,
+            bodyText: input.bodyText,
+            footerText: input.footerText ?? null,
+            messageId: out.messageId,
+            relatedLeadId,
+            sentBy: 'agent:orlode',
+            sentAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        return { success: true, messageId: out.messageId, message: `Produit ${input.productRetailerId} envoyé à ${input.customerPhone}.` };
+    }
+    catch (err) {
+        logger_1.logger.error('[Tools] sendWhatsAppProduct failed', { error: String(err) });
+        return { success: false, message: `Échec: ${err.message}` };
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// proposeClientReply — DOES NOT SEND. Stores a draft proposal that the user
+// must validate via the action card UI in team chat. Use when the user asks
+// the agent to "répond au client", "rédige un message", "envoie un email à X",
+// etc. The team-chat UI renders the proposalId as an action card with buttons.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.proposeClientReplyTool = genkit_config_1.ai.defineTool({
+    name: 'proposeClientReply',
+    description: 'Propose (do NOT send) a draft message to a client. Use when the user asks "répond au client", "rédige un message", "envoie un email à X". The user will review and validate it in the team chat. Returns a proposalId that you MUST embed in your reply as [[ACTION:proposalId]] so the UI can render the action card.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        channel: zod_1.z.enum(['whatsapp', 'email', 'telegram']).describe('Where the message should be sent.'),
+        recipient: zod_1.z.string().describe('Recipient identifier: phone number for WhatsApp/Telegram, email address for email. Include country code for phones (+225...).'),
+        recipientName: zod_1.z.string().optional().describe('Display name of the recipient if known (for the card preview).'),
+        subject: zod_1.z.string().optional().describe('Email subject (only used when channel=email).'),
+        draft: zod_1.z.string().describe('The draft message body, ready to send. Write it in the recipient\'s language.'),
+        language: zod_1.z.string().optional().describe('ISO language code (fr, en, es…) of the draft.'),
+        sourceChannel: zod_1.z.string().optional().describe('Optional team channel name where the proposal was requested.'),
+        agentName: zod_1.z.string().optional().default('Orlode'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        proposalId: zod_1.z.string().optional(),
+        message: zod_1.z.string(),
+    }),
+}, async (input) => {
+    try {
+        const author = makeAuthor(input.agentName ?? 'Orlode');
+        const db = (0, firebase_config_1.getFirestore)();
+        const ref = db.collection(`companies/${input.companyId}/agentProposals`).doc();
+        await ref.set({
+            type: 'send_message',
+            status: 'pending',
+            channel: input.channel,
+            recipient: input.recipient,
+            recipientName: input.recipientName ?? null,
+            subject: input.subject ?? null,
+            draft: input.draft,
+            language: input.language ?? null,
+            sourceChannel: input.sourceChannel ?? null,
+            createdBy: author.authorId,
+            createdByName: author.authorName,
+            agentName: author.agentName,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        logger_1.logger.info(`[TeamAgentTools] proposed ${input.channel} to ${input.recipient} → ${ref.id}`);
+        return {
+            success: true,
+            proposalId: ref.id,
+            message: `Proposal créée: ${input.channel} à ${input.recipientName ?? input.recipient}. Embed [[ACTION:${ref.id}]] dans ta réponse.`,
+        };
+    }
+    catch (err) {
+        logger_1.logger.error('[TeamAgentTools] proposeClientReply failed', { error: err });
         return { success: false, message: `Échec: ${err.message}` };
     }
 });

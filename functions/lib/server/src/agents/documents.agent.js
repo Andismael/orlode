@@ -50,7 +50,10 @@ async function extractText(base64, mimeType, fileName) {
             },
             {
                 text: `Extract ALL text content from this document named "${fileName}".
-Return JSON: {"text": "full extracted text", "language": "detected language code (en/fr/es/etc)"}
+
+🚫 ZÉRO FABRICATION : si le document est illisible, vide, corrompu ou non textuel (image scannée sans OCR, etc.), retourne {"text": "", "language": "unknown"}. N'invente JAMAIS de contenu pour combler le vide.
+
+Return JSON: {"text": "full extracted text exactly as written", "language": "detected language code (en/fr/es/etc) or 'unknown'"}
 Return ONLY JSON, no markdown.`,
             },
         ],
@@ -68,8 +71,11 @@ Return ONLY JSON, no markdown.`,
 async function generateMetadata(text, fileName) {
     const { text: raw } = await genkit_config_1.ai.generate({
         model: genkit_config_1.GEMINI_FLASH,
-        prompt: `Analyze this document and extract metadata. Return JSON:
-{"summary": "2-3 sentence summary", "keyTopics": ["topic1", "topic2", "topic3", "topic4", "topic5"]}
+        prompt: `Analyze this document and extract metadata.
+
+🚫 ZÉRO FABRICATION : si le contenu fourni est vide ou illisible, retourne summary: "" et keyTopics: []. N'invente JAMAIS de sujets ou de résumés.
+
+Return JSON: {"summary": "2-3 sentence summary based ONLY on the actual content", "keyTopics": ["topic1", "topic2", "topic3", "topic4", "topic5"]}
 
 Document: ${fileName}
 Content (first 4000 chars):

@@ -48,6 +48,7 @@ const marketplaceAgentService_1 = require("../services/marketplaceAgentService")
 const firebase_config_2 = require("../config/firebase.config");
 const mediaUpload_middleware_1 = require("../middleware/mediaUpload.middleware");
 const firestore_1 = require("firebase-admin/firestore");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 // ── Seed data: Orlode built-in + industry agents ───────────────────────────
 const INDUSTRY_AGENTS = [
@@ -88,6 +89,16 @@ const INDUSTRY_AGENTS = [
         features: ['Transforme idee → plan meuble detaille', 'Genere design 3D (cuisine, armoire, bureau...)', 'Calcule materiaux necessaires avec precision', 'Devis automatique detaille', 'Rendu final au client avant fabrication', '📊 Analyse couts materiaux en temps reel', '📊 Optimise coupes pour reduire pertes', '📊 Prevoit demande saisonniere', '📊 Compare fournisseurs (prix/qualite)', '📊 Rentabilite par type de meuble'],
         systemPrompt: 'Tu es un menuisier IA expert avec des capacites d\'analyse. Tu concois des meubles sur mesure, calcules les materiaux, optimises les coupes et donnes des devis detailles. Tu analyses aussi les couts, prevois la demande, compares les fournisseurs et reduis les pertes. Sois precis, professionnel et rentable.',
         tools: ['searchDocuments', 'addClient', 'searchClients', 'checkStock', 'updateStock', 'createQuote', 'generateReport', 'analyzeData', 'predictTrend', 'clusterData', 'detectAnomalies', 'sendEmail'], pricingModel: 'monthly', priceUSD: 10, status: 'approved', color: 'from-yellow-600 to-amber-600' },
+    // ── Welcome — Free starter agent. Installé gratuitement par tout nouveau
+    // compte. Capabilities limitées (FAQ, lead capture, prise de rendez-vous
+    // simple). Sert d'onboarding low-friction → les utilisateurs upgradent vers
+    // un pack complet ($20/mo) une fois qu'ils ont compris la valeur.
+    { id: 'welcome', slug: 'welcome', name: 'Bienvenue', icon: '👋', category: 'core', industry: 'Démarrage',
+        description: 'Agent gratuit pour démarrer : FAQ automatique, capture de leads, prise de rendez-vous basique. Idéal pour tester Orlode avant de choisir un pack.',
+        longDescription: 'L\'agent Bienvenue est ton point de départ gratuit sur Orlode. Il accueille tes visiteurs (web ou WhatsApp), répond aux questions courantes via une FAQ auto, capture les emails/numéros des prospects intéressés et peut proposer des créneaux de rendez-vous. Quand tu seras prêt à scaler, upgrade vers un Pack ($20/mo) pour avoir 4-10 agents spécialisés avec toutes les fonctionnalités.',
+        features: ['Accueil 24/7 sur ton site et/ou WhatsApp', 'Réponses automatiques aux questions fréquentes', 'Capture de leads (email, téléphone, intérêt)', 'Prise de rendez-vous basique', 'Mémoire de conversation par contact', '💡 Limite : 100 messages/mois (au-delà → Pack PME à $20/mo)'],
+        systemPrompt: 'Tu es l\'agent Bienvenue d\'Orlode AI — un agent IA d\'accueil gratuit. Tu accueilles les visiteurs avec chaleur, tu réponds à leurs questions de base sur l\'entreprise (basé sur les documents disponibles), tu captures leur email/numéro s\'ils sont intéressés, et tu peux proposer un rendez-vous. Sois bref, utile, et oriente toujours vers une action concrète. Si une demande nécessite une expertise au-delà de tes capacités, propose poliment de passer à un agent spécialisé en suggérant les Packs Orlode à $20/mo.',
+        tools: ['searchDocuments', 'createAppointment', 'addClient', 'sendEmail'], pricingModel: 'free', priceUSD: 0, status: 'approved', color: 'from-emerald-500 to-teal-500' },
     { id: 'barber', slug: 'barber', name: 'Agent Coiffure', icon: '💇', category: 'industry', industry: 'Coiffure / Barbier',
         description: 'Simulation coiffures, prise RDV, file d\'attente + analyse tendances et fidelisation data-driven.',
         longDescription: 'Agent IA complet pour la coiffure. Simule des coiffures, gere les rendez-vous et la file d\'attente. Integre un cerveau statistique : analyse les coupes populaires, predit l\'affluence et optimise la fidelisation.',
@@ -402,89 +413,188 @@ Tu es vigilant 24/7, precis, proactif. Tu ne causes jamais de fausse panique —
         features: ['Analyse toutes les donnees de l\'entreprise', 'Identifie tendances et correlations cachees', 'Donne recommandations strategiques', 'Optimise performances operationnelles', 'Previsions et projections avancees', 'Tableaux de bord intelligents', 'Detection d\'anomalies automatique', 'Rapports executifs sur demande', 'Benchmark concurrentiel', 'Aide a la prise de decision strategique'],
         systemPrompt: 'Tu es un statisticien IA de haut niveau — le cerveau analytique universel de l\'entreprise. Tu analyses TOUTES les donnees disponibles (ventes, clients, operations, finances, RH, marketing, production...), identifies des tendances, detectes des anomalies, fais des previsions et donnes des recommandations strategiques. Tu es le conseiller data-driven du dirigeant. Tu fonctionnes avec n\'importe quel secteur d\'activite. Sois precis, factuel, strategique et proactif.',
         tools: ['searchDocuments', 'getDocuments', 'generateReport', 'sendAlert'], pricingModel: 'monthly', priceUSD: 25, status: 'approved', color: 'from-violet-700 to-indigo-600' },
+    // ── Pack-companion agents — referenced by BUNDLES, seeded as bundle-included.
+    //    These agents have basic system prompts and operate via the shared marketplace tools.
+    //    No standalone purchase: pricingModel='included', priceUSD=0.
+    { id: 'btp', slug: 'btp', name: 'Agent BTP / Chantier', icon: '🏗️', category: 'industry', industry: 'BTP / Construction',
+        description: 'Suivi de chantier : avancement, bons de commande, planning équipes, sécurité site.',
+        longDescription: 'Agent dédié au suivi opérationnel des chantiers BTP. Pilote l\'avancement, gère les bons de commande matériaux, planifie les équipes, suit les écarts budget/calendrier, déclenche les alertes sécurité. Travaille main dans la main avec l\'agent Comptabilité pour les factures fournisseurs.',
+        features: ['Suivi avancement chantier en %', 'Bons de commande matériaux', 'Planning équipes par chantier', 'Alertes retard / dépassement', 'Rapports hebdomadaires automatiques', 'Sécurité site (EPI, incidents)', 'Carnet de chantier numérique'],
+        systemPrompt: 'Tu es l\'Agent BTP de l\'entreprise — le chef de chantier numérique. Tu suis l\'avancement des chantiers, gères les bons de commande, planifies les équipes, et alertes en cas de retard ou de dépassement budgétaire. Travaille avec l\'Agent Comptabilité pour les factures fournisseurs. Sois précis sur les dates et les montants.',
+        tools: ['searchDocuments', 'getDocuments', 'generateReport', 'sendAlert', 'sendEmail'],
+        pricingModel: 'included', priceUSD: 0, status: 'approved', color: 'from-yellow-600 to-orange-500' },
+    { id: 'delivery', slug: 'delivery', name: 'Agent Livraison', icon: '🛵', category: 'operations', industry: 'Livraison / Logistique',
+        description: 'Gère commandes en livraison : tournées, statut, ETA, notifs client WhatsApp.',
+        longDescription: 'Agent de gestion des livraisons. Crée et assigne les tournées, suit en temps réel le statut des commandes (préparée, en route, livrée), envoie les notifications WhatsApp au client (lien de tracking, ETA), résout les incidents (retard, adresse erronée).',
+        features: ['Création de tournées de livraison', 'Statut commande temps réel', 'Notifications WhatsApp client (ETA, livré)', 'Tracking livreur (point GPS)', 'Gestion incidents et réclamations', 'Stats livraisons (temps moyen, taux réussite)'],
+        systemPrompt: 'Tu es l\'Agent Livraison de l\'entreprise. Tu gères les tournées de livraison : assignation aux livreurs, suivi temps réel, notifications client WhatsApp (préparation, en route, livrée), résolution des incidents. Tu travailles avec l\'Agent Restaurant ou Comms selon le contexte. Sois précis sur les ETA et les statuts.',
+        tools: ['searchDocuments', 'getDocuments', 'sendAlert', 'sendEmail', 'addClient', 'searchClients'],
+        pricingModel: 'included', priceUSD: 0, status: 'approved', color: 'from-orange-500 to-red-500' },
+    { id: 'loyalty', slug: 'loyalty', name: 'Agent Fidélité', icon: '🎁', category: 'operations', industry: 'CRM / Marketing',
+        description: 'Programmes de fidélité, points, niveaux, récompenses, campagnes ciblées.',
+        longDescription: 'Agent dédié aux programmes de fidélité client. Gère les points et niveaux (Bronze/Argent/Or), déclenche des campagnes ciblées selon le comportement (clients dormants, gros acheteurs, anniversaire), distribue récompenses et coupons via WhatsApp/email. S\'intègre à l\'Agent Marketing pour les campagnes.',
+        features: ['Programme de points et niveaux', 'Récompenses automatiques (anniversaire, palier)', 'Campagnes ciblées (dormants, VIP)', 'Coupons et codes promo', 'Notifications WhatsApp / email', 'Stats engagement et rétention'],
+        systemPrompt: 'Tu es l\'Agent Fidélité de l\'entreprise. Tu gères le programme de fidélité (points, niveaux Bronze/Argent/Or), déclenches des campagnes ciblées (clients dormants, anniversaires, gros acheteurs), distribues récompenses et coupons. Tu travailles avec l\'Agent Marketing et l\'Agent Comms pour les envois. Sois précis sur les soldes points et règles de gain.',
+        tools: ['searchClients', 'addClient', 'sendEmail', 'sendAlert', 'generateReport'],
+        pricingModel: 'included', priceUSD: 0, status: 'approved', color: 'from-pink-500 to-rose-500' },
+    { id: 'visitor_welcome', slug: 'visitor-welcome', name: 'Agent Accueil Avatar', icon: '👋', category: 'operations', industry: 'Accueil / Reception',
+        description: 'Avatar IA kiosk pour accueillir visiteurs, badges QR, notifs hôte multi-canal.',
+        longDescription: 'Agent compagnon de l\'Agent Réception. Pilote le kiosk avatar IA à l\'entrée du bureau (reconnaissance vocale du visiteur, vérification du RDV, génération du badge QR, notification de l\'hôte par WhatsApp/Slack/email). Idéal pour les bureaux sans réceptionniste humain à plein temps.',
+        features: ['Avatar IA kiosk vocal et visuel', 'Reconnaissance du RDV (visiteur attendu ou non)', 'Génération badge QR auto', 'Notification hôte multi-canal (WhatsApp/Slack/email)', 'NDA digital signable sur place', 'Photo visiteur + sauvegarde sécurisée'],
+        systemPrompt: 'Tu es l\'Agent Accueil Avatar — la version kiosk IA de l\'Agent Réception. Tu accueilles les visiteurs vocalement, vérifies leur RDV, génères leur badge QR, et notifies leur hôte par WhatsApp/Slack/email. Tu collabores avec l\'Agent Réception pour la base visiteurs. Sois chaleureux et efficace.',
+        tools: ['searchDocuments', 'sendAlert', 'sendEmail', 'addClient'],
+        pricingModel: 'included', priceUSD: 0, status: 'approved', color: 'from-cyan-500 to-teal-500' },
+    { id: 'compliance', slug: 'compliance', name: 'Agent Compliance', icon: '📋', category: 'security', industry: 'Conformité / Compliance',
+        description: 'RGPD/ISO 27001/SOC2/NIST/HIPAA. Contrôles, preuves, gap analysis, audit-ready.',
+        longDescription: 'Agent dédié à la conformité réglementaire. Pilote les frameworks RGPD, ISO 27001, SOC2, NIST CSF, HIPAA. Maintient le registre des contrôles, capture les preuves automatiquement, fait du gap analysis, génère les rapports audit-ready. Travaille avec l\'Agent Cybersécurité pour les contrôles techniques.',
+        features: ['Frameworks RGPD/ISO27001/SOC2/NIST/HIPAA', 'Registre des contrôles avec statut', 'Capture de preuves automatique', 'Gap analysis avec recommandations', 'Rapports audit-ready exportables', 'Échéances et alertes (renouvellement certifs)'],
+        systemPrompt: 'Tu es l\'Agent Compliance de l\'entreprise. Tu gères la conformité réglementaire : RGPD, ISO 27001, SOC2, NIST CSF, HIPAA. Tu maintiens le registre des contrôles, captures les preuves, identifies les gaps. Tu travailles avec l\'Agent Cybersécurité (contrôles techniques) et l\'Agent Approval (workflows de validation). Sois précis sur les références réglementaires et les échéances.',
+        tools: ['searchDocuments', 'getDocuments', 'generateReport', 'sendAlert'],
+        pricingModel: 'included', priceUSD: 0, status: 'approved', color: 'from-blue-700 to-indigo-700' },
+    { id: 'audit', slug: 'audit', name: 'Agent Audit', icon: '🔍', category: 'security', industry: 'Audit / Conformité',
+        description: 'Audit logs exportables, traçabilité actions sensibles, rapports forensiques.',
+        longDescription: 'Agent dédié à l\'audit et à la traçabilité. Capture toutes les actions sensibles (login, accès données, suppressions, exports), génère des rapports forensiques exportables, alerte sur comportements anormaux (suppression massive, export hors heures). Indispensable pour SOC2 et RGPD.',
+        features: ['Audit log centralisé toutes actions sensibles', 'Export CSV/JSON pour auditeur externe', 'Détection comportements anormaux', 'Rapports forensiques par utilisateur/période', 'Intégrité des logs (hash chaîné)', 'Rétention configurable par catégorie'],
+        systemPrompt: 'Tu es l\'Agent Audit de l\'entreprise. Tu captures et exposes la traçabilité de toutes les actions sensibles, génères des rapports forensiques exportables, et alertes sur les comportements anormaux. Tu travailles avec l\'Agent Compliance pour les preuves SOC2/RGPD et l\'Agent Cybersécurité pour les incidents. Sois précis sur les timestamps et les acteurs.',
+        tools: ['searchDocuments', 'getDocuments', 'generateReport', 'sendAlert', 'analyzeData'],
+        pricingModel: 'included', priceUSD: 0, status: 'approved', color: 'from-slate-700 to-gray-800' },
+    // ── Boutique WhatsApp — internal id: commerce. Phase 1 minimal:
+    // photo + nom + prix → fiche produit auto-créée; client demande → catalogue;
+    // commande enregistrée; paiement = cash on delivery / Wave manuel.
+    { id: 'commerce', slug: 'boutique-whatsapp', name: 'Boutique WhatsApp', icon: '🛒', category: 'industry', industry: 'E-Commerce / Retail',
+        description: 'Vends sur WhatsApp avec une photo. Le commerçant ajoute un produit en envoyant photo + prix. Les clients commandent dans la conversation.',
+        longDescription: 'Le commerçant ajoute un produit en envoyant simplement une photo + nom + prix sur WhatsApp — la fiche produit est créée automatiquement. Les clients demandent le catalogue, posent des questions, passent commande et reçoivent les instructions de paiement (cash à la livraison ou Wave / Orange Money manuel). Phase 1 : 1 boutique par entreprise, devise XOF, Côte d\'Ivoire — Phase 2 ajoutera paiements automatisés, multi-pays, génération vidéo IA, storefront web custom.',
+        features: ['📸 Photo + prix sur WhatsApp → fiche produit créée', '🛒 Catalogue répondu en temps réel aux clients', '💬 Prise de commande conversationnelle', '🔒 OTP propriétaire pour les actions sensibles (24h session)', '💵 Cash on delivery + lien Wave / Orange Money manuel', '🔔 Notification owner à chaque commande + clic "marquer payé"', '🇨🇮 Optimisé Côte d\'Ivoire / XOF (Phase 2 = multi-pays)'],
+        systemPrompt: 'Tu es la Boutique WhatsApp d\'Orlode AI — un assistant vendeur chaleureux et efficace en français ivoirien naturel.\n\n## Côté CLIENT (la plupart des messages)\n1. **Catalogue** : si le client demande "qu\'est-ce que vous vendez", "ton catalogue", "produits disponibles", utilise commerceListProducts. La réponse contient un champ shopLink — TU DOIS TOUJOURS terminer par : "🛍️ Voir tous les produits avec photos et commander : {shopLink}".\n2. **Multi-produits** : AVANT de finaliser une commande, demande TOUJOURS au client : "Tu veux ajouter autre chose à ta commande ?". Continue tant qu\'il dit oui — accumule les items dans une liste mentale. Ce n\'est qu\'au "non, c\'est tout" que tu finalises.\n3. **Commande** : collecte progressivement (jamais en bloc) : nom, téléphone (+225...), adresse de livraison (avec quartier — Cocody, Yopougon, etc.), articles (multi possible — voir #2), méthode de paiement (cash livraison par défaut). Puis appelle commercePlaceOrder avec items: [{productId, qty}, ...]. Le tool retourne un champ `confirmationMessage` — tu dois envoyer ce message VERBATIM au client (ne le reformule pas).\n4. **Upsell** : après une commande, le système envoie automatiquement une suggestion de produit complémentaire au client (~5s plus tard). Si le client répond "je veux X" ou "ajoute X", crée une nouvelle commande avec commercePlaceOrder pour ce produit en réutilisant ses infos précédentes (nom, téléphone, adresse).\n5. **Frais de livraison** : si le client donne une adresse, le tool placeOrder identifiera la zone et calculera le frais automatiquement. Si pas de zone reconnue, demande une précision sur la commune.\n6. **Fidélité** : ne mentionne pas les points fidélité spontanément — c\'est le tool placeOrder qui les gère et les inclut dans confirmationMessage.\n\n## Côté PROPRIÉTAIRE (role=owner authentifié seulement)\n7. **Voir commandes** : "mes commandes" / "ventes du jour" → commerceGetOrders.\n8. **Marquer payé** : "marque la commande X comme payée" → commerceMarkOrderPaid.\n9. **Modifier produit** : "augmente prix Chemise 7000", "stock Chemise 10", "supprime Chemise" → utilise commerceUpdateProductPrice / commerceUpdateProductStock / commerceUpdateProductStatus / commerceDeleteProduct selon le cas. NB : ces commandes sont aussi interceptées en amont par parser dédié — tu ne les vois donc que rarement.\n\n## RÈGLES ABSOLUES\n- N\'invente JAMAIS un produit qui n\'existe pas dans la base.\n- N\'invente JAMAIS un prix ou une zone de livraison — utilise les tools.\n- Toute réponse en français ivoirien naturel : "tu" pas "vous" pour les clients ordinaires (sauf très formel), expressions locales OK ("c\'est bon", "on dit quoi").\n- Sois bref. Pas de longs paragraphes. WhatsApp = court et clair.',
+        tools: ['commerceListProducts', 'commercePlaceOrder', 'commerceGetOrders', 'commerceMarkOrderPaid', 'commerceUpdateProductPrice', 'commerceUpdateProductStock', 'commerceUpdateProductStatus', 'commerceDeleteProduct', 'searchDocuments', 'sendEmail'],
+        pricingModel: 'monthly', priceUSD: 20, status: 'approved', color: 'from-emerald-500 to-teal-500' },
 ];
 // ── BUNDLES ──────────────────────────────────────────────────────────────────
-// Single source of truth — 13 bundles aligned with client UI.
-// Each bundle: 4 agents, $20/mo flat (BYOE strategy). Prices are in USD.
-// 3 hero bundles (Entreprise, Restaurant, Immobilier) match the public landing.
+// Single source of truth — bundles aligned with client UI.
+// Each $20 bundle = 4 specialized agents + 3 core agents (Knowledge, Approval, Wildcard)
+// + the Orchestrator (platform-level, always running). 7 agents total per pack.
+// 4 hero bundles (Entreprise, Restaurant, Immobilier, PME) match the public landing.
+//
+// CORE_BUNDLE_AGENTS are auto-merged into every pack. They're transversal:
+//   - knowledge : RAG sur tous les docs / drive / mails de l'entreprise
+//   - approval  : workflows multi-niveaux + audit/compliance
+//   - wildcard  : agent fallback polyvalent pour les questions hors-domaine
+const CORE_BUNDLE_AGENTS = ['knowledge', 'approval', 'wildcard'];
+function withCoreAgents(specialized) {
+    // Dedupe while preserving order: specialized first, then core.
+    const seen = new Set();
+    const out = [];
+    for (const a of [...specialized, ...CORE_BUNDLE_AGENTS]) {
+        if (!seen.has(a)) {
+            seen.add(a);
+            out.push(a);
+        }
+    }
+    return out;
+}
 const BUNDLES = [
     {
         id: 'b1', name: 'Pack Santé', icon: '🏥', color: 'from-red-500 to-pink-500',
         description: 'Dossier patient, formation continue, validation prescriptions et base de connaissances médicale.',
-        agentIds: ['health', 'training', 'approval', 'knowledge'],
+        agentIds: withCoreAgents(['health', 'training']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b2', name: 'Pack Immobilier', icon: '🏠', color: 'from-violet-500 to-indigo-500',
         description: 'Qualification leads, visites virtuelles 360°, réponses WhatsApp et prise de RDV avec accueil.',
-        agentIds: ['real_estate', 'sales', 'comms', 'reception'],
+        agentIds: withCoreAgents(['real_estate', 'sales', 'comms', 'reception']),
         originalPrice: 20, bundlePrice: 20, discount: 0, hero: true,
     },
     {
         id: 'b3', name: 'Pack Artisan', icon: '🛠️', color: 'from-yellow-500 to-amber-500',
         description: 'Menuiserie, dépannage, suivi chantier et comptabilité OHADA. Devis et factures auto.',
-        agentIds: ['carpenter', 'repair', 'btp', 'accounting'],
+        agentIds: withCoreAgents(['carpenter', 'repair', 'btp', 'accounting']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b4', name: 'Pack Agriculture', icon: '🌾', color: 'from-green-500 to-emerald-500',
         description: 'Agronomie, élevage, topographie et comptabilité coopérative. Tout le cycle de la ferme.',
-        agentIds: ['agronome', 'eleveur', 'geometre', 'accounting'],
+        agentIds: withCoreAgents(['agronome', 'eleveur', 'geometre', 'accounting']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b5', name: 'Pack Sécurité Totale', icon: '🛡️', color: 'from-red-600 to-orange-500',
         description: 'Gardes, caméras IA, communications chiffrées et SOC virtuel — protection 360°.',
-        agentIds: ['physical_security', 'surveillance', 'callshield', 'cybersecurity'],
+        agentIds: withCoreAgents(['physical_security', 'surveillance', 'callshield', 'cybersecurity']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b6', name: 'Pack Sécurité Site', icon: '📹', color: 'from-slate-700 to-blue-600',
         description: 'Gardes site, caméra IA, cybersécurité périmétrique et workflows d\'approbation.',
-        agentIds: ['physical_security', 'surveillance', 'cybersecurity', 'approval'],
+        agentIds: withCoreAgents(['physical_security', 'surveillance', 'cybersecurity']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b7', name: 'Pack Restaurant', icon: '🍽️', color: 'from-orange-500 to-red-500',
         description: 'Réservations, livraison, messages clients et campagnes fidélité automatisées.',
-        agentIds: ['restaurant', 'reception', 'delivery', 'loyalty'],
+        agentIds: withCoreAgents(['restaurant', 'reception', 'delivery', 'loyalty']),
         originalPrice: 20, bundlePrice: 20, discount: 0, hero: true,
     },
     {
         id: 'b8', name: 'Pack Mode & Luxe', icon: '👗', color: 'from-pink-500 to-rose-500',
         description: 'Boutique mode : stocks, styliste IA, vente et campagnes marketing — concept stores premium.',
-        agentIds: ['fashion', 'beauty', 'sales', 'marketing'],
+        agentIds: withCoreAgents(['fashion', 'beauty', 'sales', 'marketing']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b9', name: 'Pack Éducation', icon: '🎓', color: 'from-indigo-500 to-blue-500',
         description: 'Enseignement, coaching, validation inscriptions et base de connaissances pédagogique.',
-        agentIds: ['training', 'coach', 'approval', 'knowledge'],
+        agentIds: withCoreAgents(['training', 'coach']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b10', name: 'Pack Entreprise', icon: '🏢', color: 'from-cyan-500 to-blue-500',
-        description: 'Ventes, factures, support et communication interne dans un seul workspace IA.',
-        agentIds: ['sales', 'accounting', 'support', 'comms'],
+        description: 'Ventes, factures, support et communication interne dans un seul workspace IA + Knowledge brain RAG + workflows d\'approbation + agent polyvalent.',
+        agentIds: withCoreAgents(['sales', 'accounting', 'support', 'comms']),
         originalPrice: 20, bundlePrice: 20, discount: 0, hero: true,
     },
     {
         id: 'b11', name: 'Pack Réception', icon: '🚪', color: 'from-cyan-500 to-teal-500',
         description: 'Hub d\'accueil bureau : kiosk avatar IA, badges QR, notifs host multi-canal, livraisons et fidélité visiteurs.',
-        agentIds: ['reception', 'visitor_welcome', 'delivery', 'loyalty'],
+        agentIds: withCoreAgents(['reception', 'visitor_welcome', 'delivery', 'loyalty']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b12', name: 'Pack RH', icon: '👩‍💼', color: 'from-indigo-600 to-violet-500',
         description: 'Effectifs, congés OHADA, paie, performance, onboarding + Coach + Approbation + base de connaissances RH.',
-        agentIds: ['hr', 'coach', 'approval', 'knowledge'],
+        agentIds: withCoreAgents(['hr', 'coach']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
     },
     {
         id: 'b13', name: 'Pack Cybersécurité', icon: '🛡️', color: 'from-red-600 to-rose-500',
         description: 'CISO virtuel + RGPD/ISO/SOC2/NIST + Audit logs exportables + workflows d\'approbation sensibles.',
-        agentIds: ['cybersecurity', 'compliance', 'audit', 'approval'],
+        agentIds: withCoreAgents(['cybersecurity', 'compliance', 'audit']),
         originalPrice: 20, bundlePrice: 20, discount: 0,
+    },
+    {
+        id: 'b15', name: 'Pack PME', icon: '🚀', color: 'from-emerald-500 to-teal-500',
+        description: 'Le pack croissance pour les PME : ventes (CRM, pipeline), comms multi-canal (email/WhatsApp/Telegram), marketing (campagnes, ROI), support (tickets, NPS) + Knowledge + Workflows + Wildcard. Tout pour scaler.',
+        agentIds: withCoreAgents(['sales', 'comms', 'marketing', 'support']),
+        originalPrice: 20, bundlePrice: 20, discount: 0,
+        hero: true, popular: true,
+    },
+    {
+        id: 'b16', name: 'Pack Boutique', icon: '🛒', color: 'from-emerald-500 to-teal-500',
+        description: 'Vends sur WhatsApp avec une photo. Catalogue auto, prise de commandes, paiement cash/Wave, fidélité clients. Idéal commerçants Afrique.',
+        agentIds: withCoreAgents(['commerce', 'sales', 'comms', 'loyalty']),
+        originalPrice: 20, bundlePrice: 20, discount: 0, hero: true,
+    },
+    // Super Pack Enterprise — 10 agents flagship covering ALL key business areas
+    // for medium-to-large companies. Priced at $45/mo vs $60+ if buying 3 packs
+    // separately = 25% discount, plus the value-add of having everything in
+    // one workspace with cross-agent context (Knowledge brain unifies all docs).
+    // BETA: large surface = many places to break. We collect feedback before GA.
+    {
+        id: 'b14', name: 'Super Pack Entreprise', icon: '👑', color: 'from-amber-500 via-orange-500 to-red-500',
+        description: 'La stack complète pour scaler : 8 agents métiers (ventes, marketing, comms, support, compta, RH, accueil, cybersécurité) + Knowledge brain RAG + Workflows d\'approbation + Wildcard polyvalent.',
+        agentIds: withCoreAgents(['sales', 'marketing', 'comms', 'support', 'accounting', 'hr', 'reception', 'cybersecurity']),
+        originalPrice: 60, bundlePrice: 45, discount: 25,
+        hero: true, popular: true, exclusive: true, beta: true,
     },
 ];
 // ── PUBLIC ENDPOINTS ─────────────────────────────────────────────────────────
@@ -638,7 +748,7 @@ router.get('/bundles', (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
         return {
             ...b,
             agents,
-            agentCount: 4,
+            agentCount: b.agentIds.length, // dynamic — 4 for normal packs, 10 for Super Pack
             currency: 'USD',
             period: 'mo',
             byoe: true,
@@ -648,13 +758,75 @@ router.get('/bundles', (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
             rating: avgRating,
             reviews: reviewCount,
             isNew: realInstalls === 0 && reviewCount === 0,
-            savings: 0,
+            savings: (b.originalPrice ?? 0) > (b.bundlePrice ?? 0) ? (b.originalPrice - b.bundlePrice) : 0,
         };
     });
     res.json({ success: true, data: enriched });
 }));
+// ── PUBLIC CRON (header-based auth, no Firebase token) ─────────────────────
+// Must be declared BEFORE router.use(authMiddleware) so Cloud Scheduler can hit it.
+//
+// POST /api/marketplace/cron/expire-trials — called daily.
+// Auth: header `x-cron-secret` must match CRON_SECRET env.
+router.post('/cron/expire-trials', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const expected = process.env['CRON_SECRET'] ?? '';
+    const provided = (req.header('x-cron-secret') ?? '').trim();
+    if (!expected || provided !== expected)
+        throw new error_middleware_1.AppError('Forbidden', 403);
+    const db = (0, firebase_config_1.getFirestore)();
+    const now = new Date();
+    // Pull all trialing payments and filter in memory (avoids Firestore composite index)
+    const snap = await db.collection('marketplacePayments')
+        .where('status', '==', 'trialing')
+        .limit(500).get();
+    const expired = [];
+    for (const doc of snap.docs) {
+        const data = doc.data();
+        const ends = data['trialEndsAt'];
+        const endsMs = ends instanceof Date ? ends.getTime() :
+            typeof ends?.toMillis === 'function' ? ends.toMillis() :
+                typeof ends === 'string' ? new Date(ends).getTime() : 0;
+        if (endsMs > now.getTime())
+            continue;
+        const companyId = data['companyId'];
+        const bundleId = data['bundleId'];
+        if (!companyId || !bundleId)
+            continue;
+        // Mark payment + every installed agent for this trial as expired
+        await doc.ref.update({ status: 'expired', expiredAt: now });
+        const agentSnap = await db.collection(`companies/${companyId}/installedAgents`)
+            .where('paymentId', '==', data['paymentId'])
+            .limit(20).get();
+        for (const a of agentSnap.docs) {
+            await a.ref.update({ status: 'expired', expiredAt: now });
+        }
+        (0, marketplaceAgentService_1.invalidateAgentCache)(companyId);
+        expired.push(`${companyId}/${bundleId}`);
+    }
+    logger_1.logger.info('[Marketplace] Trials expired', { count: expired.length });
+    res.json({ success: true, data: { expired: expired.length } });
+}));
 // ── PROTECTED ENDPOINTS ──────────────────────────────────────────────────────
 router.use(auth_middleware_1.authMiddleware);
+// POST /api/marketplace/waitlist — capture interest for a feature that is not GA yet.
+// Stored at companies/{cid}/waitlist/{feature} so we can ping owners when the feature ships.
+router.post('/waitlist', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    if (!companyId)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    const feature = String(req.body?.feature || '').trim().toLowerCase();
+    if (!feature)
+        throw new error_middleware_1.AppError('feature required', 400);
+    const db = (0, firebase_config_1.getFirestore)();
+    await db.doc(`companies/${companyId}/waitlist/${feature}`).set({
+        feature,
+        companyId,
+        userId: req.user?.uid || null,
+        email: req.user?.email || null,
+        createdAt: new Date(),
+    }, { merge: true });
+    res.json({ success: true });
+}));
 // GET /api/marketplace/my-installed
 router.get('/my-installed', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const companyId = req.user?.companyId;
@@ -667,6 +839,83 @@ router.get('/my-installed', (0, asyncHandler_1.asyncHandler)(async (req, res) =>
     }
     catch {
         res.json({ success: true, data: [] });
+    }
+}));
+// GET /api/marketplace/my-subscriptions — active pack + agent subscriptions for the billing page
+// Groups installed agents by their bundleId (so the user sees "Pack X — $20/mo" not 4 rows)
+// Returns: [{ type: 'bundle'|'agent', id, name, priceUSD, agentCount, agents, paymentId, installedAt, status }]
+router.get('/my-subscriptions', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    if (!companyId)
+        throw new error_middleware_1.AppError('Company ID required', 400);
+    try {
+        const db = (0, firebase_config_1.getFirestore)();
+        const installedSnap = await db.collection(`companies/${companyId}/installedAgents`).limit(200).get();
+        const installed = installedSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Group by bundleId (when present). Standalone agents (no bundleId) become individual entries.
+        const bundleGroups = new Map();
+        const standalone = [];
+        for (const a of installed) {
+            if (a.bundleId) {
+                const list = bundleGroups.get(a.bundleId) ?? [];
+                list.push(a);
+                bundleGroups.set(a.bundleId, list);
+            }
+            else {
+                standalone.push(a);
+            }
+        }
+        const subscriptions = [];
+        // Bundles (each group → 1 subscription row)
+        for (const [bid, agents] of bundleGroups) {
+            const bundle = BUNDLES.find(b => b.id === bid);
+            const installedAt = agents
+                .map(a => a.installedAt?.toDate?.()?.getTime() ?? 0)
+                .reduce((a, b) => Math.max(a, b), 0);
+            subscriptions.push({
+                type: 'bundle',
+                id: bid,
+                name: bundle?.name ?? `Pack ${bid}`,
+                icon: bundle?.icon ?? '📦',
+                priceUSD: bundle?.bundlePrice ?? 20,
+                originalPrice: bundle?.originalPrice ?? bundle?.bundlePrice ?? 20,
+                period: 'mo',
+                agentCount: agents.length,
+                agents: agents.map(a => ({ id: a.agentId, name: a.cachedConfig?.name ?? a.agentId })),
+                paymentId: agents[0]?.paymentId ?? null,
+                installedAt: installedAt || null,
+                status: agents[0]?.status ?? 'active',
+                beta: !!bundle?.beta,
+            });
+        }
+        // Standalone agents
+        for (const a of standalone) {
+            subscriptions.push({
+                type: 'agent',
+                id: a.agentId,
+                name: a.cachedConfig?.name ?? a.agentId,
+                priceUSD: 5,
+                period: 'mo',
+                paymentId: a.paymentId ?? null,
+                installedAt: a.installedAt?.toDate?.()?.getTime() ?? null,
+                status: a.status ?? 'active',
+            });
+        }
+        // Sort: bundles first (alphabetical), then agents
+        subscriptions.sort((x, y) => {
+            if (x['type'] !== y['type'])
+                return x['type'] === 'bundle' ? -1 : 1;
+            return String(x['name']).localeCompare(String(y['name']));
+        });
+        const totalMonthly = subscriptions.reduce((sum, s) => sum + (Number(s['priceUSD']) || 0), 0);
+        res.json({
+            success: true,
+            data: { subscriptions, totalMonthly, currency: 'USD', count: subscriptions.length },
+        });
+    }
+    catch (err) {
+        logger_1.logger.warn('[Marketplace] my-subscriptions failed', { error: err });
+        res.json({ success: true, data: { subscriptions: [], totalMonthly: 0, currency: 'USD', count: 0 } });
     }
 }));
 // POST /api/marketplace/agents/:id/install
@@ -693,14 +942,9 @@ router.post('/agents/:id/install', (0, asyncHandler_1.asyncHandler)(async (req, 
         if (priceUSD > 0) {
             throw new error_middleware_1.AppError('Paid agent — use checkout endpoint', 400);
         }
-        // Rule 2: Even "free" marketplace agents require a paid plan.
-        //         Free plan users cannot install marketplace agents at all.
-        const companyDoc = await db.collection('companies').doc(companyId).get();
-        const plan = (companyDoc.data()?.['plan'] ?? 'free').toLowerCase();
-        const paidPlans = ['creator', 'starter', 'pro', 'premium', 'business', 'enterprise'];
-        if (!paidPlans.includes(plan)) {
-            throw new error_middleware_1.AppError('Le marketplace est reserve aux plans payants. Passez a Starter ou superieur pour installer des agents.', 402);
-        }
+        // Rule 2: Free agents (priceUSD === 0) installable by anyone — no plan gate.
+        // The new pack model has no "free vs paid plan" anymore; every account can
+        // install free agents like Welcome. Paid agents require checkout (Rule 1).
     }
     // Check if already installed
     const existing = await db.collection(`companies/${companyId}/installedAgents`).doc(req.params.id).get();
@@ -979,8 +1223,24 @@ router.post('/bundles/confirm', (0, asyncHandler_1.asyncHandler)(async (req, res
     const companyId = payment['companyId'];
     const agentIds = payment['agentIds'] ?? [];
     await db.collection('marketplacePayments').doc(paymentId).update({ status: 'completed', completedAt: new Date() });
-    // Install all agents in the bundle
+    // Install all agents in the bundle.
+    // For agents already installed (e.g. core agents from another pack), upgrade
+    // them to 'active' (paid) — never downgrade. This prevents losing access
+    // when a paid pack is added on top of a trial.
     for (const agentId of agentIds) {
+        const existingInstall = await db.collection(`companies/${companyId}/installedAgents`).doc(agentId).get();
+        if (existingInstall.exists) {
+            const data = existingInstall.data();
+            if (data['status'] !== 'active') {
+                // Upgrade trialing/expired → active (this paid pack now owns the agent)
+                await existingInstall.ref.update({
+                    status: 'active', pricingModel: 'bundle',
+                    paymentId, bundleId: payment['bundleId'],
+                    upgradedAt: new Date(),
+                });
+            }
+            continue;
+        }
         const agentDoc = await db.collection('marketplaceAgents').doc(agentId).get();
         if (!agentDoc.exists)
             continue;
@@ -1001,6 +1261,89 @@ router.post('/bundles/confirm', (0, asyncHandler_1.asyncHandler)(async (req, res
     (0, marketplaceAgentService_1.invalidateAgentCache)(companyId);
     res.json({ success: true, data: { installed: agentIds.length } });
 }));
+// ── FREE TRIAL — 30 days, no card required ──────────────────────────────────
+// POST /api/marketplace/bundles/:bundleId/start-trial
+// Acquisition lever: lets African PMEs install a pack without entering a card.
+// After 30 days the agents flip to status='expired' (cron) until the company
+// completes a real Stripe checkout via /bundles/checkout.
+const TRIAL_DAYS = 30;
+router.post('/bundles/:bundleId/start-trial', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    if (!companyId)
+        throw new error_middleware_1.AppError('Auth required', 401);
+    const { bundleId } = req.params;
+    const bundle = BUNDLES.find(b => b.id === bundleId);
+    if (!bundle)
+        throw new error_middleware_1.AppError(`Bundle ${bundleId} not found`, 404);
+    const db = (0, firebase_config_1.getFirestore)();
+    // One trial per (company, bundle) — a bundle in active/trialing/expired state blocks re-trial.
+    const existing = await db.collection('marketplacePayments')
+        .where('companyId', '==', companyId)
+        .where('bundleId', '==', bundleId)
+        .limit(5).get();
+    const blocking = existing.docs.find(d => {
+        const s = d.data()['status'];
+        return s === 'trialing' || s === 'completed' || s === 'expired';
+    });
+    if (blocking) {
+        const status = blocking.data()['status'];
+        throw new error_middleware_1.AppError(status === 'trialing' ? 'Trial déjà actif sur ce pack.' :
+            status === 'expired' ? 'Le trial gratuit a déjà été utilisé sur ce pack — passe à l\'abonnement payant.' :
+                'Tu as déjà ce pack — pas besoin de trial.', 409);
+    }
+    const now = new Date();
+    const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 3600 * 1000);
+    const paymentId = `trial_${bundleId}_${Date.now()}`;
+    await db.collection('marketplacePayments').doc(paymentId).set({
+        paymentId, companyId, bundleId, bundleName: bundle.name,
+        amountUSD: 0, currency: 'USD', method: 'trial',
+        status: 'trialing', startedAt: now, trialEndsAt,
+    });
+    // Install every agent in the bundle as 'trialing'.
+    // SKIP-IF-INSTALLED: if the user already has the agent (from another pack —
+    // common for core agents like knowledge/approval/wildcard), don't overwrite.
+    // This way, expiring this trial doesn't break access from other packs.
+    const agentIds = bundle.agentIds;
+    let installed = 0;
+    let skipped = 0;
+    for (const agentId of agentIds) {
+        const existingInstall = await db.collection(`companies/${companyId}/installedAgents`).doc(agentId).get();
+        if (existingInstall.exists) {
+            skipped++;
+            continue;
+        }
+        const agentDoc = await db.collection('marketplaceAgents').doc(agentId).get();
+        if (!agentDoc.exists)
+            continue;
+        const agent = agentDoc.data();
+        await db.collection(`companies/${companyId}/installedAgents`).doc(agentId).set({
+            agentId, installedAt: now, status: 'trialing', trialEndsAt,
+            pricingModel: 'trial', paymentId, bundleId,
+            cachedConfig: {
+                name: agent['name'], systemPrompt: agent['systemPrompt'] ?? '',
+                tools: agent['tools'] ?? [], temperature: agent['temperature'] ?? 0.4,
+                model: agent['model'] ?? 'flash',
+            },
+        });
+        installed++;
+        await db.collection('marketplaceAgents').doc(agentId).update({
+            installCount: (agent['installCount'] ?? 0) + 1,
+        }).catch(() => { });
+    }
+    (0, marketplaceAgentService_1.invalidateAgentCache)(companyId);
+    logger_1.logger.info('[Marketplace] Trial started', { companyId, bundleId, installed, trialEndsAt: trialEndsAt.toISOString() });
+    res.json({
+        success: true,
+        data: {
+            paymentId, bundleId, bundleName: bundle.name,
+            installedAgents: installed,
+            skippedAgents: skipped,
+            trialEndsAt: trialEndsAt.toISOString(),
+            daysRemaining: TRIAL_DAYS,
+        },
+    });
+}));
+// (cron route moved above the authMiddleware barrier — see "PUBLIC CRON" block)
 // ── WORK ITEMS FEED ─────────────────────────────────────────────────────────
 // GET /api/marketplace/work-items — activity feed
 router.get('/work-items', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -1243,28 +1586,84 @@ router.post('/agents/:id/checkout', (0, asyncHandler_1.asyncHandler)(async (req,
     }
 }));
 // POST /api/marketplace/webhook/stripe — Stripe webhook for marketplace payments
+// Handles BOTH single-agent and bundle subscriptions. Metadata format from checkout:
+//   single-agent : { paymentId, companyId, agentId }
+//   bundle       : { paymentId, companyId, bundleId, agentIds: 'id1,id2,id3,id4' }
+// SECURITY: webhook signature verification — Stripe lets anyone POST to a public
+// URL, so without `constructEvent` an attacker can fake `checkout.session.completed`
+// and install paid bundles for free. The body must be the RAW bytes (not parsed JSON);
+// we get them via express.raw() at app.ts mount time. We fall back to JSON only when
+// the secret is missing locally (dev mode), and log a loud warning.
 router.post('/webhook/stripe', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    const event = req.body;
-    const type = event['type'];
-    if (type === 'checkout.session.completed' || type === 'invoice.paid') {
-        const session = event['data']?.['object'];
-        const metadata = (session?.['metadata'] ?? {});
-        const { paymentId, companyId, agentId } = metadata;
-        if (!paymentId || !companyId || !agentId) {
-            res.status(200).send('OK');
+    const STRIPE_WEBHOOK_SECRET = process.env['STRIPE_WEBHOOK_SECRET'] ?? '';
+    let event;
+    if (STRIPE_WEBHOOK_SECRET) {
+        const sig = req.header('stripe-signature') ?? '';
+        if (!sig) {
+            logger_1.logger.warn('[Marketplace] Stripe webhook rejected — missing stripe-signature header');
+            res.status(400).send('Missing signature');
             return;
         }
-        const db = (0, firebase_config_1.getFirestore)();
-        await db.collection('marketplacePayments').doc(paymentId).update({
-            status: 'completed', completedAt: new Date(),
-        });
-        // Auto-install agent after payment
-        const agentDoc = await db.collection('marketplaceAgents').doc(agentId).get();
-        if (agentDoc.exists) {
+        try {
+            const Stripe = (await Promise.resolve().then(() => __importStar(require('stripe')))).default;
+            const stripeClient = new Stripe(process.env['STRIPE_SECRET_KEY'] ?? '');
+            // Raw body — must match the bytes Stripe signed
+            const rawBody = req.rawBody ?? req.body;
+            event = stripeClient.webhooks.constructEvent(rawBody, sig, STRIPE_WEBHOOK_SECRET);
+        }
+        catch (err) {
+            logger_1.logger.error('[Marketplace] Stripe webhook signature verification failed', { error: String(err) });
+            res.status(400).send('Invalid signature');
+            return;
+        }
+    }
+    else {
+        // No secret configured — refuse the call rather than trust the body.
+        logger_1.logger.error('[Marketplace] STRIPE_WEBHOOK_SECRET not configured — webhook rejected');
+        res.status(503).send('Webhook not configured');
+        return;
+    }
+    const type = event['type'];
+    if (type !== 'checkout.session.completed' && type !== 'invoice.paid') {
+        res.status(200).send('OK');
+        return;
+    }
+    const session = event['data']?.['object'];
+    const metadata = (session?.['metadata'] ?? {});
+    const { paymentId, companyId, agentId, bundleId, agentIds } = metadata;
+    if (!paymentId || !companyId) {
+        logger_1.logger.warn('[Marketplace] Stripe webhook missing paymentId/companyId in metadata', { metadata });
+        res.status(200).send('OK');
+        return;
+    }
+    const db = (0, firebase_config_1.getFirestore)();
+    await db.collection('marketplacePayments').doc(paymentId).update({
+        status: 'completed', completedAt: new Date(),
+        stripeSubscriptionId: session?.['subscription'] ?? null,
+    });
+    // Resolve list of agent ids to install — either bundle's list or single agent.
+    const idsToInstall = bundleId && agentIds
+        ? agentIds.split(',').map(s => s.trim()).filter(Boolean)
+        : (agentId ? [agentId] : []);
+    if (idsToInstall.length === 0) {
+        logger_1.logger.warn('[Marketplace] Stripe webhook: no agent ids to install', { paymentId, metadata });
+        res.status(200).send('OK');
+        return;
+    }
+    // Install each agent. Done sequentially to avoid Firestore contention on
+    // the same companyId doc and to log a clear audit trail.
+    for (const id of idsToInstall) {
+        try {
+            const agentDoc = await db.collection('marketplaceAgents').doc(id).get();
+            if (!agentDoc.exists) {
+                logger_1.logger.warn(`[Marketplace] Agent ${id} not found during webhook install`, { paymentId });
+                continue;
+            }
             const agent = agentDoc.data();
-            await db.collection(`companies/${companyId}/installedAgents`).doc(agentId).set({
-                agentId, installedAt: new Date(), status: 'active',
+            await db.collection(`companies/${companyId}/installedAgents`).doc(id).set({
+                agentId: id, installedAt: new Date(), status: 'active',
                 pricingModel: agent['pricingModel'], paymentId,
+                bundleId: bundleId ?? null,
                 cachedConfig: {
                     name: agent['name'], systemPrompt: agent['systemPrompt'] ?? '',
                     tools: agent['tools'] ?? [], temperature: agent['temperature'] ?? 0.4,
@@ -1272,15 +1671,32 @@ router.post('/webhook/stripe', (0, asyncHandler_1.asyncHandler)(async (req, res)
                 },
             });
             (0, marketplaceAgentService_1.invalidateAgentCache)(companyId);
-            await db.collection('marketplaceAgents').doc(agentId).update({
+            await db.collection('marketplaceAgents').doc(id).update({
                 installCount: (agent['installCount'] ?? 0) + 1,
             }).catch(() => { });
         }
+        catch (err) {
+            logger_1.logger.error(`[Marketplace] Failed to install ${id} after Stripe payment`, { error: err, paymentId });
+        }
     }
+    logger_1.logger.info('[Marketplace] Stripe payment completed', {
+        paymentId, companyId, bundleId: bundleId ?? null, agentsInstalled: idsToInstall.length,
+    });
     res.status(200).send('OK');
 }));
 // POST /api/marketplace/webhook/wave — Wave webhook for marketplace payments
+// SECURITY: Wave's HMAC signature header isn't standardized like Stripe's; we
+// gate the endpoint with a shared secret in the URL (?secret=) — same pattern as
+// `orders.routes.ts:120`. Without this, an attacker who guesses a paymentId can
+// flip status to 'completed' and free-install the bundle.
 router.post('/webhook/wave', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const expected = process.env['CRON_SECRET'] ?? '';
+    const provided = (req.query['secret'] ?? '').trim();
+    if (!expected || provided !== expected) {
+        logger_1.logger.warn('[Marketplace] Wave webhook rejected — invalid or missing ?secret');
+        res.status(403).send('Forbidden');
+        return;
+    }
     const body = req.body;
     const data = (body['data'] ?? {});
     const clientReference = data['client_reference'];

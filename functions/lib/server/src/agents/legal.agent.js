@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.legalAgentTool = exports.legalAgentFlow = exports.getAllCompanyContractsTool = exports.legalAutomationTool = exports.contractTemplatesTool = exports.caseTimelineTool = exports.contractRiskScoringTool = exports.markSignedTool = exports.sendForSignatureTool = exports.getStatsTool = exports.getClausesTool = exports.checkComplianceTool = exports.createDeadlineTool = exports.getDeadlinesTool = exports.getCasesTool = exports.createCaseTool = exports.compareContractsTool = exports.generateContractTool = exports.analyzeContractTool = void 0;
+exports.legalAgentTool = exports.legalAgentFlow = exports.getAllCompanyContractsTool = exports.legalAutomationTool = exports.contractTemplatesTool = exports.caseTimelineTool = exports.contractRiskScoringTool = exports.markSignedTool = exports.emailContractForSignatureTool = exports.sendForSignatureTool = exports.getStatsTool = exports.getClausesTool = exports.checkComplianceTool = exports.createDeadlineTool = exports.getDeadlinesTool = exports.getCasesTool = exports.createCaseTool = exports.compareContractsTool = exports.generateContractTool = exports.analyzeContractTool = void 0;
+exports.renderSignedConfirmationEmail = renderSignedConfirmationEmail;
 /**
  * Legal Agent PRO — Gemini Flash
  * Mission : Proteger l'entreprise, zero deadline manquee, conformite totale.
@@ -297,7 +298,7 @@ exports.getStatsTool = genkit_config_1.ai.defineTool({
 // ══════════════════════════════════════════════════════════════════════════════
 exports.sendForSignatureTool = genkit_config_1.ai.defineTool({
     name: 'leg_sendForSignature',
-    description: 'Send a contract for signature to the counterparty.',
+    description: 'Internal status update for a contract previously created in legalContracts. Use only when the contract was already sent through another channel and you just need to flag the DB status. For ACTUAL email sending with e-signature, use leg_emailContractForSignature instead.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), contractId: zod_1.z.string(), email: zod_1.z.string().optional() }),
     outputSchema: zod_1.z.object({ success: zod_1.z.boolean(), message: zod_1.z.string() }),
 }, async ({ companyId, contractId, email }) => {
@@ -314,6 +315,280 @@ exports.sendForSignatureTool = genkit_config_1.ai.defineTool({
     });
     return { success: true, message: `Contrat ${data['contractNumber']} envoye pour signature a ${to}.` };
 });
+// ── PRIMARY contract-sending tool — generates + emails via Wemas ───────────
+// This is what the agent should reach for whenever the user asks to
+// "envoyer / emailer / send" a contract. It generates the body via Gemini,
+// pushes it through Wemas (which produces a signing URL + sends the
+// recipient an e-signature email), and caches the result locally.
+exports.emailContractForSignatureTool = genkit_config_1.ai.defineTool({
+    name: 'leg_emailContractForSignature',
+    description: 'Generate a contract AND email it for e-signature in one step. USE THIS whenever the user asks to "envoyer / send / email" a contract to someone. The recipient receives a Wemas e-signature link by email. Returns the contractId, signingUrl, and confirmation message.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        contractType: zod_1.z.enum(['nda', 'employment', 'service', 'supplier', 'partnership', 'freelance', 'cdi', 'cdd', 'prestation_services'])
+            .describe('Type of contract. "freelance" for freelance/independent contractor, "nda" for confidentiality, "service"/"prestation_services" for service agreements.'),
+        partyA: zod_1.z.string().describe('Sender / company name (the one sending the contract)'),
+        partyB: zod_1.z.string().describe('Recipient name (the person who will receive and sign)'),
+        signatoryEmail: zod_1.z.string().describe('Email address of the recipient (where the signing link will be sent)'),
+        signatoryPhone: zod_1.z.string().optional().describe('Optional WhatsApp phone in E.164 format (e.g. "+12038097112"). When provided, the signing link is also sent via WhatsApp.'),
+        duration: zod_1.z.string().optional().describe('Contract duration (e.g. "6 months", "1 year")'),
+        customClauses: zod_1.z.string().optional().describe('Any specific clauses to include beyond the standard ones'),
+        senderName: zod_1.z.string().optional().describe('Name of the sender for the email signature'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        contractId: zod_1.z.string().optional(),
+        signingUrl: zod_1.z.string().optional(),
+        message: zod_1.z.string(),
+    }),
+}, async ({ companyId, contractType, partyA, partyB, signatoryEmail, signatoryPhone, duration, customClauses, senderName }) => {
+    // 1. Generate the contract body via Gemini
+    let contractContent;
+    try {
+        const { text } = await genkit_config_1.ai.generate({
+            model: genkit_config_1.GEMINI_FLASH,
+            prompt: `Tu rédiges un contrat de type "${contractType}" en français entre "${partyA}" (Partie A) et "${partyB}" (Partie B).${duration ? `\n\nDurée du contrat : ${duration}.` : ''}${customClauses ? `\n\nClauses spécifiques à inclure : ${customClauses}` : ''}
+
+Inclus toutes les clauses standards : identification des parties, objet du contrat, obligations de chaque partie, durée et conditions de résiliation, modalités de paiement (si applicable), confidentialité, propriété intellectuelle (si applicable), juridiction et droit applicable.
+
+Format : markdown avec titres (##) et sous-titres (###). Aucun placeholder à remplir — utilise des valeurs réalistes et professionnelles. Ton sobre et juridique. Ne mets pas de disclaimer IA — c'est le corps du contrat qui sera signé.`,
+            config: { temperature: 0.3 },
+        });
+        contractContent = text;
+        if (!contractContent || contractContent.trim().length < 200) {
+            return { success: false, message: 'La génération du contrat a échoué (contenu trop court). Réessaie.' };
+        }
+    }
+    catch (err) {
+        logger_1.logger.error('[Legal] Contract generation failed', { error: String(err) });
+        return { success: false, message: `Génération du contrat impossible: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    // 2. Create contract natively in Orlode (Firestore) — no external bridge
+    const { wemasService } = await Promise.resolve().then(() => __importStar(require('../services/wemas/wemasService')));
+    const ctype = ({
+        nda: 'nda',
+        employment: 'cdi',
+        service: 'prestation_services',
+        supplier: 'prestation_services',
+        partnership: 'prestation_services',
+        freelance: 'freelance',
+        cdi: 'cdi',
+        cdd: 'cdd',
+        prestation_services: 'prestation_services',
+    }[contractType]) ?? 'prestation_services';
+    let contract;
+    try {
+        contract = await wemasService.createContract({
+            companyId,
+            signatoryName: partyB,
+            signatoryEmail,
+            signatoryPhone,
+            contractContent,
+            contractType: ctype,
+            mainContractType: ctype === 'nda' || ctype === 'prestation_services' ? 'standard' : 'standard',
+            senderName: senderName ?? partyA,
+            expiresInDays: 30,
+            status: 'pending_signature',
+            tags: [contractType],
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[Legal] Native createContract failed', { error: String(err) });
+        return {
+            success: false,
+            message: `Création du contrat impossible : ${err instanceof Error ? err.message : 'erreur inconnue'}.`,
+        };
+    }
+    // 3. Build the signing URL pointing to Orlode's public sign page
+    const PUBLIC_APP_URL = process.env['PUBLIC_APP_URL'] ?? 'https://mon-assistant-86bbd.web.app';
+    const signingUrl = `${PUBLIC_APP_URL}/sign/${contract.uniqueLink}`;
+    // 4. Send the signing email via the unified email service
+    try {
+        const { sendEmail } = await Promise.resolve().then(() => __importStar(require('../services/email/emailService')));
+        const firstName = partyB.split(/\s+/)[0] ?? partyB;
+        const senderLabel = senderName ?? partyA;
+        const html = renderSigningEmail({
+            firstName, signatoryName: partyB, contractType,
+            senderName: senderLabel, signingUrl,
+        });
+        const result = await sendEmail({
+            companyId,
+            to: signatoryEmail,
+            subject: `${senderLabel} vous demande votre signature — ${contractType}`,
+            html,
+        });
+        logger_1.logger.info('[Legal] Signing email sent', {
+            companyId, contractId: contract.id, to: signatoryEmail, provider: result.provider,
+        });
+    }
+    catch (err) {
+        // Email failed but contract is saved — surface the error so the agent
+        // doesn't lie. Caller can retry by re-using contract.uniqueLink.
+        logger_1.logger.error('[Legal] Signing email send failed', { error: String(err) });
+        return {
+            success: false,
+            contractId: contract.id,
+            signingUrl,
+            message: `Contrat créé mais l'email n'a pas pu être envoyé. Tu peux partager ce lien manuellement : [${signingUrl}](${signingUrl})`,
+        };
+    }
+    // 5. Optional WhatsApp send — fire-and-forget, doesn't block success
+    let whatsappSent = false;
+    if (signatoryPhone) {
+        try {
+            const { whatsappService } = await Promise.resolve().then(() => __importStar(require('../services/whatsapp/whatsappService')));
+            const cfg = await whatsappService.getConfig(companyId);
+            if (cfg) {
+                const senderLabel = senderName ?? partyA;
+                const firstName = partyB.split(/\s+/)[0] ?? partyB;
+                const waMsg = `Bonjour ${firstName} 👋\n\n*${senderLabel}* vous demande de signer un contrat ${contractType}.\n\n📝 Lire et signer ici :\n${signingUrl}\n\n_Lien valable 30 jours · Signature électronique sécurisée_`;
+                const id = await whatsappService.sendMessage(cfg, signatoryPhone, waMsg);
+                if (id) {
+                    whatsappSent = true;
+                    logger_1.logger.info('[Legal] Signing WhatsApp sent', { companyId, contractId: contract.id, to: signatoryPhone });
+                }
+            }
+            else {
+                logger_1.logger.warn('[Legal] WhatsApp not configured, skipping WhatsApp send', { companyId });
+            }
+        }
+        catch (err) {
+            logger_1.logger.warn('[Legal] WhatsApp send failed (non-blocking)', { error: String(err) });
+        }
+    }
+    const channels = ['email' + (whatsappSent ? ' + WhatsApp' : '')];
+    return {
+        success: true,
+        contractId: contract.id,
+        signingUrl,
+        message: `Contrat ${contractType} envoyé à ${signatoryEmail} (${channels.join(' & ')}) pour signature électronique. [Lire et signer le contrat](${signingUrl})`,
+    };
+});
+function renderSigningEmail(v) {
+    const orgColor = '#0A4F3C';
+    const typeLabel = {
+        nda: 'Accord de confidentialité',
+        employment: 'Contrat de travail',
+        service: 'Contrat de prestation',
+        supplier: 'Contrat fournisseur',
+        partnership: 'Accord de partenariat',
+        freelance: 'Contrat freelance',
+        cdi: 'CDI',
+        cdd: 'CDD',
+        prestation_services: 'Contrat de prestation',
+    }[v.contractType] ?? 'Contrat';
+    return `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><title>${typeLabel} — Signature requise</title></head>
+<body style="margin:0;padding:0;background-color:#f0fdf4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0fdf4;padding:48px 16px;">
+  <tr><td align="center">
+    <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background-color:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.10);">
+      <tr><td style="background:${orgColor};padding:52px 40px 44px;text-align:center;">
+        <div style="display:inline-block;background:rgba(255,255,255,0.18);border-radius:50%;width:72px;height:72px;line-height:72px;text-align:center;margin-bottom:20px;">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-top:18px;"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
+        </div>
+        <h1 style="color:white;margin:0 0 8px 0;font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1.15;">Signature requise</h1>
+        <p style="color:rgba(255,255,255,0.90);margin:0;font-size:15px;">${typeLabel}</p>
+      </td></tr>
+      <tr><td style="padding:40px 40px 0;">
+        <p style="color:#111827;font-size:18px;font-weight:600;margin:0 0 8px 0;">Bonjour ${v.firstName},</p>
+        <p style="color:#4b5563;font-size:15px;line-height:1.7;margin:0 0 20px 0;"><strong>${v.senderName}</strong> vous demande de signer un ${typeLabel.toLowerCase()}. Ouvrez le lien ci-dessous pour le lire et le signer électroniquement.</p>
+      </td></tr>
+      <tr><td style="padding:8px 40px 0;text-align:center;">
+        <a href="${v.signingUrl}" style="display:inline-block;background:${orgColor};color:white;padding:16px 44px;text-decoration:none;border-radius:14px;font-weight:700;font-size:15px;box-shadow:0 4px 16px rgba(10,79,60,0.30);">Lire et signer le contrat</a>
+        <p style="color:#9ca3af;font-size:12px;margin:14px 0 0 0;">Ou copiez ce lien dans votre navigateur :<br><span style="color:#6b7280;font-size:11px;word-break:break-all;">${v.signingUrl}</span></p>
+      </td></tr>
+      <tr><td style="padding:32px 40px 40px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border-radius:12px;border:1px solid #fde68a;">
+          <tr><td style="padding:18px 22px;">
+            <p style="color:#92400e;font-size:13px;font-weight:700;margin:0 0 5px 0;">Signature électronique sécurisée</p>
+            <p style="color:#78350f;font-size:12px;line-height:1.6;margin:0;">Lien valable 30 jours. Votre signature est horodatée et conservée comme preuve légale. Une copie de confirmation vous sera envoyée après signature.</p>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="background:#f9fafb;padding:24px 40px;text-align:center;border-top:1px solid #f3f4f6;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;">Powered by Orlode &mdash; Email automatique, merci de ne pas répondre.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+}
+function renderSignedConfirmationEmail(v) {
+    const orgColor = '#0A4F3C';
+    const typeLabel = {
+        nda: 'Accord de confidentialité',
+        cdi: 'CDI',
+        cdd: 'CDD',
+        freelance: 'Contrat freelance',
+        prestation_services: 'Contrat de prestation',
+    }[v.contractType] ?? 'Contrat';
+    const signedDate = new Date(v.signedAt);
+    const formattedDate = signedDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+    const formattedTime = signedDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const preview = v.contractContent.slice(0, 1200) + (v.contractContent.length > 1200 ? '...' : '');
+    return `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><title>Contrat signé</title></head>
+<body style="margin:0;padding:0;background-color:#f0fdf4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0fdf4;padding:48px 16px;">
+  <tr><td align="center">
+    <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background-color:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.10);">
+      <tr><td style="background:${orgColor};padding:52px 40px 44px;text-align:center;">
+        <div style="display:inline-block;background:rgba(255,255,255,0.18);border-radius:50%;width:72px;height:72px;line-height:72px;text-align:center;margin-bottom:20px;">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-top:18px;"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <h1 style="color:white;margin:0 0 8px 0;font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1.15;">Contrat signé avec succès</h1>
+        <p style="color:rgba(255,255,255,0.90);margin:0;font-size:15px;">${typeLabel}</p>
+      </td></tr>
+      <tr><td style="padding:40px 40px 0;">
+        <p style="color:#111827;font-size:18px;font-weight:600;margin:0 0 8px 0;">Bonjour ${v.signatoryName.split(/\s+/)[0]},</p>
+        <p style="color:#6b7280;font-size:15px;line-height:1.7;margin:0;">Votre contrat avec <strong>${v.senderName}</strong> a été signé électroniquement. Conservez cet email comme preuve légale.</p>
+      </td></tr>
+      <tr><td style="padding:24px 40px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border-radius:16px;border:1px solid #d1fae5;"><tr><td style="padding:24px 28px;">
+          <p style="color:#065f46;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 16px 0;">Signature</p>
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr><td style="padding:7px 0;border-bottom:1px solid #d1fae5;"><table width="100%"><tr><td style="color:#6b7280;font-size:13px;">Signataire</td><td style="color:#111827;font-size:13px;font-weight:700;text-align:right;">${v.signatoryName}</td></tr></table></td></tr>
+            <tr><td style="padding:7px 0;border-bottom:1px solid #d1fae5;"><table width="100%"><tr><td style="color:#6b7280;font-size:13px;">Email</td><td style="color:#111827;font-size:13px;font-weight:700;text-align:right;">${v.signatoryEmail}</td></tr></table></td></tr>
+            <tr><td style="padding:7px 0;border-bottom:1px solid #d1fae5;"><table width="100%"><tr><td style="color:#6b7280;font-size:13px;">Date</td><td style="color:#111827;font-size:13px;font-weight:700;text-align:right;">${formattedDate}</td></tr></table></td></tr>
+            <tr><td style="padding:7px 0;"><table width="100%"><tr><td style="color:#6b7280;font-size:13px;">Heure</td><td style="color:#111827;font-size:13px;font-weight:700;text-align:right;">${formattedTime}</td></tr></table></td></tr>
+          </table>
+        </td></tr></table>
+      </td></tr>
+      <tr><td style="padding:24px 40px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #6ee7b7;border-radius:12px;overflow:hidden;background:#f0fdf4;">
+          <tr><td style="background:#d1fae5;padding:10px 16px;"><p style="color:#065f46;font-size:11px;font-weight:700;text-transform:uppercase;margin:0;">Signature de ${v.signatoryName}</p></td></tr>
+          <tr><td style="padding:16px;text-align:center;background:white;">
+            <div style="background:white;border:1px dashed #10b981;border-radius:8px;padding:12px;">
+              <img src="${v.signatureData}" alt="Signature" style="max-width:100%;max-height:70px;display:block;margin:0 auto;" />
+            </div>
+            <p style="color:#047857;font-size:12px;font-weight:600;margin:8px 0 0 0;">${v.signatoryName} &mdash; ${formattedDate} ${formattedTime}</p>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:24px 40px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;">
+          <tr><td style="background:#f9fafb;padding:16px 24px;border-bottom:1px solid #e5e7eb;"><p style="color:#374151;font-size:12px;font-weight:700;margin:0;">Extrait du contrat</p></td></tr>
+          <tr><td style="padding:24px;background:white;"><div style="color:#4b5563;font-size:13px;line-height:1.9;white-space:pre-wrap;font-family:Georgia,'Times New Roman',serif;">${preview.replace(/[<>&]/g, c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;')}</div></td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:32px 40px 0;text-align:center;">
+        <a href="${v.contractLink}" style="display:inline-block;background:${orgColor};color:white;padding:16px 44px;text-decoration:none;border-radius:14px;font-weight:700;font-size:15px;">Consulter mon contrat signé</a>
+      </td></tr>
+      <tr><td style="padding:24px 40px 40px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border-radius:12px;border:1px solid #fde68a;"><tr><td style="padding:18px 22px;">
+          <p style="color:#92400e;font-size:13px;font-weight:700;margin:0 0 5px 0;">Conservez cet email</p>
+          <p style="color:#78350f;font-size:12px;line-height:1.6;margin:0;">Ce document constitue une preuve légale de votre engagement contractuel.</p>
+        </td></tr></table>
+      </td></tr>
+      <tr><td style="background:#f9fafb;padding:24px 40px;text-align:center;border-top:1px solid #f3f4f6;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;">Powered by Orlode &mdash; Email automatique.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+}
 exports.markSignedTool = genkit_config_1.ai.defineTool({
     name: 'leg_markAsSigned',
     description: 'Mark a contract as signed.',
@@ -568,7 +843,7 @@ const ALL_TOOLS = [
     exports.createCaseTool, exports.getCasesTool,
     exports.getDeadlinesTool, exports.createDeadlineTool,
     exports.checkComplianceTool, exports.getClausesTool, exports.getStatsTool,
-    exports.sendForSignatureTool, exports.markSignedTool,
+    exports.sendForSignatureTool, exports.emailContractForSignatureTool, exports.markSignedTool,
     // PRO
     exports.contractRiskScoringTool, exports.caseTimelineTool, exports.contractTemplatesTool, exports.legalAutomationTool,
 ];
@@ -627,6 +902,9 @@ CAPACITÉS :
 - Génération de templates ajustés au contexte
 
 ⚠️ CROSS-DOMAIN : Les contrats de travail (RH) sont dans companies/{id}/contracts (créés par l'agent RH). Les contrats commerciaux (NDA, prestation, partenariat) sont dans companies/{id}/legalContracts. Utilise leg_getAllContracts pour TOUT lister sans demander à l'utilisateur de préciser la source.
+
+🔥 RÈGLE CRITIQUE — ENVOI DE CONTRATS :
+Quand l'utilisateur dit "envoyer / envoie / send / email / emailer" un contrat à quelqu'un avec son adresse email, tu DOIS appeler **leg_emailContractForSignature** (en un seul appel : génère + envoie via Wemas pour signature électronique). N'utilise JAMAIS leg_generateContract seul puis leg_sendForSignature — ça ne fait QUE mettre à jour la DB sans envoyer d'email réel. Ne jamais répondre "envoyé" sans avoir reçu success=true de leg_emailContractForSignature. Si tu n'as pas tous les paramètres (type, partyA, partyB, signatoryEmail), DEMANDE-les à l'utilisateur en une seule question. Si Wemas n'est pas configuré, dis-le clairement à l'utilisateur — ne prétends pas avoir envoyé.
 
 ⚠️ DISCLAIMER OBLIGATOIRE :
 Toujours préciser que ton analyse est une ASSISTANCE IA, PAS un conseil juridique professionnel. Recommander un avocat qualifié pour toute décision contraignante. Ne JAMAIS donner de jugement définitif — présenter l'analyse et recommander une revue par un professionnel.

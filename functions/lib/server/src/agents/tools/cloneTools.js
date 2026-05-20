@@ -250,7 +250,7 @@ exports.cloneFindAppointmentTool = genkit_config_1.ai.defineTool({
 //   6. Audit trail — every creation is logged in cloneAuditLog
 //
 exports.cloneCreateAppointmentTool = genkit_config_1.ai.defineTool({
-    name: 'createAppointment',
+    name: 'clone_createAppointment',
     description: 'Create an appointment. Only call after confirming: name, service, date (YYYY-MM-DD), time (HH:MM 24h), and at least one contact (phone OR email). Returns appointmentId on success. The status will be "pending" unless the company has auto-confirm enabled.',
     inputSchema: zod_1.z.object({
         companyId: zod_1.z.string(),
@@ -540,7 +540,7 @@ exports.cloneConfirmAppointmentTool = genkit_config_1.ai.defineTool({
 });
 // ── addClient / createLead (with dedup by phone/email) ──────────────────────
 exports.cloneAddClientTool = genkit_config_1.ai.defineTool({
-    name: 'addClient',
+    name: 'clone_addClient',
     description: 'Register a new client/lead in the CRM. Call when you have captured at least the name and one contact (phone or email). If the contact already exists, returns the existing clientId without creating a duplicate.',
     inputSchema: zod_1.z.object({
         companyId: zod_1.z.string(),
@@ -630,8 +630,12 @@ exports.cloneCreateSupportTicketTool = genkit_config_1.ai.defineTool({
     }
 });
 // ── sendEmail (reuses the orchestrator's unified service — Gmail-first) ──────
+// IMPORTANT: tool name must NOT collide with `sendEmail` from externalTools.ts.
+// When two tools share the same name, the second registration silently replaces
+// the first in Genkit's global registry, breaking the orchestrator's
+// `sendEmailTool` lookup ("NOT_FOUND: Tool sendEmail not found").
 exports.cloneSendEmailTool = genkit_config_1.ai.defineTool({
-    name: 'sendEmail',
+    name: 'clone_sendEmail',
     description: 'Send a confirmation or follow-up email to a visitor after capturing their email. Use for appointment confirmations or sending info. Be polite and concise.',
     inputSchema: zod_1.z.object({
         companyId: zod_1.z.string(),

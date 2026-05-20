@@ -49,6 +49,36 @@ import socialRoutes from '../../server/src/routes/social.routes';
 import videoRoutes from '../../server/src/routes/video.routes';
 import publicRoutes from '../../server/src/routes/public.routes';
 import wemasRoutes from '../../server/src/routes/wemas.routes';
+import commerceRoutes from '../../server/src/routes/commerce.routes';
+import subscriptionRoutes from '../../server/src/routes/subscription.routes';
+import marketplaceRoutes from '../../server/src/routes/marketplace.routes';
+import superadminRoutes from '../../server/src/routes/superadmin.routes';
+import creatorRoutes from '../../server/src/routes/creator.routes';
+import teamRoutes from '../../server/src/routes/team.routes';
+import websiteRoutes from '../../server/src/routes/website.routes';
+import meRoutes from '../../server/src/routes/me.routes';
+import usersRoutes from '../../server/src/routes/users.routes';
+import notificationRoutes from '../../server/src/routes/notification.routes';
+import referralRoutes from '../../server/src/routes/referral.routes';
+import gmailRoutes from '../../server/src/routes/gmail.routes';
+import legalRoutes from '../../server/src/routes/legal.routes';
+import productsRoutes from '../../server/src/routes/products.routes';
+import ordersRoutes from '../../server/src/routes/orders.routes';
+import reservationsRoutes from '../../server/src/routes/reservations.routes';
+import appointmentsRoutes from '../../server/src/routes/appointments.routes';
+import publicCommerceRoutes from '../../server/src/routes/publicCommerce.routes';
+import quoteRequestsRoutes from '../../server/src/routes/quoteRequests.routes';
+import myStatusRoutes from '../../server/src/routes/myStatus.routes';
+import betaFeedbackRoutes from '../../server/src/routes/betaFeedback.routes';
+import dataDeletionRoutes from '../../server/src/routes/dataDeletion.routes';
+import aiRoutes from '../../server/src/routes/ai.routes';
+import newsRoutes from '../../server/src/routes/news.routes';
+import cloneRoutes from '../../server/src/routes/clone.routes';
+import cloneAnalyticsRoutes from '../../server/src/routes/cloneAnalytics.routes';
+import datascientistRoutes from '../../server/src/routes/datascientist.routes';
+import messagingRoutes from '../../server/src/routes/messaging.routes';
+import telegramRoutes from '../../server/src/routes/telegram.routes';
+import socialAiRoutes from '../../server/src/routes/socialAi.routes';
 
 // Genkit flows
 import '../../server/src/genkit';
@@ -58,6 +88,11 @@ initFirebase();
 checkMcpAvailability().catch(() => {});
 
 const app = express();
+
+// Cloud Run sits behind Google's front-end proxy. Tell Express to trust the
+// X-Forwarded-For header so req.ip resolves to the real client (not Cloud Run).
+// Without this, the rate limiter sees a single IP for every request → 429 storms.
+app.set('trust proxy', true);
 
 // Security
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
@@ -122,6 +157,36 @@ app.use('/api/contracts', wemasRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/social', socialRoutes);
 app.use('/api/video', videoRoutes);
+app.use('/api/commerce', commerceRoutes);
+app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/superadmin', superadminRoutes);
+app.use('/api/creator', creatorRoutes);
+app.use('/api/team', teamRoutes);
+app.use('/api/website', websiteRoutes);
+app.use('/api/me', meRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/referral', referralRoutes);
+app.use('/api/gmail', gmailRoutes);
+app.use('/api/legal', legalRoutes);
+app.use('/api/products', productsRoutes);
+app.use('/api/orders', ordersRoutes);
+app.use('/api/reservations', reservationsRoutes);
+app.use('/api/appointments', appointmentsRoutes);
+app.use('/api/publicCommerce', publicCommerceRoutes);
+app.use('/api/quote-requests', quoteRequestsRoutes);
+app.use('/api/my-status', myStatusRoutes);
+app.use('/api/beta-feedback', betaFeedbackRoutes);
+app.use('/api/data-deletion', dataDeletionRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/news', newsRoutes);
+app.use('/api/clone', cloneRoutes);
+app.use('/api/clone-analytics', cloneAnalyticsRoutes);
+app.use('/api/datascientist', datascientistRoutes);
+app.use('/api/messaging', messagingRoutes);
+app.use('/api/telegram', telegramRoutes);
+app.use('/api/social-ai', socialAiRoutes);
 
 app.use(notFoundMiddleware);
 app.use(errorMiddleware);

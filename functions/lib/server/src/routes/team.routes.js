@@ -173,6 +173,40 @@ router.get('/', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     });
     res.json({ success: true, data: { team: { id: companyId, name: company['name'], plan: company['plan'], ownerId }, members } });
 }));
+// GET /api/team/members — flat list of members (alias of GET / for clients
+// that expect just the members array). Mirrors the merge logic above.
+router.get('/members', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    if (!companyId)
+        throw new error_middleware_1.AppError('Company required', 400);
+    const db = (0, firebase_config_1.getFirestore)();
+    const [membersSnap, usersSnap] = await Promise.all([
+        db.collection(`companies/${companyId}/members`).limit(200).get().catch(() => null),
+        db.collection('users').where('companyId', '==', companyId).limit(200).get().catch(() => null),
+    ]);
+    const byUid = new Map();
+    if (membersSnap) {
+        for (const d of membersSnap.docs)
+            byUid.set(d.id, { id: d.id, uid: d.id, ...d.data() });
+    }
+    if (usersSnap) {
+        for (const d of usersSnap.docs) {
+            const u = d.data();
+            const existing = byUid.get(d.id);
+            if (existing) {
+                byUid.set(d.id, { ...existing, email: existing['email'] ?? u['email'], displayName: existing['displayName'] ?? u['displayName'], photoURL: existing['photoURL'] ?? u['photoURL'] });
+            }
+            else {
+                byUid.set(d.id, { id: d.id, uid: d.id, email: u['email'], displayName: u['displayName'], photoURL: u['photoURL'], role: u['role'] ?? 'member', status: 'active' });
+            }
+        }
+    }
+    const members = Array.from(byUid.values()).filter(m => {
+        const s = m['status'];
+        return !s || s === 'active' || s === 'invited';
+    });
+    res.json({ success: true, data: members });
+}));
 // ═══════════════════════════════════════════════════════════════════════════
 // INVITES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -710,8 +744,9 @@ router.post('/channels/:channelId/messages/:msgId/replies', (0, asyncHandler_1.a
     const db = (0, firebase_config_1.getFirestore)();
     const userName = getUserName(req);
     const replyRef = db.collection(`companies/${companyId}/channels/${channelId}/messages/${msgId}/replies`).doc();
+    const trimmedReply = content.trim();
     await replyRef.set({
-        content: content.trim(),
+        content: trimmedReply,
         authorId: userId, authorName: userName, authorPhoto: getUserPhoto(req),
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
@@ -721,6 +756,12 @@ router.post('/channels/:channelId/messages/:msgId/replies', (0, asyncHandler_1.a
         threadCount: firestore_1.FieldValue.increment(1),
         lastThreadAt: firestore_1.FieldValue.serverTimestamp(),
     });
+    // Niveau 2 — fire-and-forget AI thread reply if @orlode is mentioned.
+    void Promise.resolve().then(() => __importStar(require('../services/teamAgentResponder'))).then(({ processThreadReplyForAgent }) => processThreadReplyForAgent({
+        companyId, channelId, parentMessageId: msgId, replyId: replyRef.id,
+        content: trimmedReply, authorId: userId, authorName: userName,
+        createdByType: 'human',
+    })).catch(err => logger_1.logger.warn('[Team] thread AI responder failed', { error: err instanceof Error ? err.message : err }));
     res.json({ success: true, data: { id: replyRef.id } });
 }));
 // GET /api/team/channels/:channelId/messages/:msgId/replies — fetch thread replies
@@ -848,17 +889,24 @@ router.post('/dms/:dmId/messages', (0, asyncHandler_1.asyncHandler)(async (req, 
         throw new error_middleware_1.AppError('Not a participant', 403);
     const userName = getUserName(req);
     const msgRef = db.collection(`companies/${companyId}/dms/${dmId}/messages`).doc();
+    const trimmedDm = content.trim();
     await msgRef.set({
-        content: content.trim(),
+        content: trimmedDm,
         authorId: userId, authorName: userName, authorPhoto: getUserPhoto(req),
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
     // Update DM with last message info
     await dmRef.update({
-        lastMessage: content.trim().slice(0, 100),
+        lastMessage: trimmedDm.slice(0, 100),
         lastMessageBy: userName, lastMessageAt: firestore_1.FieldValue.serverTimestamp(),
         updatedAt: firestore_1.FieldValue.serverTimestamp(),
     });
+    // Niveau 2 — fire-and-forget AI reply in DM if @orlode is mentioned.
+    void Promise.resolve().then(() => __importStar(require('../services/teamAgentResponder'))).then(({ processDMMessageForAgent }) => processDMMessageForAgent({
+        companyId, dmId, messageId: msgRef.id,
+        content: trimmedDm, authorId: userId, authorName: userName,
+        createdByType: 'human',
+    })).catch(err => logger_1.logger.warn('[Team] DM AI responder failed', { error: err instanceof Error ? err.message : err }));
     res.json({ success: true, data: { id: msgRef.id } });
 }));
 // ═══════════════════════════════════════════════════════════════════════════
@@ -981,6 +1029,146 @@ router.get('/pending-invites', (0, asyncHandler_1.asyncHandler)(async (req, res)
     const snap = await db.collection(`companies/${companyId}/invites`).where('status', '==', 'pending').limit(50).get();
     const invites = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     res.json({ success: true, data: invites });
+}));
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT PROPOSALS (action cards in team chat)
+//
+// When @orlode is asked to do a write action (send message, create invoice…),
+// the agent stores a "proposal" instead of executing. The team-chat UI renders
+// it as a card with [Modifier] [Valider] [Annuler] buttons. Clicking Valider
+// calls /execute, which runs the actual tool.
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /api/team/agent-proposals/:proposalId
+router.get('/agent-proposals/:proposalId', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    if (!companyId)
+        throw new error_middleware_1.AppError('Company required', 400);
+    const { proposalId } = req.params;
+    const db = (0, firebase_config_1.getFirestore)();
+    const doc = await db.collection(`companies/${companyId}/agentProposals`).doc(proposalId).get();
+    if (!doc.exists)
+        throw new error_middleware_1.AppError('Proposal not found', 404);
+    res.json({ success: true, data: { id: doc.id, ...doc.data() } });
+}));
+// PATCH /api/team/agent-proposals/:proposalId — edit the draft before executing
+router.patch('/agent-proposals/:proposalId', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.uid;
+    if (!companyId || !userId)
+        throw new error_middleware_1.AppError('Auth required', 401);
+    const { proposalId } = req.params;
+    const { draft, recipient } = req.body;
+    const db = (0, firebase_config_1.getFirestore)();
+    const ref = db.collection(`companies/${companyId}/agentProposals`).doc(proposalId);
+    const doc = await ref.get();
+    if (!doc.exists)
+        throw new error_middleware_1.AppError('Proposal not found', 404);
+    if (doc.data()?.['status'] !== 'pending')
+        throw new error_middleware_1.AppError('Proposal already resolved', 400);
+    const update = { updatedAt: firestore_1.FieldValue.serverTimestamp(), editedBy: userId };
+    if (draft !== undefined)
+        update.draft = draft;
+    if (recipient !== undefined)
+        update.recipient = recipient;
+    await ref.update(update);
+    res.json({ success: true });
+}));
+// POST /api/team/agent-proposals/:proposalId/execute — run the proposed action
+router.post('/agent-proposals/:proposalId/execute', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.uid;
+    if (!companyId || !userId)
+        throw new error_middleware_1.AppError('Auth required', 401);
+    const { proposalId } = req.params;
+    const db = (0, firebase_config_1.getFirestore)();
+    const ref = db.collection(`companies/${companyId}/agentProposals`).doc(proposalId);
+    const doc = await ref.get();
+    if (!doc.exists)
+        throw new error_middleware_1.AppError('Proposal not found', 404);
+    const data = doc.data();
+    if (data['status'] !== 'pending')
+        throw new error_middleware_1.AppError('Proposal already resolved', 400);
+    const { type, channel, recipient, draft, subject, language } = data;
+    let result = { success: false, message: '' };
+    try {
+        if (type === 'send_message') {
+            if (channel === 'whatsapp') {
+                const { whatsappService } = await Promise.resolve().then(() => __importStar(require('../services/whatsapp/whatsappService')));
+                const wConfig = await whatsappService.getConfig(companyId).catch(() => null);
+                if (!wConfig)
+                    throw new error_middleware_1.AppError('WhatsApp non connecté pour cette entreprise', 400);
+                await whatsappService.sendMessage(wConfig, recipient ?? '', draft ?? '');
+                result = { success: true, message: `WhatsApp envoyé à ${recipient}` };
+            }
+            else if (channel === 'email') {
+                const { sendEmail } = await Promise.resolve().then(() => __importStar(require('../services/email/emailService')));
+                await sendEmail({
+                    companyId,
+                    to: recipient ?? '',
+                    subject: subject ?? 'Message',
+                    html: (draft ?? '').replace(/\n/g, '<br>'),
+                });
+                result = { success: true, message: `Email envoyé à ${recipient}` };
+            }
+            else if (channel === 'telegram') {
+                const { sendTelegramMessage } = await Promise.resolve().then(() => __importStar(require('../services/telegram/telegramService')));
+                await sendTelegramMessage(companyId, recipient ?? '', draft ?? '');
+                result = { success: true, message: `Telegram envoyé à ${recipient}` };
+            }
+            else {
+                throw new error_middleware_1.AppError(`Canal non supporté: ${channel}`, 400);
+            }
+        }
+        else {
+            throw new error_middleware_1.AppError(`Type de proposition non supporté: ${type}`, 400);
+        }
+        await ref.update({
+            status: 'executed',
+            executedAt: firestore_1.FieldValue.serverTimestamp(),
+            executedBy: userId,
+            executionResult: result,
+        });
+        // Log activity for audit trail
+        await db.collection(`companies/${companyId}/activities`).add({
+            action: 'agent_proposal_executed',
+            userId,
+            entityType: 'agent_proposal',
+            entityId: proposalId,
+            details: { type, channel, recipient, language, draftPreview: (draft ?? '').slice(0, 200) },
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        res.json({ success: true, data: result });
+    }
+    catch (err) {
+        await ref.update({
+            status: 'failed',
+            executedAt: firestore_1.FieldValue.serverTimestamp(),
+            executedBy: userId,
+            executionError: err?.message ?? String(err),
+        });
+        throw err instanceof error_middleware_1.AppError ? err : new error_middleware_1.AppError(err?.message ?? 'Execution failed', 500);
+    }
+}));
+// POST /api/team/agent-proposals/:proposalId/cancel
+router.post('/agent-proposals/:proposalId/cancel', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.uid;
+    if (!companyId || !userId)
+        throw new error_middleware_1.AppError('Auth required', 401);
+    const { proposalId } = req.params;
+    const db = (0, firebase_config_1.getFirestore)();
+    const ref = db.collection(`companies/${companyId}/agentProposals`).doc(proposalId);
+    const doc = await ref.get();
+    if (!doc.exists)
+        throw new error_middleware_1.AppError('Proposal not found', 404);
+    if (doc.data()?.['status'] !== 'pending')
+        throw new error_middleware_1.AppError('Proposal already resolved', 400);
+    await ref.update({
+        status: 'cancelled',
+        cancelledAt: firestore_1.FieldValue.serverTimestamp(),
+        cancelledBy: userId,
+    });
+    res.json({ success: true });
 }));
 exports.default = router;
 //# sourceMappingURL=team.routes.js.map

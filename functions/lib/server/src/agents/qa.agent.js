@@ -18,6 +18,7 @@ const INPUT = zod_1.z.object({
     companyId: zod_1.z.string(),
     context: zod_1.z.string().optional().describe('Additional context from the calling agent'),
     language: zod_1.z.string().optional().default('auto'),
+    history: zod_1.z.array(zod_1.z.object({ role: zod_1.z.enum(['user', 'model']), content: zod_1.z.string() })).optional(),
 });
 const OUTPUT = zod_1.z.object({
     answer: zod_1.z.string(),
@@ -25,11 +26,16 @@ const OUTPUT = zod_1.z.object({
     confidence: zod_1.z.enum(['high', 'medium', 'low']),
 });
 // ── The flow ──────────────────────────────────────────────────────────────────
-exports.qaAgentFlow = genkit_config_1.ai.defineFlow({ name: 'qaAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ question, companyId, context, language }) => {
-    logger_1.logger.info(`[QAAgent] Question: "${question.slice(0, 80)}"`);
+exports.qaAgentFlow = genkit_config_1.ai.defineFlow({ name: 'qaAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ question, companyId, context, language, history }) => {
+    logger_1.logger.info(`[QAAgent] Question: "${question.slice(0, 80)}" (history=${history?.length ?? 0})`);
     const langInstruction = language === 'auto'
-        ? 'Respond in the same language as the question.'
-        : `Respond in ${language}.`;
+        ? 'Réponds dans la même langue que la question (français par défaut).'
+        : `Réponds en ${language}.`;
+    const dateAnchors = (() => {
+        const now = new Date();
+        const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+        return `AUJOURD'HUI : ${now.toISOString().slice(0, 10)} (${months[now.getMonth()]} ${now.getFullYear()}).`;
+    })();
     // Build tool list — add Drive/Docs/Sheets tools when Google Workspace MCP is available
     const qaTools = [
         ragTools_1.searchDocumentsTool,
@@ -37,19 +43,42 @@ exports.qaAgentFlow = genkit_config_1.ai.defineFlow({ name: 'qaAgent', inputSche
         ...(mcp_config_1.mcpAvailability.googleWorkspace ? [googleWorkspace_1.driveSearchTool, googleWorkspace_1.docsReadTool, googleWorkspace_1.sheetsReadTool] : []),
     ];
     const mcpNote = mcp_config_1.mcpAvailability.googleWorkspace
-        ? 'You can also search Google Drive (drive_search), read Google Docs (docs_read), or read Google Sheets (sheets_read) for additional context.'
+        ? 'Tu peux aussi chercher dans Google Drive (drive_search), lire Google Docs (docs_read), ou Google Sheets (sheets_read) pour du contexte additionnel.'
         : '';
+    const messages = [];
+    if (history && history.length > 0) {
+        for (const h of history.slice(-20))
+            messages.push({ role: h.role, content: [{ text: h.content }] });
+    }
+    messages.push({ role: 'user', content: [{ text: question }] });
     // Agentic loop: Gemini Pro uses search tools then answers
     let response = await genkit_config_1.ai.generate({
         model: genkit_config_1.GEMINI_PRO,
-        system: `You are an expert Q&A assistant for a corporate knowledge management system.
-${context ? `Context from calling agent:\n${context}\n` : ''}
-ALWAYS call searchDocuments first to find relevant information before answering.
+        system: `Tu es un assistant Q&R expert pour un système de gestion des connaissances d'entreprise.
+CompanyID: ${companyId}.
+${context ? `Contexte de l'agent appelant :\n${context}\n` : ''}
+
+## 📅 CONTEXTE TEMPOREL (ne jamais inventer de dates)
+${dateAnchors}
+Pour toute citation ou réponse, utilise cette ancre temporelle si une date est nécessaire — ne fabrique jamais de dates de documents.
+
+## 🧠 MÉMOIRE CONVERSATIONNELLE
+Tu as l'historique des messages précédents. Quand l'utilisateur dit "ça", "ce document", "lui", référence-toi à l'élément le plus récent. Ne repars PAS à zéro si le contexte est clair.
+
+## 🚫 RÈGLE ABSOLUE — ZÉRO FABRICATION
+Tu ne DOIS JAMAIS prétendre avoir fait une action sans appel d'outil réussi.
+INTERDIT :
+- Inventer une réponse sans avoir appelé searchDocuments / askQA tool
+- Citer un document inexistant
+- Pretendre avoir analysé un fichier sans l'avoir lu
+RÈGLE : APPELLE le tool. Si succès → confirme avec les vrais champs. Si échec → dis la vraie raison. L'utilisateur préfère "je n'ai pas pu" honnête à une fausse confirmation.
+
+APPELLE TOUJOURS searchDocuments en premier pour trouver l'information avant de répondre.
 ${mcpNote}
-If the answer is not found in documents, say so honestly.
+Si la réponse n'est pas dans les documents, dis-le honnêtement.
 ${langInstruction}
-Be concise and cite your sources.`,
-        prompt: question,
+Sois concis et cite tes sources.`,
+        messages,
         tools: qaTools,
         config: { temperature: 0.2 },
     });

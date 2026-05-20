@@ -333,8 +333,10 @@ export const deployToFirebaseTool = ai.defineTool(
   }
 );
 
-// Generate static HTML for deployment
-function generateStaticHTML(content: Record<string, unknown>, companyName: string, color: string, companyId: string, widgetEnabled: boolean, template?: string): string {
+// Generate static HTML for deployment.
+// Exported so the preview route at /api/website/preview/:companyId can serve a
+// real rendered page instead of raw JSON.
+export function generateStaticHTML(content: Record<string, unknown>, companyName: string, color: string, companyId: string, widgetEnabled: boolean, template?: string): string {
   const hero = content['hero'] as { title: string; subtitle: string; cta: string } | undefined;
   const about = content['about'] as { title: string; description: string; values: string[] } | undefined;
   const services = content['services'] as Array<{ name: string; description: string; icon: string }> | undefined;

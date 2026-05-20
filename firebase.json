@@ -21,9 +21,9 @@
     "rewrites": [
       {
         "source": "/api/**",
-        "run": {
-          "serviceId": "corpmind-server",
-          "region": "europe-west1"
+        "function": {
+          "functionId": "api",
+          "region": "us-central1"
         }
       },
       {

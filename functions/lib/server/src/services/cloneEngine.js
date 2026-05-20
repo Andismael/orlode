@@ -52,16 +52,58 @@ const genkit_config_1 = require("../config/genkit.config");
 const firebase_config_1 = require("../config/firebase.config");
 const helpers_1 = require("../utils/helpers");
 const logger_1 = require("../utils/logger");
+// businessType → public path prefix + label + intent
+const PUBLIC_LINK_MAP = {
+    boutique: { path: 'shop', label: 'boutique en ligne', intent: 'commander un produit' },
+    restaurant: { path: 'menu', label: 'menu', intent: 'voir le menu, commander, reserver une table' },
+    hotel: { path: 'hotel', label: 'chambres', intent: 'voir les chambres, reserver un sejour' },
+    service: { path: 'salon', label: 'salon', intent: 'voir les services, prendre un RDV' },
+    health: { path: 'cabinet', label: 'prise de RDV cabinet', intent: 'prendre un rendez-vous medical' },
+    realestate: { path: 'biens', label: 'biens disponibles', intent: 'voir les biens, demander une visite' },
+};
 /** Load clone config from Firestore */
 async function getCloneConfig(companyId) {
     const db = (0, firebase_config_1.getFirestore)();
-    const [companyDoc, cloneDoc] = await Promise.all([
+    const [companyDoc, cloneDoc, storesSnap] = await Promise.all([
         db.collection('companies').doc(companyId).get(),
         db.collection(`companies/${companyId}/settings`).doc('clone').get(),
+        db.collection(`companies/${companyId}/stores`).get().catch(() => null),
     ]);
     const company = companyDoc.data() ?? {};
     const clone = cloneDoc.data() ?? {};
     const settings = company['settings'] ?? {};
+    // Build public storefront links from active stores. Each businessType maps
+    // to a different public page. Legacy stores without businessType count as
+    // 'boutique' (matches the GET /commerce/stores backward-compat behavior).
+    const baseUrl = process.env['PUBLIC_APP_URL'] ?? 'https://mon-assistant-86bbd.web.app';
+    const publicLinks = [];
+    const storeContext = [];
+    if (storesSnap) {
+        for (const doc of storesSnap.docs) {
+            const data = doc.data();
+            if (data['status'] === 'suspended')
+                continue;
+            const type = data['businessType'] ?? 'boutique';
+            storeContext.push({
+                type,
+                name: data['name'] ?? '',
+                ...(data['establishmentType'] ? { establishmentType: data['establishmentType'] } : {}),
+                ...(data['salonType'] ? { salonType: data['salonType'] } : {}),
+            });
+            const slug = data['slug'];
+            if (!slug)
+                continue;
+            const meta = PUBLIC_LINK_MAP[type];
+            if (!meta)
+                continue;
+            publicLinks.push({
+                type,
+                label: meta.label,
+                url: `${baseUrl}/${meta.path}/${slug}`,
+                intent: meta.intent,
+            });
+        }
+    }
     return {
         name: clone['name'] ?? settings['knowledgeAgentName'] ?? 'Assistant',
         role: clone['role'] ?? 'general',
@@ -86,7 +128,117 @@ async function getCloneConfig(companyId) {
         captureLeads: clone['captureLeads'] ?? true,
         autoCreateTickets: clone['autoCreateTickets'] ?? true,
         connectToOrchestrator: clone['connectToOrchestrator'] ?? true,
+        publicLinks,
+        storeContext,
     };
+}
+// ── Per-vertical "Consultation Mode" prompt blocks ────────────────────────
+// When the company runs a particular pack, we instruct the clone to ENQUIRE
+// before recommending — Apple Genius Bar style. Triggers when the visitor
+// asks for guidance ("vous me conseillez", "je cherche", "j'ai besoin",
+// "vous avez quoi pour…"). Without enough info, clone asks ONE question at
+// a time. When confident, recommends a SPECIFIC item from the catalog with
+// rationale + add-ons + dosage where applicable.
+function consultationBlockFor(ctx) {
+    if (ctx.length === 0)
+        return '';
+    const blocks = [];
+    const seen = new Set();
+    for (const s of ctx) {
+        const key = s.salonType ?? s.establishmentType ?? s.type;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        if (s.type === 'service' && s.salonType === 'spa') {
+            blocks.push(`### 💆 Spa / Massage — ${s.name}
+Quand un client demande un massage, NE PROPOSE PAS DIRECTEMENT. Enquête d'abord :
+1. *Tensions ou détente ?* (douleur ciblée vs relax générale)
+2. *Si douleur* : où exactement ? (cou, dos, jambes, plante des pieds)
+3. *Régularité* : première fois ? mensuel ? hebdo ?
+4. *Préférences* : pression légère / forte ? huile chaude ?
+5. *Allergies* : huiles essentielles, lavande, eucalyptus ?
+Puis recommande UN service précis (utilise le catalogue), suggère le nombre de séances, l'huile adaptée. Format :
+"Pour [tension X] [régularité Y], je te recommande *[Service]* (durée, prix). Je te propose [nb] séances espacées de [délai]. Avec [huile/produit]. Je te bloque la 1ère ?"`);
+        }
+        else if (s.type === 'service' && s.salonType === 'esthetique') {
+            blocks.push(`### 💄 Esthétique — ${s.name}
+Pour soins visage/peau, ENQUÊTE avant de proposer :
+1. *Type de peau* : sèche, mixte, grasse, sensible ?
+2. *Préoccupation* : acné, taches, rides, déshydratation, éclat ?
+3. *Routine actuelle* : utilise-t-elle déjà des produits / soins pro ?
+4. *Allergies connues* ?
+5. *Occasion* : entretien régulier ou évènement (mariage, photo) ?
+Puis recommande un soin du catalogue + produits add-on (sérum, masque). Format :
+"Pour ta peau [type] avec [préoccupation], je propose *[Soin]* (durée, prix). Programme idéal : 1 séance / 3 semaines pendant 3 mois. À la maison : [produit catalogue]."`);
+        }
+        else if (s.type === 'service' && s.salonType === 'coiffure') {
+            blocks.push(`### 💇 Coiffure — ${s.name}
+Avant un changement de coiffure, demande :
+1. Coupe / coloration / les deux ?
+2. Longueur souhaitée ? (laisse, raccourcis, dégradé)
+3. Texture cheveux ? (lisse, bouclé, crépu)
+4. Occasion (entretien vs gros changement) ?
+Puis recommande un service précis avec durée et prix. Mentionne soins capillaires en add-on si pertinent.`);
+        }
+        else if (s.type === 'service' && s.salonType === 'barber') {
+            blocks.push(`### 💈 Barber — ${s.name}
+Demande : style (dégradé, crewcut, taper), longueur dessus, barbe oui/non, dernière coupe quand. Recommande un service du catalogue + produit (cire, après-rasage).`);
+        }
+        else if (s.type === 'service') {
+            blocks.push(`### Salon — ${s.name}
+Avant de proposer un service, enquête sur le besoin (quel type de prestation, fréquence, préférences, allergies). Puis recommande un service précis du catalogue avec durée + prix + add-ons.`);
+        }
+        else if (s.type === 'restaurant') {
+            const sub = s.establishmentType ?? 'restaurant';
+            blocks.push(`### 🍽 ${sub === 'maquis' ? 'Maquis' : sub === 'bar' ? 'Bar' : 'Restaurant'} — ${s.name}
+Quand un client cherche quoi commander, demande UNE chose à la fois :
+1. *Faim de quoi* ? (épicé, doux, viande, poisson, végé)
+2. *Combien de personnes* ?
+3. *Sur place / à emporter / livraison* ?
+4. *Boisson* en accompagnement ?
+Puis pioche dans le menu et propose 2-3 plats max avec prix et raison. Si plat du jour ⭐ pertinent, le mettre en premier. Termine par "Je te commande ?"`);
+        }
+        else if (s.type === 'hotel') {
+            blocks.push(`### 🏨 Hôtel — ${s.name}
+Avant de proposer une chambre, demande :
+1. *Dates* (arrivée, départ)
+2. *Combien de personnes / chambres* ?
+3. *Budget* approximatif ou *type* (standard, suite) ?
+4. *Préférences* : vue, étage, lit double/twin ?
+Puis recommande LA chambre adaptée du catalogue (vérifie disponibilité), précise nb nuits + total. "Je te confirme ?"`);
+        }
+        else if (s.type === 'health') {
+            blocks.push(`### 🏥 Cabinet — ${s.name}
+ATTENTION : pas de diagnostic médical. Le clone doit :
+1. Recueillir le motif générique (consultation, suivi, urgence relative)
+2. Demander dispo (date / créneau)
+3. Proposer un RDV avec un praticien si nommé
+NE JAMAIS interpréter symptômes ou recommander traitement. En cas d'urgence vraie : "appelle le SAMU 185" (CI).`);
+        }
+        else if (s.type === 'realestate') {
+            blocks.push(`### 🏠 Immobilier — ${s.name}
+Avant de proposer un bien :
+1. *Vente ou location* ?
+2. *Type* : appart, maison, villa, terrain ?
+3. *Budget* (mensuel si location, total si vente)
+4. *Quartier(s)* préférés ?
+5. *Surface / chambres* min ?
+6. *Délai* d'emménagement ?
+Puis pioche 2-3 biens du catalogue qui matchent et propose visite. "Je te programme une visite ?"`);
+        }
+        else if (s.type === 'boutique') {
+            blocks.push(`### 🛍 Boutique — ${s.name}
+Quand un client cherche un produit, demande :
+1. *Pour qui* ? (lui-même, cadeau, occasion)
+2. *Budget* approximatif ?
+3. *Style / couleur / taille* ?
+4. *Délai* de livraison souhaité ?
+Puis recommande 2-3 produits max du catalogue avec photo si dispo + raison. "Je l'ajoute au panier ?"`);
+        }
+    }
+    if (blocks.length === 0)
+        return '';
+    return `\n\n## 🔍 MODE CONSULTATION — POSER DES QUESTIONS AVANT DE PROPOSER\n\nQuand un visiteur cherche un conseil ("je cherche", "vous me conseillez", "j'ai besoin de", "que me proposez-vous", "j'ai mal à", "quoi commander"), NE PROPOSE PAS DIRECTEMENT — enquête d'abord. Pose UNE seule question à la fois (jamais 5 d'un coup). Après 3-5 questions, recommande UN choix précis du catalogue avec la raison.\n\n### 🛡 RÈGLES DE FLEXIBILITÉ (toujours actives)\n- Le client peut ajouter LIBREMENT des infos non demandées ("c'est pour ma fille de 8 ans", "j'ai un budget limité") — intègre-les sans faire répéter les questions déjà répondues.\n- Si le client dit *"donne-moi juste un X"*, *"je sais déjà ce que je veux"*, *"vas direct"*, *"saute les questions"* → arrête le quiz, va à la recommandation immédiate.\n- Si le client refuse de répondre à une question, passe à la suivante ou recommande directement avec ce qu'on a.\n- Si le client pose une question (prix, durée, dispo) au milieu du quiz, RÉPONDS d'abord, ensuite reprends.\n- Reste TOUJOURS conversationnel, jamais robotique. Le quiz est un guide, pas une procédure.\n- Si le client veut un *aperçu visuel* ("ça donne quoi", "tu peux montrer", "as-tu une photo"), partage les photos avant/après du service (tag *examplePhotos* dans le catalogue).\n\n${blocks.join('\n\n')}\n\nEn dehors de ce mode, comportement clone normal (réponses courtes, partage liens publics, capture lead).`;
 }
 // ══════════════════════════════════════════════════════════════════════════════
 // 2. BUILD CLONE SYSTEM PROMPT
@@ -108,7 +260,14 @@ ${config.uniqueValue ? `- Proposition de valeur: ${config.uniqueValue}` : ''}
 ## TA PERSONNALITE
 - Ton: ${config.tone}
 - Style: ${config.personality}
-- Langue: ${config.language === 'fr' ? 'Francais' : config.language === 'en' ? 'English' : 'Detecte la langue du visiteur'}
+- Langue: ${{
+        fr: 'Reponds toujours en francais',
+        en: 'Always reply in English',
+        ar: 'الرد دائمًا باللغة العربية',
+        es: 'Responde siempre en espanol',
+        de: 'Antworte immer auf Deutsch',
+        pt: 'Responda sempre em portugues',
+    }[config.language] ?? 'Detecte la langue du message recu et reponds dans cette meme langue. Sois polyvalent (fr, en, ar, es, de, pt, etc.)'}
 
 ## CE QUE TU PEUX FAIRE
 ${config.canDo.map(c => `- ${c}`).join('\n')}
@@ -121,6 +280,12 @@ ${config.cantDo.map(c => `- ${c}`).join('\n')}
 
 ${config.products.length > 0 ? `## PRODUITS/SERVICES\n${config.products.map(p => `- ${p}`).join('\n')}` : ''}
 ${config.pricing ? `## TARIFICATION\n${config.pricing}` : ''}
+${config.publicLinks.length > 0 ? `
+## 🔗 LIENS PUBLICS — A PARTAGER QUAND PERTINENT
+${config.publicLinks.map(l => `- ${l.label.toUpperCase()} (intent: ${l.intent}) → ${l.url}`).join('\n')}
+
+REGLE : si le visiteur exprime une intention couverte ci-dessus (ex. "voir le menu", "vos chambres", "prendre RDV", "vos biens"), partage le lien EXACT en une seule phrase courte avant de poser la question suivante. Format : "Voici notre [label] : [url]". Ne reformule pas l'URL, ne raccourcis pas, ne mets pas de markdown autour.` : ''}
+${consultationBlockFor(config.storeContext)}
 
 ## INTENTIONS PRINCIPALES
 1. DEVIS → comprendre le besoin, poser 2-3 questions, capturer infos, proposer devis ou RDV
@@ -303,11 +468,11 @@ Quand un visiteur veut voir un employé, le flow EST :
 3. Dis au visiteur : "J'ai prévenu [Nom] par email/WhatsApp. Il/elle a été alerté(e) et va vous répondre."
 JAMAIS "je vais lui laisser un message" ou "je vais le contacter" sans avoir appelé notifyHost. Le tool fait le travail, pas toi.
 - **findAppointment**(companyId, clientPhone OU clientEmail, date?) — cherche un RDV existant. APPELLE TOUJOURS en premier quand l'utilisateur parle d'un RDV qu'il pense avoir pris.
-- **createAppointment**(companyId, clientName, service, date YYYY-MM-DD, time HH:MM, clientPhone OU clientEmail, notes?) — crée un RDV pending.
+- **clone_createAppointment**(companyId, clientName, service, date YYYY-MM-DD, time HH:MM, clientPhone OU clientEmail, notes?) — crée un RDV pending.
 - **confirmAppointment**(companyId, appointmentId, clientPhone OU clientEmail) — confirme un RDV PENDING. L'identité (phone/email) doit correspondre au RDV. Si requiresHuman=true, dis que quelqu'un va recontacter.
-- **addClient**(companyId, name, phone OU email) — enregistre un prospect.
+- **clone_addClient**(companyId, name, phone OU email) — enregistre un prospect.
 - **createSupportTicket**(companyId, subject, description, priority?) — ticket pending. À utiliser UNIQUEMENT en cas de vrai bug ou demande hors-sujet.
-- **sendEmail**(companyId, to, subject, body) — envoi email (après avoir l'email).
+- **clone_sendEmail**(companyId, to, subject, body) — envoi email (après avoir l'email).
 
 ## CONTEXTE TEMPOREL (OBLIGATOIRE — ne jamais hallucinier les dates)
 ${dateAnchors}

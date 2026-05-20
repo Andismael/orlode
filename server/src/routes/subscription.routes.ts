@@ -267,7 +267,15 @@ router.post('/wave/checkout', asyncHandler(async (req: AuthenticatedRequest, res
 }));
 
 // POST /api/subscription/wave/webhook — Wave payment confirmation
+// SECURITY: gated by ?secret=CRON_SECRET (Wave doesn't sign webhooks consistently).
+// Without this, anyone who guesses a paymentId can flip a plan to 'completed'.
 router.post('/wave/webhook', asyncHandler(async (req: Request, res: Response) => {
+  const expected = process.env['CRON_SECRET'] ?? '';
+  const provided = (req.query['secret'] as string ?? '').trim();
+  if (!expected || provided !== expected) {
+    res.status(403).send('Forbidden');
+    return;
+  }
   const body = req.body as Record<string, unknown>;
   const clientReference = (body['data'] as Record<string, unknown>)?.['client_reference'] as string;
   const checkoutStatus = (body['data'] as Record<string, unknown>)?.['checkout_status'] as string;

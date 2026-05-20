@@ -25,6 +25,7 @@ export const visitorRegistryTool = ai.defineTool(
       type:        z.enum(['walkin', 'appointment', 'delivery', 'vip']).optional(),
     }),
     outputSchema: z.object({
+      success:     z.boolean(),
       visitId:     z.string(),
       badgeNumber: z.string(),
       checkInAt:   z.string(),
@@ -36,18 +37,26 @@ export const visitorRegistryTool = ai.defineTool(
     const visitId = generateId();
     const badgeNumber = `V-${Date.now().toString().slice(-6)}`;
     const now = new Date();
-    await db.collection('visitors').doc(visitId).set({
-      companyId, id: visitId, name: visitorName,
-      email: visitorEmail ?? null, company: visitorCompany ?? '',
-      host: hostName, purpose: purpose ?? 'Non specifie',
-      type: type ?? 'walkin', badgeNumber,
-      status: 'checked_in',
-      checkInAt: FieldValue.serverTimestamp(),
-      checkOutAt: null,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection('visitors').doc(visitId).set({
+        companyId, id: visitId, name: visitorName,
+        email: visitorEmail ?? null, company: visitorCompany ?? '',
+        host: hostName, purpose: purpose ?? 'Non specifie',
+        type: type ?? 'walkin', badgeNumber,
+        status: 'checked_in',
+        checkInAt: FieldValue.serverTimestamp(),
+        checkOutAt: null,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[Reception] visitor registry write failed', { error: String(err) });
+      return {
+        success: false, visitId: '', badgeNumber: '', checkInAt: now.toISOString(),
+        message: `Enregistrement du visiteur impossible: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
     return {
-      visitId, badgeNumber, checkInAt: now.toISOString(),
+      success: true, visitId, badgeNumber, checkInAt: now.toISOString(),
       message: `${visitorName} enregistre(e) pour voir ${hostName}. Badge: ${badgeNumber}.`,
     };
   }
@@ -76,7 +85,12 @@ export const calendarCheckTool = ai.defineTool(
     const snap = await db.collection('appointments')
       .where('companyId', '==', companyId)
       .where('status', '==', 'confirmed')
-      .limit(50).get();
+      .limit(50).get().catch((err) => {
+        logger.error('[Reception] checkAppointment read failed', { error: String(err) });
+        return null;
+      });
+
+    if (!snap) return { hasAppointment: false };
 
     const match = snap.docs.map(d => d.data()).find(m => {
       const name = ((m['visitorName'] as string) ?? '').toLowerCase();
@@ -124,7 +138,12 @@ export const visitorHistoryTool = ai.defineTool(
     const db = getFirestore();
     const snap = await db.collection('visitors')
       .where('companyId', '==', companyId)
-      .limit(100).get();
+      .limit(100).get().catch((err) => {
+        logger.error('[Reception] visitor history read failed', { error: String(err) });
+        return null;
+      });
+
+    if (!snap) return { visitors: [], total: 0 };
 
     const now = Date.now();
     const cutoffs: Record<string, number> = {
@@ -168,8 +187,11 @@ export const companyInfoTool = ai.defineTool(
   },
   async ({ companyId }) => {
     const db = getFirestore();
-    const doc = await db.collection('companies').doc(companyId).get();
-    const d = doc.data() ?? {};
+    const doc = await db.collection('companies').doc(companyId).get().catch((err) => {
+      logger.error('[Reception] company info read failed', { error: String(err) });
+      return null;
+    });
+    const d = doc?.data() ?? {};
     return {
       name:         (d['name'] as string) ?? 'The Company',
       address:      (d['address'] as string) ?? 'Adresse non configuree',
@@ -201,9 +223,12 @@ export const presenceStatusTool = ai.defineTool(
     const pSnap = await db.collection('presence')
       .where('companyId', '==', companyId)
       .where('date', '==', today)
-      .limit(200).get();
+      .limit(200).get().catch((err) => {
+        logger.error('[Reception] presence read failed', { error: String(err) });
+        return null;
+      });
 
-    const present = pSnap.docs
+    const present = (pSnap?.docs ?? [])
       .filter(d => d.data()['status'] === 'present')
       .map(d => ({
         name: (d.data()['employeeName'] as string) ?? '',
@@ -216,7 +241,9 @@ export const presenceStatusTool = ai.defineTool(
       const uSnap = await db.collection('users')
         .where('companyId', '==', companyId).get();
       totalEmployees = uSnap.size;
-    } catch {}
+    } catch (err) {
+      logger.error('[Reception] users count read failed', { error: String(err) });
+    }
 
     return {
       present,
@@ -244,19 +271,24 @@ export const employeeCheckinTool = ai.defineTool(
     const today = new Date().toISOString().split('T')[0];
     const id = `${employeeId}_${today}`;
 
-    const existing = await db.collection('presence').doc(id).get();
-    if (existing.exists) {
+    const existing = await db.collection('presence').doc(id).get().catch(() => null);
+    if (existing?.exists) {
       return { success: false, message: `${employeeName} est deja pointe(e) aujourd'hui.` };
     }
 
-    await db.collection('presence').doc(id).set({
-      companyId, employeeId, employeeName,
-      department: department ?? '',
-      date: today,
-      checkInAt: FieldValue.serverTimestamp(),
-      checkOutAt: null,
-      status: 'present',
-    });
+    try {
+      await db.collection('presence').doc(id).set({
+        companyId, employeeId, employeeName,
+        department: department ?? '',
+        date: today,
+        checkInAt: FieldValue.serverTimestamp(),
+        checkOutAt: null,
+        status: 'present',
+      });
+    } catch (err) {
+      logger.error('[Reception] employee checkin write failed', { error: String(err) });
+      return { success: false, message: 'Pointage impossible.' };
+    }
 
     return { success: true, message: `${employeeName} pointe(e) comme present(e).` };
   }
@@ -284,9 +316,12 @@ export const checkinByCodeTool = ai.defineTool(
       .where('companyId', '==', companyId)
       .where('employeeCode', '==', code)
       .where('codeActive', '==', true)
-      .limit(1).get();
+      .limit(1).get().catch((err) => {
+        logger.error('[Reception] code lookup read failed', { error: String(err) });
+        return null;
+      });
 
-    if (snap.empty) {
+    if (!snap || snap.empty) {
       return { success: false, action: 'error', employeeName: '', message: 'Code invalide ou revoque.' };
     }
 
@@ -297,28 +332,38 @@ export const checkinByCodeTool = ai.defineTool(
     const today = new Date().toISOString().split('T')[0];
     const presenceId = `${employeeId}_${today}`;
 
-    const existing = await db.collection('presence').doc(presenceId).get();
+    const existing = await db.collection('presence').doc(presenceId).get().catch(() => null);
 
-    if (existing.exists) {
+    if (existing?.exists) {
       if (existing.data()?.status === 'present') {
         const checkIn = existing.data()?.checkInAt?.toDate?.() ?? existing.data()?.checkInAt;
         const checkOut = new Date();
         const hoursWorked = checkIn ? parseFloat(((checkOut.getTime() - new Date(checkIn).getTime()) / 3600000).toFixed(2)) : 0;
-        await db.collection('presence').doc(presenceId).update({ checkOutAt: checkOut, status: 'checked_out', hoursWorked });
+        try {
+          await db.collection('presence').doc(presenceId).update({ checkOutAt: checkOut, status: 'checked_out', hoursWorked });
+        } catch (err) {
+          logger.error('[Reception] checkout update failed', { error: String(err) });
+          return { success: false, action: 'error', employeeName, message: 'Pointage de depart impossible.' };
+        }
         return { success: true, action: 'checkout', employeeName, hoursWorked, message: `${employeeName} a pointe son depart (${hoursWorked}h).` };
       }
       return { success: true, action: 'already_done', employeeName, message: `${employeeName} a deja termine sa journee.` };
     }
 
-    await db.collection('presence').doc(presenceId).set({
-      companyId, employeeId, employeeName,
-      employeeEmail: (empData['email'] as string) ?? '',
-      department: (empData['department'] as string) ?? '',
-      date: today,
-      checkInAt: FieldValue.serverTimestamp(),
-      checkOutAt: null,
-      status: 'present',
-    });
+    try {
+      await db.collection('presence').doc(presenceId).set({
+        companyId, employeeId, employeeName,
+        employeeEmail: (empData['email'] as string) ?? '',
+        department: (empData['department'] as string) ?? '',
+        date: today,
+        checkInAt: FieldValue.serverTimestamp(),
+        checkOutAt: null,
+        status: 'present',
+      });
+    } catch (err) {
+      logger.error('[Reception] checkinByCode write failed', { error: String(err) });
+      return { success: false, action: 'error', employeeName, message: 'Pointage impossible.' };
+    }
     return { success: true, action: 'checkin', employeeName, message: `${employeeName} pointe(e) comme present(e).` };
   }
 );
@@ -353,7 +398,12 @@ export const leaveStatusTool = ai.defineTool(
       query = query.where('status', '==', status) as typeof query;
     }
 
-    const snap = await (query as ReturnType<typeof db.collection>).limit(100).get();
+    const snap = await (query as ReturnType<typeof db.collection>).limit(100).get().catch((err) => {
+      logger.error('[Reception] leave requests read failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { requests: [], total: 0 };
+
     const requests = snap.docs.map(d => ({
       id: d.id,
       employeeName: (d.data()['employeeName'] as string) ?? '',
@@ -393,7 +443,11 @@ export const directoryLookupTool = ai.defineTool(
     const db = getFirestore();
     const snap = await db.collection('users')
       .where('companyId', '==', companyId)
-      .limit(200).get();
+      .limit(200).get().catch((err) => {
+        logger.error('[Reception] directory lookup read failed', { error: String(err) });
+        return null;
+      });
+    if (!snap) return { results: [], total: 0 };
 
     const q = query.toLowerCase();
     const results = snap.docs
@@ -448,15 +502,21 @@ export const createEmployeeBadgeTool = ai.defineTool(
     let resolvedId = employeeId;
 
     if (employeeId) {
-      empDoc = await db.collection('users').doc(employeeId).get();
-      if (!empDoc.exists) {
+      empDoc = await db.collection('users').doc(employeeId).get().catch(() => null);
+      if (!empDoc?.exists) {
         return { success: false, employeeName: '', department: '', jobTitle: '', message: 'Employe non trouve avec cet ID.' };
       }
       empData = empDoc.data() as Record<string, unknown>;
     } else if (employeeName) {
       const snap = await db.collection('users')
         .where('companyId', '==', companyId)
-        .limit(200).get();
+        .limit(200).get().catch((err) => {
+          logger.error('[Reception] badge employee lookup failed', { error: String(err) });
+          return null;
+        });
+      if (!snap) {
+        return { success: false, employeeName: employeeName ?? '', department: '', jobTitle: '', message: 'Lecture de l\'annuaire impossible.' };
+      }
       const q = employeeName.toLowerCase();
       const match = snap.docs.find(d => {
         const name = ((d.data()['displayName'] as string) ?? '').toLowerCase();
@@ -476,9 +536,12 @@ export const createEmployeeBadgeTool = ai.defineTool(
       .where('companyId', '==', companyId)
       .where('employeeId', '==', resolvedId)
       .where('status', '==', 'active')
-      .limit(1).get();
+      .limit(1).get().catch((err) => {
+        logger.error('[Reception] badge existence check failed', { error: String(err) });
+        return null;
+      });
 
-    if (!existingSnap.empty) {
+    if (existingSnap && !existingSnap.empty) {
       const existing = existingSnap.docs[0].data();
       return {
         success: true,
@@ -500,25 +563,34 @@ export const createEmployeeBadgeTool = ai.defineTool(
     const jobTitle = (empData!['jobTitle'] as string) ?? '';
     const photoURL = (empData!['photoURL'] as string) ?? undefined;
 
-    await db.collection('employeeBadges').doc(badgeId).set({
-      companyId,
-      employeeId: resolvedId,
-      badgeNumber,
-      employeeName: name,
-      department,
-      jobTitle,
-      email: (empData!['email'] as string) ?? '',
-      phone: (empData!['phone'] as string) ?? '',
-      photoURL: photoURL ?? null,
-      status: 'active',
-      issuedAt: FieldValue.serverTimestamp(),
-      expiresAt: null,
-      createdBy: 'agent',
-    });
+    try {
+      await db.collection('employeeBadges').doc(badgeId).set({
+        companyId,
+        employeeId: resolvedId,
+        badgeNumber,
+        employeeName: name,
+        department,
+        jobTitle,
+        email: (empData!['email'] as string) ?? '',
+        phone: (empData!['phone'] as string) ?? '',
+        photoURL: photoURL ?? null,
+        status: 'active',
+        issuedAt: FieldValue.serverTimestamp(),
+        expiresAt: null,
+        createdBy: 'agent',
+      });
+    } catch (err) {
+      logger.error('[Reception] badge create failed', { error: String(err) });
+      return { success: false, employeeName: name, department, jobTitle, message: 'Creation du badge impossible.' };
+    }
 
-    await db.collection('users').doc(resolvedId!).update({
-      badgeId, badgeNumber, badgeIssuedAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection('users').doc(resolvedId!).update({
+        badgeId, badgeNumber, badgeIssuedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.warn('[Reception] badge user update failed (non-blocking)', { error: String(err) });
+    }
 
     return {
       success: true,
@@ -615,6 +687,7 @@ export const preRegisterVisitorTool = ai.defineTool(
       notes: z.string().optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
       registrationId: z.string(), qrCode: z.string(), status: z.string(), message: z.string(),
     }),
   },
@@ -623,17 +696,26 @@ export const preRegisterVisitorTool = ai.defineTool(
     const id = generateId();
     const qrCode = `PRE-${id.slice(0, 8).toUpperCase()}`;
 
-    await db.collection(`companies/${companyId}/preRegistrations`).doc(id).set({
-      id, visitorName, visitorEmail, visitorCompany: visitorCompany ?? '',
-      hostName, hostEmail: hostEmail ?? '', purpose: purpose ?? '',
-      scheduledDate, scheduledTime: scheduledTime ?? '09:00',
-      requiresNDA: requiresNDA ?? false, requiresParking: requiresParking ?? false,
-      notes: notes ?? '', qrCode, status: 'pending_approval',
-      ndaSigned: false, checkedIn: false,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/preRegistrations`).doc(id).set({
+        id, visitorName, visitorEmail, visitorCompany: visitorCompany ?? '',
+        hostName, hostEmail: hostEmail ?? '', purpose: purpose ?? '',
+        scheduledDate, scheduledTime: scheduledTime ?? '09:00',
+        requiresNDA: requiresNDA ?? false, requiresParking: requiresParking ?? false,
+        notes: notes ?? '', qrCode, status: 'pending_approval',
+        ndaSigned: false, checkedIn: false,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[Reception] pre-registration write failed', { error: String(err) });
+      return {
+        success: false, registrationId: '', qrCode: '', status: 'error',
+        message: `Pre-enregistrement impossible: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
 
     return {
+      success: true,
       registrationId: id, qrCode, status: 'pending_approval',
       message: `Pre-enregistrement cree pour ${visitorName} le ${scheduledDate}. QR: ${qrCode}. En attente d'approbation par ${hostName}.`,
     };
@@ -654,18 +736,23 @@ export const registerDeliveryTool = ai.defineTool(
       recipientName: z.string(), recipientDepartment: z.string().optional(),
       signed: z.boolean().optional(),
     }),
-    outputSchema: z.object({ deliveryId: z.string(), status: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean(), deliveryId: z.string(), status: z.string(), message: z.string() }),
   },
   async ({ companyId, carrier, trackingNumber, itemCount, description, recipientName, recipientDepartment, signed }) => {
     const db = getFirestore();
     const id = generateId();
-    await db.collection(`companies/${companyId}/deliveries`).doc(id).set({
-      id, carrier, trackingNumber: trackingNumber ?? '', itemCount: itemCount ?? 1,
-      description: description ?? '', recipientName, recipientDepartment: recipientDepartment ?? '',
-      signed: signed ?? false, status: 'received',
-      receivedAt: FieldValue.serverTimestamp(), collectedAt: null,
-    });
-    return { deliveryId: id, status: 'received', message: `Livraison ${carrier} enregistree — ${itemCount} colis pour ${recipientName}. En attente de collecte.` };
+    try {
+      await db.collection(`companies/${companyId}/deliveries`).doc(id).set({
+        id, carrier, trackingNumber: trackingNumber ?? '', itemCount: itemCount ?? 1,
+        description: description ?? '', recipientName, recipientDepartment: recipientDepartment ?? '',
+        signed: signed ?? false, status: 'received',
+        receivedAt: FieldValue.serverTimestamp(), collectedAt: null,
+      });
+    } catch (err) {
+      logger.error('[Reception] delivery write failed', { error: String(err) });
+      return { success: false, deliveryId: '', status: 'error', message: 'Enregistrement de la livraison impossible.' };
+    }
+    return { success: true, deliveryId: id, status: 'received', message: `Livraison ${carrier} enregistree — ${itemCount} colis pour ${recipientName}. En attente de collecte.` };
   }
 );
 
@@ -681,7 +768,11 @@ export const getDeliveriesTool = ai.defineTool(
     let q = db.collection(`companies/${companyId}/deliveries`) as FirebaseFirestore.Query;
     if (status === 'pending') q = q.where('status', '==', 'received');
     else if (status === 'collected') q = q.where('status', '==', 'collected');
-    const snap = await q.orderBy('receivedAt', 'desc').limit(50).get();
+    const snap = await q.orderBy('receivedAt', 'desc').limit(50).get().catch((err) => {
+      logger.error('[Reception] deliveries read failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { deliveries: [], total: 0 };
     const deliveries = snap.docs.map(d => {
       const data = d.data();
       return {
@@ -716,14 +807,20 @@ export const getEvacuationStatusTool = ai.defineTool(
     const today = new Date().toISOString().split('T')[0];
 
     // Present employees
-    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).where('status', '==', 'present').limit(500).get();
-    const employees = presSnap.docs.map(d => ({
+    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).where('status', '==', 'present').limit(500).get().catch((err) => {
+      logger.error('[Reception] evacuation presence read failed', { error: String(err) });
+      return null;
+    });
+    const employees = (presSnap?.docs ?? []).map(d => ({
       name: (d.data()['employeeName'] as string) ?? '', department: (d.data()['department'] as string) ?? '',
     }));
 
     // Checked-in visitors
-    const visSnap = await db.collection('visitors').where('companyId', '==', companyId).where('status', '==', 'checked_in').limit(100).get();
-    const visitors = visSnap.docs.map(d => ({
+    const visSnap = await db.collection('visitors').where('companyId', '==', companyId).where('status', '==', 'checked_in').limit(100).get().catch((err) => {
+      logger.error('[Reception] evacuation visitors read failed', { error: String(err) });
+      return null;
+    });
+    const visitors = (visSnap?.docs ?? []).map(d => ({
       name: (d.data()['name'] as string) ?? '', host: (d.data()['host'] as string) ?? '',
       company: (d.data()['company'] as string) ?? '',
     }));
@@ -750,6 +847,7 @@ export const manageParkingTool = ai.defineTool(
       spotId: z.string().optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
       spots: z.array(z.object({ id: z.string(), status: z.string(), occupant: z.string(), plate: z.string() })).optional(),
       spotId: z.string().optional(), message: z.string(),
     }),
@@ -759,34 +857,58 @@ export const manageParkingTool = ai.defineTool(
     const col = db.collection(`companies/${companyId}/parkingSpots`);
 
     if (action === 'list') {
-      const snap = await col.limit(50).get();
+      const snap = await col.limit(50).get().catch((err) => {
+        logger.error('[Reception] parking list read failed', { error: String(err) });
+        return null;
+      });
+      if (!snap) return { success: false, message: 'Lecture des places de parking impossible.' };
       const spots = snap.docs.map(d => ({
         id: d.id, status: (d.data()['status'] as string) ?? 'available',
         occupant: (d.data()['occupant'] as string) ?? '', plate: (d.data()['plate'] as string) ?? '',
       }));
-      return { spots, message: `${spots.filter(s => s.status === 'available').length} place(s) disponible(s) sur ${spots.length}.` };
+      return { success: true, spots, message: `${spots.filter(s => s.status === 'available').length} place(s) disponible(s) sur ${spots.length}.` };
     }
 
     if (action === 'reserve') {
       // Find available spot
-      const available = await col.where('status', '==', 'available').limit(1).get();
+      const available = await col.where('status', '==', 'available').limit(1).get().catch((err) => {
+        logger.error('[Reception] parking reserve read failed', { error: String(err) });
+        return null;
+      });
+      if (!available) return { success: false, message: 'Recherche de place impossible.' };
       if (available.empty) {
         // Create new spot
-        const id = `P-${(await col.get()).size + 1}`;
-        await col.doc(id).set({ id, status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
-        return { spotId: id, message: `Place ${id} reservee pour ${visitorName ?? 'visiteur'}${plateNumber ? ` (${plateNumber})` : ''}.` };
+        try {
+          const allSnap = await col.get();
+          const id = `P-${allSnap.size + 1}`;
+          await col.doc(id).set({ id, status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
+          return { success: true, spotId: id, message: `Place ${id} reservee pour ${visitorName ?? 'visiteur'}${plateNumber ? ` (${plateNumber})` : ''}.` };
+        } catch (err) {
+          logger.error('[Reception] parking create failed', { error: String(err) });
+          return { success: false, message: 'Reservation de place impossible.' };
+        }
       }
       const spot = available.docs[0];
-      await spot.ref.update({ status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
-      return { spotId: spot.id, message: `Place ${spot.id} reservee pour ${visitorName ?? 'visiteur'}.` };
+      try {
+        await spot.ref.update({ status: 'reserved', occupant: visitorName ?? '', plate: plateNumber ?? '', reservedAt: new Date() });
+      } catch (err) {
+        logger.error('[Reception] parking reserve update failed', { error: String(err) });
+        return { success: false, message: 'Reservation de place impossible.' };
+      }
+      return { success: true, spotId: spot.id, message: `Place ${spot.id} reservee pour ${visitorName ?? 'visiteur'}.` };
     }
 
     if (action === 'release' && spotId) {
-      await col.doc(spotId).update({ status: 'available', occupant: '', plate: '', reservedAt: null });
-      return { spotId, message: `Place ${spotId} liberee.` };
+      try {
+        await col.doc(spotId).update({ status: 'available', occupant: '', plate: '', reservedAt: null });
+      } catch (err) {
+        logger.error('[Reception] parking release failed', { error: String(err) });
+        return { success: false, message: 'Liberation de place impossible.' };
+      }
+      return { success: true, spotId, message: `Place ${spotId} liberee.` };
     }
 
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
   }
 );
 
@@ -813,7 +935,17 @@ export const getVisitorAnalyticsTool = ai.defineTool(
     const days = period === 'week' ? 7 : period === 'month' ? 30 : 90;
     const cutoff = new Date(Date.now() - days * 86400000);
 
-    const snap = await db.collection('visitors').where('companyId', '==', companyId).where('checkInAt', '>=', cutoff).limit(500).get();
+    const snap = await db.collection('visitors').where('companyId', '==', companyId).where('checkInAt', '>=', cutoff).limit(500).get().catch((err) => {
+      logger.error('[Reception] visitor analytics read failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) {
+      return {
+        totalVisitors: 0, avgDuration: 0,
+        peakHours: [], purposeBreakdown: [], typeBreakdown: [],
+        repeatVisitors: 0, uniqueCompanies: 0, dailyTrend: [],
+      };
+    }
     const visitors = snap.docs.map(d => d.data());
 
     // Peak hours

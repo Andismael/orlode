@@ -53,6 +53,8 @@ import { coachAgentTool }                 from './coach.agent';
 import { dataScientistAgentTool }         from './datascientist.agent';
 import { approvalAgentTool }             from './approval.agent';
 import { websiteAgentTool }              from './website.agent';
+import { COMMERCE_TOOLS }                 from './commerce.agent';
+import { META_ADS_TOOLS }                 from './metaAds.agent';
 // commercialAgentTool is for the PUBLIC landing page chatbot only — NOT for internal use
 import {
   getDocumentsTool, readDocumentTool, editDocumentTool,
@@ -179,6 +181,10 @@ const ORCHESTRATOR_TOOLS = [
   createQuoteTool,
   sendAlertTool,
   generateReportTool,
+  // Commerce (Boutique WhatsApp) — list products, place orders, owner ops
+  ...COMMERCE_TOOLS,
+  // Meta Ads — manage CTW campaigns from chat ("@admin lance une promo X")
+  ...META_ADS_TOOLS,
 ];
 
 const SYSTEM_PROMPT_TEMPLATE = `You are the intelligent AI assistant for "{{COMPANY_NAME}}".
@@ -307,6 +313,7 @@ Examples:
 - Always cite which agent/source provided the information
 - If you used multiple agents, synthesize their outputs cohesively
 - Respond in the same language as the user's message
+- **Preserve URLs verbatim**: when a tool result contains an http(s):// URL, include it AS-IS in your reply. Never replace it with link text alone — the user must be able to copy/click it. Critical for setup error messages that point to admin pages.
 - ALWAYS include relevant navigation links in your responses using markdown format:
   - After creating an appointment → [Voir le calendrier](/calendar)
   - After creating a quote/devis → [Voir l'espace de travail](/workspace)

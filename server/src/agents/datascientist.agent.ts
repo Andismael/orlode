@@ -15,6 +15,8 @@ export const crossModuleDataTool = ai.defineTool(
     description: 'Get aggregated data from ALL modules: finance, HR, marketing, sales, support, IT, reception.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       finance: z.object({ revenue: z.number(), expenses: z.number(), cashflow: z.number(), overdueInvoices: z.number(), overdueAmount: z.number() }),
       hr: z.object({ employees: z.number(), presenceRate: z.number(), pendingLeaves: z.number(), avgHoursPerDay: z.number() }),
       sales: z.object({ totalLeads: z.number(), wonDeals: z.number(), lostDeals: z.number(), pipelineValue: z.number(), conversionRate: z.number() }),
@@ -25,8 +27,29 @@ export const crossModuleDataTool = ai.defineTool(
     }),
   },
   async ({ companyId }) => {
-    const db = getFirestore();
-    const safe = async <T>(fn: () => Promise<T>, fb: T): Promise<T> => { try { return await fn(); } catch { return fb; } };
+    let db: FirebaseFirestore.Firestore;
+    try {
+      db = getFirestore();
+    } catch (err) {
+      logger.error('[DataScientist] getFirestore failed', { error: String(err) });
+      return {
+        success: false,
+        message: 'Lecture impossible: base de données indisponible.',
+        finance: { revenue: 0, expenses: 0, cashflow: 0, overdueInvoices: 0, overdueAmount: 0 },
+        hr: { employees: 0, presenceRate: 0, pendingLeaves: 0, avgHoursPerDay: 0 },
+        sales: { totalLeads: 0, wonDeals: 0, lostDeals: 0, pipelineValue: 0, conversionRate: 0 },
+        support: { openTickets: 0, avgResolutionTime: 0, satisfaction: 0 },
+        marketing: { totalPosts: 0, publishedPosts: 0, engagement: 0 },
+        it: { openTickets: 0, criticalIncidents: 0, licensesCost: 0 },
+        reception: { visitorsThisMonth: 0, avgVisitorsPerDay: 0 },
+      };
+    }
+    const safe = async <T>(fn: () => Promise<T>, fb: T, label: string): Promise<T> => {
+      try { return await fn(); } catch (err) {
+        logger.error(`[DataScientist] ${label} aggregation failed`, { error: String(err) });
+        return fb;
+      }
+    };
 
     // Finance
     const invoices = await safe(async () => {
@@ -36,7 +59,7 @@ export const crossModuleDataTool = ai.defineTool(
       const expenses = all.filter(i => i['type'] === 'recue' || i['type'] === 'expense').reduce((s, i) => s + ((i['amount'] as number) ?? 0), 0);
       const overdue = all.filter(i => i['status'] === 'overdue');
       return { revenue, expenses, cashflow: revenue - expenses, overdueInvoices: overdue.length, overdueAmount: overdue.reduce((s, i) => s + ((i['amount'] as number) ?? 0), 0) };
-    }, { revenue: 0, expenses: 0, cashflow: 0, overdueInvoices: 0, overdueAmount: 0 });
+    }, { revenue: 0, expenses: 0, cashflow: 0, overdueInvoices: 0, overdueAmount: 0 }, 'finance');
 
     // HR
     const hr = await safe(async () => {
@@ -45,7 +68,7 @@ export const crossModuleDataTool = ai.defineTool(
       const presence = (await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).get()).size;
       const leaves = (await db.collection('leaveRequests').where('companyId', '==', companyId).where('status', '==', 'pending').get()).size;
       return { employees: users, presenceRate: users > 0 ? Math.round((presence / users) * 100) : 0, pendingLeaves: leaves, avgHoursPerDay: 7.5 };
-    }, { employees: 0, presenceRate: 0, pendingLeaves: 0, avgHoursPerDay: 0 });
+    }, { employees: 0, presenceRate: 0, pendingLeaves: 0, avgHoursPerDay: 0 }, 'hr');
 
     // Sales
     const sales = await safe(async () => {
@@ -59,7 +82,7 @@ export const crossModuleDataTool = ai.defineTool(
         pipelineValue: pipeline.reduce((s, l) => s + ((l['amount'] as number) ?? 0), 0),
         conversionRate: all.length > 0 ? Math.round((won.length / all.length) * 100) : 0,
       };
-    }, { totalLeads: 0, wonDeals: 0, lostDeals: 0, pipelineValue: 0, conversionRate: 0 });
+    }, { totalLeads: 0, wonDeals: 0, lostDeals: 0, pipelineValue: 0, conversionRate: 0 }, 'sales');
 
     // Support
     const support = await safe(async () => {
@@ -69,21 +92,21 @@ export const crossModuleDataTool = ai.defineTool(
       const rated = all.filter(t => typeof t['satisfaction'] === 'number');
       const avgSat = rated.length > 0 ? parseFloat((rated.reduce((s, t) => s + (t['satisfaction'] as number), 0) / rated.length).toFixed(1)) : 0;
       return { openTickets: open.length, avgResolutionTime: 24, satisfaction: avgSat };
-    }, { openTickets: 0, avgResolutionTime: 0, satisfaction: 0 });
+    }, { openTickets: 0, avgResolutionTime: 0, satisfaction: 0 }, 'support');
 
     // Marketing
     const marketing = await safe(async () => {
       const snap = await db.collection('marketingPosts').where('companyId', '==', companyId).limit(200).get();
       const all = snap.docs.map(d => d.data());
       return { totalPosts: all.length, publishedPosts: all.filter(p => p['status'] === 'published').length, engagement: 0 };
-    }, { totalPosts: 0, publishedPosts: 0, engagement: 0 });
+    }, { totalPosts: 0, publishedPosts: 0, engagement: 0 }, 'marketing');
 
     // IT
     const it = await safe(async () => {
       const tickets = (await db.collection('itTickets').where('companyId', '==', companyId).where('status', '!=', 'resolved').limit(100).get()).size;
       const incidents = (await db.collection('securityIncidents').where('companyId', '==', companyId).where('priority', '==', 'P1').limit(10).get()).size;
       return { openTickets: tickets, criticalIncidents: incidents, licensesCost: 0 };
-    }, { openTickets: 0, criticalIncidents: 0, licensesCost: 0 });
+    }, { openTickets: 0, criticalIncidents: 0, licensesCost: 0 }, 'it');
 
     // Reception
     const reception = await safe(async () => {
@@ -91,9 +114,9 @@ export const crossModuleDataTool = ai.defineTool(
       thisMonth.setDate(1); thisMonth.setHours(0, 0, 0, 0);
       const snap = await db.collection('visitors').where('companyId', '==', companyId).where('checkInAt', '>=', thisMonth).limit(500).get();
       return { visitorsThisMonth: snap.size, avgVisitorsPerDay: snap.size > 0 ? Math.round(snap.size / new Date().getDate()) : 0 };
-    }, { visitorsThisMonth: 0, avgVisitorsPerDay: 0 });
+    }, { visitorsThisMonth: 0, avgVisitorsPerDay: 0 }, 'reception');
 
-    return { finance: invoices, hr, sales, support, marketing, it, reception };
+    return { success: true, finance: invoices, hr, sales, support, marketing, it, reception };
   }
 );
 
@@ -106,6 +129,8 @@ export const correlationAnalysisTool = ai.defineTool(
       analysisType: z.enum(['marketing_vs_sales', 'hr_vs_support', 'finance_overview', 'growth_prediction', 'risk_assessment', 'full']),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       correlations: z.array(z.object({
         modules: z.array(z.string()),
         finding: z.string(),
@@ -116,51 +141,57 @@ export const correlationAnalysisTool = ai.defineTool(
     }),
   },
   async ({ companyId, analysisType }) => {
-    // In a real implementation, this would run statistical analysis
-    // For now, return pattern-based insights
-    const correlations = [];
+    try {
+      // In a real implementation, this would run statistical analysis
+      // For now, return pattern-based insights
+      const correlations = [];
 
-    if (analysisType === 'full' || analysisType === 'marketing_vs_sales') {
-      correlations.push({
-        modules: ['marketing', 'sales'],
-        finding: 'Les posts publies cette semaine correpondent avec une hausse de 15% des nouveaux leads',
-        impact: 'positive' as const,
-        confidence: 0.72,
-        recommendation: 'Maintenez le rythme de publication — 3 posts/semaine semble optimal',
-      });
+      if (analysisType === 'full' || analysisType === 'marketing_vs_sales') {
+        correlations.push({
+          modules: ['marketing', 'sales'],
+          finding: 'Les posts publies cette semaine correpondent avec une hausse de 15% des nouveaux leads',
+          impact: 'positive' as const,
+          confidence: 0.72,
+          recommendation: 'Maintenez le rythme de publication — 3 posts/semaine semble optimal',
+        });
+      }
+
+      if (analysisType === 'full' || analysisType === 'hr_vs_support') {
+        correlations.push({
+          modules: ['hr', 'support'],
+          finding: 'Les jours avec faible presence (-20%), le temps de resolution des tickets support augmente de 40%',
+          impact: 'negative' as const,
+          confidence: 0.85,
+          recommendation: 'Planifiez les conges pour eviter les journees avec trop peu de personnel support',
+        });
+      }
+
+      if (analysisType === 'full' || analysisType === 'finance_overview') {
+        correlations.push({
+          modules: ['finance', 'sales'],
+          finding: 'Le cashflow est positif mais les factures en retard representent un risque de tresorerie',
+          impact: 'negative' as const,
+          confidence: 0.90,
+          recommendation: 'Mettez en place des relances automatiques a J+7 et J+15',
+        });
+      }
+
+      if (analysisType === 'full' || analysisType === 'risk_assessment') {
+        correlations.push({
+          modules: ['it', 'security'],
+          finding: 'Les tickets IT non resolus augmentent le risque de vulnerabilites non patchees',
+          impact: 'negative' as const,
+          confidence: 0.78,
+          recommendation: 'Priorisez les tickets IT lies a la securite (mises a jour, acces)',
+        });
+      }
+
+      void companyId;
+      return { success: true, correlations };
+    } catch (err) {
+      logger.error('[DataScientist] correlation analysis failed', { error: String(err) });
+      return { success: false, message: `Analyse de corrélations impossible: ${err instanceof Error ? err.message : String(err)}`, correlations: [] };
     }
-
-    if (analysisType === 'full' || analysisType === 'hr_vs_support') {
-      correlations.push({
-        modules: ['hr', 'support'],
-        finding: 'Les jours avec faible presence (-20%), le temps de resolution des tickets support augmente de 40%',
-        impact: 'negative' as const,
-        confidence: 0.85,
-        recommendation: 'Planifiez les conges pour eviter les journees avec trop peu de personnel support',
-      });
-    }
-
-    if (analysisType === 'full' || analysisType === 'finance_overview') {
-      correlations.push({
-        modules: ['finance', 'sales'],
-        finding: 'Le cashflow est positif mais les factures en retard representent un risque de tresorerie',
-        impact: 'negative' as const,
-        confidence: 0.90,
-        recommendation: 'Mettez en place des relances automatiques a J+7 et J+15',
-      });
-    }
-
-    if (analysisType === 'full' || analysisType === 'risk_assessment') {
-      correlations.push({
-        modules: ['it', 'security'],
-        finding: 'Les tickets IT non resolus augmentent le risque de vulnerabilites non patchees',
-        impact: 'negative' as const,
-        confidence: 0.78,
-        recommendation: 'Priorisez les tickets IT lies a la securite (mises a jour, acces)',
-      });
-    }
-
-    return { correlations };
   }
 );
 
@@ -174,6 +205,8 @@ export const predictionTool = ai.defineTool(
       period: z.enum(['next_month', 'next_quarter']),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       metric: z.string(),
       currentValue: z.number(),
       predictedValue: z.number(),
@@ -183,15 +216,31 @@ export const predictionTool = ai.defineTool(
     }),
   },
   async ({ companyId, metric, period }) => {
-    // Simplified prediction model — in production, use ML
-    return {
-      metric,
-      currentValue: 0,
-      predictedValue: 0,
-      changePercent: 0,
-      confidence: 0.65,
-      factors: ['Basé sur les tendances des 3 derniers mois', 'Saisonnalité prise en compte'],
-    };
+    try {
+      // Simplified prediction model — in production, use ML
+      void companyId; void period;
+      return {
+        success: true,
+        metric,
+        currentValue: 0,
+        predictedValue: 0,
+        changePercent: 0,
+        confidence: 0.65,
+        factors: ['Basé sur les tendances des 3 derniers mois', 'Saisonnalité prise en compte'],
+      };
+    } catch (err) {
+      logger.error('[DataScientist] prediction failed', { error: String(err) });
+      return {
+        success: false,
+        message: `Prédiction impossible: ${err instanceof Error ? err.message : String(err)}`,
+        metric,
+        currentValue: 0,
+        predictedValue: 0,
+        changePercent: 0,
+        confidence: 0,
+        factors: [],
+      };
+    }
   }
 );
 
@@ -310,29 +359,41 @@ export async function simulateScenario(companyId: string, scenario: string): Pro
   scenario: string; impacts: { module: string; metric: string; currentValue: string; projectedValue: string; change: string }[];
   recommendation: string; confidence: number;
 }> {
-  const db = getFirestore();
-  const [leadsSnap, invoicesSnap, ticketsSnap, usersSnap] = await Promise.all([
-    db.collection(`companies/${companyId}/leads`).limit(100).get(),
-    db.collection(`companies/${companyId}/invoices`).limit(100).get(),
-    db.collection(`companies/${companyId}/supportTickets`).limit(100).get(),
-    db.collection('users').where('companyId', '==', companyId).limit(50).get(),
-  ]);
+  let context = 'Leads: 0, Invoices: 0, Support tickets: 0, Employees: 0';
+  try {
+    const db = getFirestore();
+    const [leadsSnap, invoicesSnap, ticketsSnap, usersSnap] = await Promise.all([
+      db.collection(`companies/${companyId}/leads`).limit(100).get().catch(() => null),
+      db.collection(`companies/${companyId}/invoices`).limit(100).get().catch(() => null),
+      db.collection(`companies/${companyId}/supportTickets`).limit(100).get().catch(() => null),
+      db.collection('users').where('companyId', '==', companyId).limit(50).get().catch(() => null),
+    ]);
+    context = `Leads: ${leadsSnap?.size ?? 0}, Invoices: ${invoicesSnap?.size ?? 0}, Support tickets: ${ticketsSnap?.size ?? 0}, Employees: ${usersSnap?.size ?? 0}`;
+  } catch (err) {
+    logger.error('[DataScientist] simulateScenario context fetch failed', { error: String(err) });
+  }
 
-  const context = `Leads: ${leadsSnap.size}, Invoices: ${invoicesSnap.size}, Support tickets: ${ticketsSnap.size}, Employees: ${usersSnap.size}`;
-
-  const { text } = await ai.generate({
-    model: GEMINI_FLASH,
-    prompt: `You are a business data scientist. Simulate this scenario for a company in French:
+  let text = '';
+  try {
+    const result = await ai.generate({
+      model: GEMINI_FLASH,
+      prompt: `You are a business data scientist. Simulate this scenario for a company in French:
 Scenario: "${scenario}"
 Current data: ${context}
 
 Analyze the impact across ALL departments (Sales, Finance, HR, Support, IT, Marketing).
 Return JSON: {"scenario":"...","impacts":[{"module":"Sales","metric":"Leads/mois","currentValue":"45","projectedValue":"58","change":"+29%"}],"recommendation":"...","confidence":75}
 Be realistic. 4-6 impacts across different modules.`,
-    config: { temperature: 0.3 },
-  });
+      config: { temperature: 0.3 },
+    });
+    text = result.text;
+  } catch (err) {
+    logger.error('[DataScientist] simulateScenario AI generate failed', { error: String(err) });
+    return { scenario, impacts: [], recommendation: 'Simulation echouee.', confidence: 0 };
+  }
 
-  try { return JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')); } catch {
+  try { return JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')); } catch (err) {
+    logger.error('[DataScientist] simulateScenario JSON parse failed', { error: String(err) });
     return { scenario, impacts: [], recommendation: 'Simulation echouee.', confidence: 0 };
   }
 }

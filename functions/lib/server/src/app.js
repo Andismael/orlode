@@ -76,7 +76,10 @@ const training_routes_1 = __importDefault(require("./routes/training.routes"));
 const company_routes_1 = __importDefault(require("./routes/company.routes"));
 const users_routes_1 = __importDefault(require("./routes/users.routes"));
 const whatsapp_routes_1 = __importDefault(require("./routes/whatsapp.routes"));
+const betaFeedback_routes_1 = __importDefault(require("./routes/betaFeedback.routes"));
 const social_routes_1 = __importDefault(require("./routes/social.routes"));
+const socialAi_routes_1 = __importDefault(require("./routes/socialAi.routes"));
+const contracts_routes_1 = __importDefault(require("./routes/contracts.routes"));
 const video_routes_1 = __importDefault(require("./routes/video.routes"));
 const public_routes_1 = __importDefault(require("./routes/public.routes"));
 const wemas_routes_1 = __importStar(require("./routes/wemas.routes"));
@@ -85,6 +88,8 @@ const marketplace_routes_1 = __importDefault(require("./routes/marketplace.route
 const team_routes_1 = __importDefault(require("./routes/team.routes"));
 const referral_routes_1 = __importDefault(require("./routes/referral.routes"));
 const website_routes_1 = __importDefault(require("./routes/website.routes"));
+const commerce_routes_1 = __importDefault(require("./routes/commerce.routes"));
+const publicCommerce_routes_1 = __importDefault(require("./routes/publicCommerce.routes"));
 const creator_routes_1 = __importDefault(require("./routes/creator.routes"));
 const superadmin_routes_1 = __importDefault(require("./routes/superadmin.routes"));
 const me_routes_1 = __importDefault(require("./routes/me.routes"));
@@ -103,6 +108,8 @@ const cloneAnalytics_routes_1 = __importDefault(require("./routes/cloneAnalytics
 const myStatus_routes_1 = __importDefault(require("./routes/myStatus.routes"));
 const azure_routes_1 = __importDefault(require("./routes/azure.routes"));
 const msOauth_routes_1 = __importDefault(require("./routes/msOauth.routes"));
+const datascientist_routes_1 = __importDefault(require("./routes/datascientist.routes"));
+const kora_routes_1 = __importDefault(require("./routes/kora.routes"));
 // Genkit flows — import to register all flows with the Genkit runtime
 require("./genkit");
 // MCP availability check
@@ -207,6 +214,8 @@ app.use('/api/clone-analytics', cloneAnalytics_routes_1.default);
 app.use('/api/my-status', myStatus_routes_1.default);
 app.use('/api/azure', azure_routes_1.default);
 app.use('/api/ms-oauth', msOauth_routes_1.default);
+app.use('/api/datascientist', datascientist_routes_1.default);
+app.use('/api/kora', kora_routes_1.default);
 app.use('/api/reception', reception_routes_1.default);
 app.use('/api/agents', agents_routes_1.default);
 app.use('/api/support', support_routes_1.default);
@@ -227,18 +236,27 @@ const clone_routes_1 = __importDefault(require("./routes/clone.routes"));
 app.use('/api/clone', clone_routes_1.default);
 app.use('/api/public', public_routes_1.default);
 app.use('/api/public', wemas_routes_1.publicContractRouter);
+app.use('/api/public', publicCommerce_routes_1.default);
 app.use('/api/team', team_routes_1.default);
 app.use('/api/referral', referral_routes_1.default);
 app.use('/api/website', website_routes_1.default);
+app.use('/api/commerce', commerce_routes_1.default);
 // Public visitor booking (no auth)
 const reception_routes_2 = require("./routes/reception.routes");
 app.post('/api/public/book/:companyId', reception_routes_2.publicBookingHandler);
-app.use('/api/contracts', wemas_routes_1.default);
+app.use('/api/contracts', wemas_routes_1.default); // legacy direct-Firestore (used by ContractDashboard / PortfolioNotes / templates / comments)
 app.use('/api/legal', legal_routes_1.default);
 app.use('/api/whatsapp', whatsapp_routes_1.default);
+app.use('/api/beta-feedback', betaFeedback_routes_1.default);
 const dataDeletion_routes_1 = __importDefault(require("./routes/dataDeletion.routes"));
 app.use('/api', dataDeletion_routes_1.default);
+app.use('/api/social/ai', socialAi_routes_1.default);
 app.use('/api/social', social_routes_1.default);
+// Wemas bridge mounted at /api/wemas to avoid path collision with the legacy
+// /api/contracts router above (which still serves ContractDashboard etc.).
+// New e-signature features (HR/Sales sendForSignature, ContractsPage admin) all
+// hit /api/wemas/*. Legacy callers continue to work as before.
+app.use('/api/wemas', contracts_routes_1.default);
 app.use('/api/video', video_routes_1.default);
 app.use('/api/notifications', notification_routes_1.default);
 app.use('/api/subscription', subscription_routes_1.default);

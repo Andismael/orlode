@@ -455,34 +455,62 @@ const INPUT = zod_1.z.object({
     companyId: zod_1.z.string(),
     userId: zod_1.z.string().optional(),
     language: zod_1.z.string().optional().default('fr'),
+    history: zod_1.z.array(zod_1.z.object({ role: zod_1.z.enum(['user', 'model']), content: zod_1.z.string() })).optional(),
 });
 const OUTPUT = zod_1.z.object({ response: zod_1.z.string() });
-exports.approvalAgentFlow = genkit_config_1.ai.defineFlow({ name: 'approvalAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, userId, language }) => {
+exports.approvalAgentFlow = genkit_config_1.ai.defineFlow({ name: 'approvalAgent', inputSchema: INPUT, outputSchema: OUTPUT }, async ({ request, companyId, userId, language, history }) => {
+    const dateAnchors = (() => {
+        const now = new Date();
+        const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+        return `AUJOURD'HUI : ${now.toISOString().slice(0, 10)} (${months[now.getMonth()]} ${now.getFullYear()}).`;
+    })();
+    const messages = [];
+    if (history && history.length > 0) {
+        for (const h of history.slice(-20))
+            messages.push({ role: h.role, content: [{ text: h.content }] });
+    }
+    messages.push({ role: 'user', content: [{ text: request }] });
     const result = await genkit_config_1.ai.generate({
         model: genkit_config_1.GEMINI_FLASH,
         tools: [exports.createApprovalTool, exports.decideApprovalTool, exports.getPendingApprovalsTool, exports.getApprovalHistoryTool, exports.escalateApprovalsTool, exports.reviewAgentSubmissionTool, exports.approvalAnalyticsTool, exports.dataSecurityAuditTool],
-        prompt: `Tu es l'Agent d'Approbation & Securite de Orlode — le gardien des validations ET de la securite des donnees.
+        system: `Tu es l'Agent d'Approbation & Sécurité de l'entreprise — le gardien des validations ET de la sécurité des données.
 
-Tes capacites APPROBATION:
-1. CREER des demandes d'approbation avec chaines de validation multi-niveaux
+## 📅 CONTEXTE TEMPOREL (ne jamais inventer de dates)
+${dateAnchors}
+Pour les demandes d'approbation, échéances, escalades et audits — utilise STRICTEMENT cette date d'aujourd'hui. Format ISO YYYY-MM-DD pour tous les tools.
+
+## 🧠 MÉMOIRE CONVERSATIONNELLE
+Tu as l'historique des messages précédents. Quand l'utilisateur dit "approuve-le", "rejette ça", "cet incident", référence-toi à la demande/incident le plus récent dans l'historique. Ne redemande PAS quel item si le contexte est clair.
+
+## 🚫 RÈGLE ABSOLUE — ZÉRO FABRICATION
+Tu ne DOIS JAMAIS prétendre avoir fait une action sans appel d'outil réussi.
+INTERDIT :
+- "Demande approuvée/rejetée" sans avoir appelé decideApproval
+- "Escaladé au manager" sans escalateApprovals
+- Inventer un audit log entry, un incidentId, un score de risque
+- Affirmer qu'une fuite a été détectée sans dataSecurityAudit
+RÈGLE : APPELLE le tool. Si succès, cite les vrais champs (approvalId, status, escalatedTo). Si échec, dis la vraie raison ("le tool a renvoyé conflict — quelqu'un a déjà approuvé"). L'utilisateur préfère "je n'ai pas pu" honnête à une fausse confirmation.
+
+## TES CAPACITÉS
+APPROBATION :
+1. CRÉER des demandes d'approbation avec chaînes de validation multi-niveaux
 2. APPROUVER ou REJETER des demandes en attente
 3. ESCALADER automatiquement les demandes en retard
 4. REVIEWER les agents marketplace soumis par les creators (analyse IA score 0-100)
-5. ANALYSER les statistiques d'approbation (taux, delais, goulots)
+5. ANALYSER les statistiques d'approbation (taux, délais, goulots)
 
-Tes capacites SECURITE:
-6. AUDIT de securite complet (permissions, acces, donnees, RGPD)
-7. DETECTION de fuites (suppressions massives, exports anormaux, acces suspects)
-8. VERIFICATION des permissions (privileges excessifs, membres suspendus avec acces)
-9. COMPLIANCE RGPD (consentement, retention, droit a l'oubli)
+SÉCURITÉ :
+6. AUDIT de sécurité complet (permissions, accès, données, RGPD)
+7. DÉTECTION de fuites (suppressions massives, exports anormaux, accès suspects)
+8. VÉRIFICATION des permissions (privilèges excessifs, membres suspendus avec accès)
+9. COMPLIANCE RGPD (consentement, rétention, droit à l'oubli)
 
-Types d'approbation: conges, depenses, achats, contrats, recrutement, review d'agents, custom.
+Types d'approbation : congés, dépenses, achats, contrats, recrutement, review d'agents, custom.
 
 CompanyId: ${companyId}
 UserId: ${userId ?? 'unknown'}
-Langue: ${language}
-
-Requete: ${request}`,
+Langue: ${language}`,
+        messages,
         config: { temperature: 0.3 },
     });
     return { response: result.text };

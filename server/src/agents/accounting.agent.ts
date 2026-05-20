@@ -41,15 +41,15 @@ export const createInvoiceTool = ai.defineTool(
       notes: z.string().optional(),
       taxRate: z.number().optional().default(20),
     }),
-    outputSchema: z.object({ invoiceId: z.string(), number: z.string(), totalHT: z.number(), totalTTC: z.number(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean(), invoiceId: z.string(), number: z.string(), totalHT: z.number(), totalTTC: z.number(), message: z.string() }),
   },
   async ({ companyId, client, clientEmail, items, currency, dueInDays, notes, taxRate }) => {
     const db = getFirestore();
     const id = generateId();
 
     // Auto-generate invoice number
-    const countSnap = await db.collection(`companies/${companyId}/invoices`).count().get();
-    const count = countSnap.data().count + 1;
+    const countSnap = await db.collection(`companies/${companyId}/invoices`).count().get().catch(() => null);
+    const count = (countSnap?.data().count ?? 0) + 1;
     const number = `FAC-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
 
     const totalHT = items.reduce((s, i) => s + (i.quantity ?? 1) * (i.unitPrice ?? 0), 0);
@@ -60,16 +60,21 @@ export const createInvoiceTool = ai.defineTool(
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + (dueInDays ?? 30));
 
-    await db.collection(`companies/${companyId}/invoices`).doc(id).set({
-      id, number, client, clientEmail: clientEmail ?? '',
-      items, currency: currency ?? 'EUR',
-      totalHT, taxRate: effectiveTaxRate, taxAmount, totalTTC,
-      dueDate, status: 'pending', paidAmount: 0,
-      notes: notes ?? '',
-      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/invoices`).doc(id).set({
+        id, number, client, clientEmail: clientEmail ?? '',
+        items, currency: currency ?? 'EUR',
+        totalHT, taxRate: effectiveTaxRate, taxAmount, totalTTC,
+        dueDate, status: 'pending', paidAmount: 0,
+        notes: notes ?? '',
+        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[Accounting] createInvoice write failed', { error: String(err) });
+      return { success: false, invoiceId: '', number: '', totalHT: 0, totalTTC: 0, message: 'Sauvegarde impossible.' };
+    }
 
-    return { invoiceId: id, number, totalHT, totalTTC, message: `Facture ${number} creee pour ${client}: ${totalTTC} ${currency} TTC (echeance: ${dueDate.toLocaleDateString('fr-FR')}).` };
+    return { success: true, invoiceId: id, number, totalHT, totalTTC, message: `Facture ${number} creee pour ${client}: ${totalTTC} ${currency} TTC (echeance: ${dueDate.toLocaleDateString('fr-FR')}).` };
   }
 );
 
@@ -95,8 +100,8 @@ export const updateInvoiceTool = ai.defineTool(
     if (invoiceId) {
       docRef = db.collection(`companies/${companyId}/invoices`).doc(invoiceId);
     } else if (invoiceNumber) {
-      const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get();
-      if (snap.empty) return { success: false, message: `Facture "${invoiceNumber}" non trouvee.` };
+      const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get().catch(() => null);
+      if (!snap || snap.empty) return { success: false, message: `Facture "${invoiceNumber}" non trouvee.` };
       docRef = snap.docs[0].ref;
     } else {
       return { success: false, message: 'ID ou numero de facture requis.' };
@@ -109,14 +114,24 @@ export const updateInvoiceTool = ai.defineTool(
     // Record payment
     if (paidAmount || status === 'paid') {
       const paymentId = generateId();
-      await db.collection(`companies/${companyId}/payments`).doc(paymentId).set({
-        invoiceId: docRef.id, amount: paidAmount ?? 0,
-        method: paymentMethod ?? 'virement', date: paymentDate ?? new Date().toISOString().split('T')[0],
-        createdAt: FieldValue.serverTimestamp(),
-      });
+      try {
+        await db.collection(`companies/${companyId}/payments`).doc(paymentId).set({
+          invoiceId: docRef.id, amount: paidAmount ?? 0,
+          method: paymentMethod ?? 'virement', date: paymentDate ?? new Date().toISOString().split('T')[0],
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        logger.error('[Accounting] payment write failed', { error: String(err) });
+        return { success: false, message: 'Enregistrement du paiement impossible.' };
+      }
     }
 
-    await docRef.update(updates);
+    try {
+      await docRef.update(updates);
+    } catch (err) {
+      logger.error('[Accounting] updateInvoice write failed', { error: String(err) });
+      return { success: false, message: 'Mise a jour de la facture impossible.' };
+    }
     return { success: true, message: `Facture mise a jour${status ? ` → ${status}` : ''}${paidAmount ? ` (${paidAmount} recu)` : ''}.` };
   }
 );
@@ -140,11 +155,11 @@ export const sendInvoiceTool = ai.defineTool(
     let docId = invoiceId ?? '';
 
     if (invoiceId) {
-      const doc = await db.collection(`companies/${companyId}/invoices`).doc(invoiceId).get();
-      if (doc.exists) invoiceData = doc.data() as Record<string, unknown>;
+      const doc = await db.collection(`companies/${companyId}/invoices`).doc(invoiceId).get().catch(() => null);
+      if (doc?.exists) invoiceData = doc.data() as Record<string, unknown>;
     } else if (invoiceNumber) {
-      const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get();
-      if (!snap.empty) { invoiceData = snap.docs[0].data() as Record<string, unknown>; docId = snap.docs[0].id; }
+      const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get().catch(() => null);
+      if (snap && !snap.empty) { invoiceData = snap.docs[0].data() as Record<string, unknown>; docId = snap.docs[0].id; }
     }
 
     if (!invoiceData) return { success: false, message: 'Facture non trouvee.' };
@@ -252,17 +267,25 @@ export const sendInvoiceTool = ai.defineTool(
     }
 
     // Mark as sent
-    await db.collection(`companies/${companyId}/invoices`).doc(docId).update({
-      sentAt: FieldValue.serverTimestamp(), sentCount: FieldValue.increment(1), status: 'sent',
-    });
+    try {
+      await db.collection(`companies/${companyId}/invoices`).doc(docId).update({
+        sentAt: FieldValue.serverTimestamp(), sentCount: FieldValue.increment(1), status: 'sent',
+      });
+    } catch (err) {
+      logger.error('[Accounting] sendInvoice mark-sent failed', { error: String(err) });
+    }
 
     // Save email reference
-    await db.collection(`companies/${companyId}/invoiceEmails`).add({
-      invoiceId: docId, invoiceNumber: inv['number'], recipient: recipientEmail,
-      subject: `${docLabel} ${inv['number']}`, htmlContent: emailHtml,
-      hasPdfAttachment: !!pdfBuffer,
-      sentAt: new Date(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/invoiceEmails`).add({
+        invoiceId: docId, invoiceNumber: inv['number'], recipient: recipientEmail,
+        subject: `${docLabel} ${inv['number']}`, htmlContent: emailHtml,
+        hasPdfAttachment: !!pdfBuffer,
+        sentAt: new Date(),
+      });
+    } catch (err) {
+      logger.error('[Accounting] sendInvoice email-ref save failed', { error: String(err) });
+    }
 
     return { success: true, message: `${docLabel} ${inv['number']} envoye a ${recipientEmail}${pdfBuffer ? ' avec PDF attache' : ''} (${(inv['totalTTC'] as number ?? 0).toFixed(2)} ${cur}).` };
   }
@@ -278,6 +301,7 @@ export const sendReminderTool = ai.defineTool(
       tone: z.enum(['gentle', 'firm', 'urgent']).optional().default('gentle'),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
       remindersSent: z.number(),
       details: z.array(z.object({ invoice: z.string(), client: z.string(), amount: z.number(), daysOverdue: z.number() })),
       message: z.string(),
@@ -286,17 +310,22 @@ export const sendReminderTool = ai.defineTool(
   async ({ companyId, invoiceNumber, tone }) => {
     const db = getFirestore();
     const today = new Date();
-    let docs;
+    let docs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
 
-    if (invoiceNumber) {
-      const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get();
-      docs = snap.docs;
-    } else {
-      const snap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'pending').limit(50).get();
-      docs = snap.docs.filter(d => {
-        const due = (d.data()['dueDate'] as { toDate?: () => Date })?.toDate?.() ?? new Date(d.data()['dueDate'] as string);
-        return due.getTime() < today.getTime();
-      });
+    try {
+      if (invoiceNumber) {
+        const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get();
+        docs = snap.docs;
+      } else {
+        const snap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'pending').limit(50).get();
+        docs = snap.docs.filter(d => {
+          const due = (d.data()['dueDate'] as { toDate?: () => Date })?.toDate?.() ?? new Date(d.data()['dueDate'] as string);
+          return due.getTime() < today.getTime();
+        });
+      }
+    } catch (err) {
+      logger.error('[Accounting] sendReminder query failed', { error: String(err) });
+      return { success: false, remindersSent: 0, details: [], message: 'Lecture des factures impossible.' };
     }
 
     const details = docs.map(d => {
@@ -316,12 +345,17 @@ export const sendReminderTool = ai.defineTool(
       const toneText = tone === 'urgent' ? 'URGENT' : tone === 'firm' ? 'Ferme' : 'Cordial';
       // Mark reminders sent
       for (const d of docs) {
-        await d.ref.update({ lastReminderAt: FieldValue.serverTimestamp(), reminderCount: FieldValue.increment(1), status: 'overdue' });
+        try {
+          await d.ref.update({ lastReminderAt: FieldValue.serverTimestamp(), reminderCount: FieldValue.increment(1), status: 'overdue' });
+        } catch (err) {
+          logger.error('[Accounting] sendReminder update failed', { error: String(err), invoice: d.id });
+        }
       }
     }
 
     const total = details.reduce((s, d) => s + d.amount, 0);
     return {
+      success: true,
       remindersSent: details.length,
       details,
       message: details.length > 0
@@ -341,6 +375,8 @@ export const getInvoicesTool = ai.defineTool(
       limit: z.number().optional().default(20),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       invoices: z.array(z.object({
         id: z.string(), number: z.string(), client: z.string(),
         totalTTC: z.number(), currency: z.string(), dueDate: z.string(),
@@ -353,7 +389,11 @@ export const getInvoicesTool = ai.defineTool(
     const db = getFirestore();
     let q = db.collection(`companies/${companyId}/invoices`) as FirebaseFirestore.Query;
     if (status !== 'all') q = q.where('status', '==', status);
-    const snap = await q.limit(limit ?? 20).get();
+    const snap = await q.limit(limit ?? 20).get().catch((err) => {
+      logger.error('[Accounting] getInvoices query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des factures impossible.', invoices: [], totalPending: 0, totalOverdue: 0, count: 0 };
     const today = Date.now();
 
     const invoices = snap.docs.map(d => {
@@ -370,6 +410,7 @@ export const getInvoicesTool = ai.defineTool(
     });
 
     return {
+      success: true,
       invoices,
       totalPending: safe(invoices.filter(i => i.status === 'pending').reduce((s, i) => s + num(i.totalTTC), 0)),
       totalOverdue: safe(invoices.filter(i => (i.daysOverdue ?? 0) > 0).reduce((s, i) => s + num(i.totalTTC), 0)),
@@ -384,18 +425,24 @@ export const getPaymentHistoryTool = ai.defineTool(
     description: 'Get payment history — all received payments with dates, amounts, methods.',
     inputSchema: z.object({ companyId: z.string(), limit: z.number().optional().default(20) }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       payments: z.array(z.object({ id: z.string(), invoiceId: z.string(), amount: z.number(), method: z.string(), date: z.string() })),
       totalReceived: z.number(),
     }),
   },
   async ({ companyId, limit }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/payments`).limit(limit ?? 20).get();
+    const snap = await db.collection(`companies/${companyId}/payments`).limit(limit ?? 20).get().catch((err) => {
+      logger.error('[Accounting] getPaymentHistory query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des paiements impossible.', payments: [], totalReceived: 0 };
     const payments = snap.docs.map(d => {
       const x = d.data();
       return { id: d.id, invoiceId: (x['invoiceId'] as string) ?? '', amount: (x['amount'] as number) ?? 0, method: (x['method'] as string) ?? '', date: (x['date'] as string) ?? '' };
     });
-    return { payments, totalReceived: payments.reduce((s, p) => s + p.amount, 0) };
+    return { success: true, payments, totalReceived: payments.reduce((s, p) => s + p.amount, 0) };
   }
 );
 
@@ -414,7 +461,7 @@ export const submitExpenseTool = ai.defineTool(
       description: z.string(), date: z.string().optional(),
       receipt: z.string().optional().describe('Receipt reference or URL'),
     }),
-    outputSchema: z.object({ expenseId: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean(), expenseId: z.string(), message: z.string() }),
   },
   async ({ companyId, userId, amount, currency, category, description, date, receipt }) => {
     const db = getFirestore();
@@ -422,15 +469,20 @@ export const submitExpenseTool = ai.defineTool(
     let empName = '';
     try { const u = await db.collection('users').doc(userId).get(); empName = (u.data()?.['displayName'] as string) ?? ''; } catch {}
 
-    await db.collection(`companies/${companyId}/expenses`).doc(id).set({
-      id, userId, submittedBy: empName || userId,
-      amount, currency: currency ?? 'EUR', category, description,
-      date: date ?? new Date().toISOString().split('T')[0],
-      receipt: receipt ?? null, status: 'pending',
-      submittedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/expenses`).doc(id).set({
+        id, userId, submittedBy: empName || userId,
+        amount, currency: currency ?? 'EUR', category, description,
+        date: date ?? new Date().toISOString().split('T')[0],
+        receipt: receipt ?? null, status: 'pending',
+        submittedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[Accounting] submitExpense write failed', { error: String(err) });
+      return { success: false, expenseId: '', message: 'Sauvegarde impossible.' };
+    }
 
-    return { expenseId: id, message: `Note de frais #${id.slice(0, 8)} soumise: ${amount} ${currency} (${category}) — en attente d'approbation.` };
+    return { success: true, expenseId: id, message: `Note de frais #${id.slice(0, 8)} soumise: ${amount} ${currency} (${category}) — en attente d'approbation.` };
   }
 );
 
@@ -449,12 +501,17 @@ export const reviewExpenseTool = ai.defineTool(
   async ({ companyId, expenseId, decision, comment }) => {
     const db = getFirestore();
     const ref = db.collection(`companies/${companyId}/expenses`).doc(expenseId);
-    const doc = await ref.get();
-    if (!doc.exists) return { success: false, message: 'Note de frais non trouvee.' };
+    const doc = await ref.get().catch(() => null);
+    if (!doc?.exists) return { success: false, message: 'Note de frais non trouvee.' };
 
-    await ref.update({
-      status: decision, reviewComment: comment ?? '', reviewedAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await ref.update({
+        status: decision, reviewComment: comment ?? '', reviewedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[Accounting] reviewExpense update failed', { error: String(err) });
+      return { success: false, message: 'Mise a jour impossible.' };
+    }
 
     const data = doc.data()!;
     return { success: true, message: `Note de frais de ${data['submittedBy']} (${data['amount']} ${data['currency']}) ${decision === 'approved' ? 'approuvee' : 'rejetee'}${comment ? ` — ${comment}` : ''}.` };
@@ -470,6 +527,8 @@ export const getExpenseReportsTool = ai.defineTool(
       status: z.enum(['all', 'pending', 'approved', 'rejected']).optional().default('all'),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       expenses: z.array(z.object({ id: z.string(), submittedBy: z.string(), amount: z.number(), currency: z.string(), category: z.string(), description: z.string(), status: z.string(), date: z.string() })),
       totalAmount: z.number(), pendingCount: z.number(),
     }),
@@ -479,14 +538,18 @@ export const getExpenseReportsTool = ai.defineTool(
     let q = db.collection(`companies/${companyId}/expenses`) as FirebaseFirestore.Query;
     if (userId) q = q.where('userId', '==', userId);
     if (status !== 'all') q = q.where('status', '==', status);
-    const snap = await q.limit(50).get();
+    const snap = await q.limit(50).get().catch((err) => {
+      logger.error('[Accounting] getExpenseReports query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture des notes de frais impossible.', expenses: [], totalAmount: 0, pendingCount: 0 };
 
     const expenses = snap.docs.map(d => {
       const x = d.data();
       return { id: d.id, submittedBy: (x['submittedBy'] as string) ?? '', amount: (x['amount'] as number) ?? 0, currency: (x['currency'] as string) ?? 'EUR', category: (x['category'] as string) ?? '', description: (x['description'] as string) ?? '', status: (x['status'] as string) ?? '', date: (x['date'] as string) ?? '' };
     });
 
-    return { expenses, totalAmount: expenses.reduce((s, e) => s + e.amount, 0), pendingCount: expenses.filter(e => e.status === 'pending').length };
+    return { success: true, expenses, totalAmount: expenses.reduce((s, e) => s + e.amount, 0), pendingCount: expenses.filter(e => e.status === 'pending').length };
   }
 );
 
@@ -499,14 +562,18 @@ export const getCashFlowTool = ai.defineTool(
     name: 'acc_getCashFlow',
     description: 'Get current cash flow summary — inflows, outflows, balance.',
     inputSchema: z.object({ companyId: z.string(), period: z.enum(['month', 'quarter', 'year']).optional().default('month') }),
-    outputSchema: z.object({ period: z.string(), inflows: z.number(), outflows: z.number(), balance: z.number(), currency: z.string(), alerts: z.array(z.string()) }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string().optional(), period: z.string(), inflows: z.number(), outflows: z.number(), balance: z.number(), currency: z.string(), alerts: z.array(z.string()) }),
   },
   async ({ companyId, period }) => {
     const db = getFirestore();
 
     // Calculate from invoices + expenses
-    const invoiceSnap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'paid').limit(200).get();
-    const expenseSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(200).get();
+    const invoiceSnap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'paid').limit(200).get().catch(() => null);
+    const expenseSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(200).get().catch(() => null);
+    if (!invoiceSnap || !expenseSnap) {
+      logger.error('[Accounting] getCashFlow read failed');
+      return { success: false, message: 'Lecture des donnees impossible.', period: period ?? 'month', inflows: 0, outflows: 0, balance: 0, currency: 'EUR', alerts: [] };
+    }
 
     const inflows = safe(invoiceSnap.docs.reduce((s, d) => s + num(d.data()['totalTTC'] ?? d.data()['amount']), 0));
     const outflows = safe(expenseSnap.docs.reduce((s, d) => s + num(d.data()['amount']), 0));
@@ -516,17 +583,18 @@ export const getCashFlowTool = ai.defineTool(
     if (balance < 0) alerts.push('Tresorerie negative ! Action urgente requise.');
 
     // Check overdue invoices
-    const pendingSnap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'pending').limit(50).get();
-    const overdueCount = pendingSnap.docs.filter(d => {
+    const pendingSnap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'pending').limit(50).get().catch(() => null);
+    const overdueCount = pendingSnap?.docs.filter(d => {
       const due = (d.data()['dueDate'] as { toDate?: () => Date })?.toDate?.() ?? new Date(d.data()['dueDate'] as string);
       return due.getTime() < Date.now();
-    }).length;
+    }).length ?? 0;
     if (overdueCount > 0) alerts.push(`${overdueCount} facture(s) en retard de paiement.`);
 
-    const pendingExpenses = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'pending').count().get();
-    if (pendingExpenses.data().count > 0) alerts.push(`${pendingExpenses.data().count} note(s) de frais en attente.`);
+    const pendingExpenses = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'pending').count().get().catch(() => null);
+    const pendingExpenseCount = pendingExpenses?.data().count ?? 0;
+    if (pendingExpenseCount > 0) alerts.push(`${pendingExpenseCount} note(s) de frais en attente.`);
 
-    return { period: period ?? 'month', inflows, outflows, balance, currency: 'EUR', alerts };
+    return { success: true, period: period ?? 'month', inflows, outflows, balance, currency: 'EUR', alerts };
   }
 );
 
@@ -536,6 +604,8 @@ export const forecastCashFlowTool = ai.defineTool(
     description: 'Forecast cash flow for the next 3 months based on current data and trends.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       forecast: z.array(z.object({ month: z.string(), expectedInflows: z.number(), expectedOutflows: z.number(), projectedBalance: z.number() })),
       riskLevel: z.string(), recommendations: z.array(z.string()),
     }),
@@ -544,8 +614,12 @@ export const forecastCashFlowTool = ai.defineTool(
     const db = getFirestore();
 
     // Get current data
-    const invoiceSnap = await db.collection(`companies/${companyId}/invoices`).limit(100).get();
-    const expenseSnap = await db.collection(`companies/${companyId}/expenses`).limit(100).get();
+    const invoiceSnap = await db.collection(`companies/${companyId}/invoices`).limit(100).get().catch(() => null);
+    const expenseSnap = await db.collection(`companies/${companyId}/expenses`).limit(100).get().catch(() => null);
+    if (!invoiceSnap || !expenseSnap) {
+      logger.error('[Accounting] forecastCashFlow read failed');
+      return { success: false, message: 'Lecture des donnees impossible.', forecast: [], riskLevel: 'unknown', recommendations: [] };
+    }
 
     // Coerce to real numbers — Firestore can store strings/mixed types
     const num = (v: unknown): number => {
@@ -581,7 +655,7 @@ export const forecastCashFlowTool = ai.defineTool(
     if (riskLevel === 'medium') recommendations.push('Surveiller la tresorerie de pres les 2 prochains mois.');
     if (riskLevel === 'low') recommendations.push('Situation financiere saine. Envisager des investissements.');
 
-    return { forecast, riskLevel, recommendations };
+    return { success: true, forecast, riskLevel, recommendations };
   }
 );
 
@@ -595,6 +669,8 @@ export const getBudgetStatusTool = ai.defineTool(
     description: 'Get budget vs actual spending by department or category.',
     inputSchema: z.object({ companyId: z.string(), department: z.string().optional(), year: z.number().optional() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       year: z.number(),
       budgets: z.array(z.object({ category: z.string(), budgeted: z.number(), actual: z.number(), remaining: z.number(), percentage: z.number(), status: z.string() })),
     }),
@@ -604,7 +680,11 @@ export const getBudgetStatusTool = ai.defineTool(
     const y = year ?? new Date().getFullYear();
     let q = db.collection(`companies/${companyId}/budgets`).where('year', '==', y) as FirebaseFirestore.Query;
     if (department) q = q.where('department', '==', department);
-    const snap = await q.limit(20).get();
+    const snap = await q.limit(20).get().catch((err) => {
+      logger.error('[Accounting] getBudgetStatus query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture du budget impossible.', year: y, budgets: [] };
 
     const budgets = snap.docs.map(d => {
       const data = d.data();
@@ -615,7 +695,7 @@ export const getBudgetStatusTool = ai.defineTool(
     });
 
     if (budgets.length === 0) budgets.push({ category: 'Pas de donnees budget', budgeted: 0, actual: 0, remaining: 0, percentage: 0, status: 'not_configured' });
-    return { year: y, budgets };
+    return { success: true, year: y, budgets };
   }
 );
 
@@ -643,11 +723,11 @@ export const getInvoiceByIdTool = ai.defineTool(
     let docId = '';
 
     if (invoiceId) {
-      const doc = await db.collection(`companies/${companyId}/invoices`).doc(invoiceId).get();
-      if (doc.exists) { data = doc.data() as Record<string, unknown>; docId = doc.id; }
+      const doc = await db.collection(`companies/${companyId}/invoices`).doc(invoiceId).get().catch(() => null);
+      if (doc?.exists) { data = doc.data() as Record<string, unknown>; docId = doc.id; }
     } else if (invoiceNumber) {
-      const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get();
-      if (!snap.empty) { data = snap.docs[0].data() as Record<string, unknown>; docId = snap.docs[0].id; }
+      const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get().catch(() => null);
+      if (snap && !snap.empty) { data = snap.docs[0].data() as Record<string, unknown>; docId = snap.docs[0].id; }
     }
 
     if (!data) return { found: false, id: '', number: '', client: '', clientEmail: '', items: [], totalHT: 0, taxRate: 0, taxAmount: 0, totalTTC: 0, paidAmount: 0, balanceDue: 0, status: '', dueDate: '', createdAt: '', reminderCount: 0, notes: '' };
@@ -678,17 +758,22 @@ export const voidInvoiceTool = ai.defineTool(
   },
   async ({ companyId, invoiceNumber, reason }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get();
-    if (snap.empty) return { success: false, message: `Facture "${invoiceNumber}" non trouvee.` };
+    const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get().catch(() => null);
+    if (!snap || snap.empty) return { success: false, message: `Facture "${invoiceNumber}" non trouvee.` };
 
     const doc = snap.docs[0];
     const data = doc.data();
     if (data['status'] === 'void') return { success: false, message: 'Cette facture est deja annulee.' };
 
-    await doc.ref.update({
-      status: 'void', voidedAt: FieldValue.serverTimestamp(), voidReason: reason,
-      previousStatus: data['status'],
-    });
+    try {
+      await doc.ref.update({
+        status: 'void', voidedAt: FieldValue.serverTimestamp(), voidReason: reason,
+        previousStatus: data['status'],
+      });
+    } catch (err) {
+      logger.error('[Accounting] voidInvoice update failed', { error: String(err) });
+      return { success: false, message: 'Annulation impossible.' };
+    }
 
     return { success: true, message: `Facture ${invoiceNumber} annulee. Motif: ${reason}. Montant: ${data['totalTTC']} ${data['currency']}.` };
   }
@@ -703,8 +788,8 @@ export const generateInvoicePdfTool = ai.defineTool(
   },
   async ({ companyId, invoiceNumber }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get();
-    if (snap.empty) return { success: false, content: '', message: 'Facture non trouvee.' };
+    const snap = await db.collection(`companies/${companyId}/invoices`).where('number', '==', invoiceNumber).limit(1).get().catch(() => null);
+    if (!snap || snap.empty) return { success: false, content: '', message: 'Facture non trouvee.' };
 
     const inv = snap.docs[0].data();
     let companyName = 'Orlode';
@@ -765,8 +850,8 @@ export const getExpenseByIdTool = ai.defineTool(
   },
   async ({ companyId, expenseId }) => {
     const db = getFirestore();
-    const doc = await db.collection(`companies/${companyId}/expenses`).doc(expenseId).get();
-    if (!doc.exists) return { found: false, id: '', submittedBy: '', amount: 0, currency: '', category: '', description: '', date: '', status: '' };
+    const doc = await db.collection(`companies/${companyId}/expenses`).doc(expenseId).get().catch(() => null);
+    if (!doc?.exists) return { found: false, id: '', submittedBy: '', amount: 0, currency: '', category: '', description: '', date: '', status: '' };
     const x = doc.data()!;
     return {
       found: true, id: doc.id, submittedBy: (x['submittedBy'] as string) ?? '',
@@ -784,6 +869,8 @@ export const getDashboardSummaryTool = ai.defineTool(
     description: 'Get a complete financial dashboard summary: total invoiced, collected, overdue, expenses, net balance this month.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       totalInvoiced: z.number(), totalCollected: z.number(), totalOverdue: z.number(),
       totalExpenses: z.number(), pendingExpenses: z.number(),
       netBalance: z.number(), invoiceCount: z.number(), overdueCount: z.number(),
@@ -792,8 +879,12 @@ export const getDashboardSummaryTool = ai.defineTool(
   },
   async ({ companyId }) => {
     const db = getFirestore();
-    const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(200).get();
-    const expSnap = await db.collection(`companies/${companyId}/expenses`).limit(200).get();
+    const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(200).get().catch(() => null);
+    const expSnap = await db.collection(`companies/${companyId}/expenses`).limit(200).get().catch(() => null);
+    if (!invSnap || !expSnap) {
+      logger.error('[Accounting] getDashboardSummary read failed');
+      return { success: false, message: 'Lecture des donnees impossible.', totalInvoiced: 0, totalCollected: 0, totalOverdue: 0, totalExpenses: 0, pendingExpenses: 0, netBalance: 0, invoiceCount: 0, overdueCount: 0, currency: 'XOF' };
+    }
 
     let totalInvoiced = 0, totalCollected = 0, totalOverdue = 0, overdueCount = 0;
     const today = Date.now();
@@ -819,6 +910,7 @@ export const getDashboardSummaryTool = ai.defineTool(
     });
 
     return {
+      success: true,
       totalInvoiced: safe(Math.round(totalInvoiced * 100) / 100),
       totalCollected: safe(Math.round(totalCollected * 100) / 100),
       totalOverdue: safe(Math.round(totalOverdue * 100) / 100),
@@ -846,7 +938,7 @@ export const convertCurrencyTool = ai.defineTool(
     inputSchema: z.object({
       amount: z.number(), from: z.string().default('EUR'), to: z.string().default('USD'),
     }),
-    outputSchema: z.object({ original: z.number(), converted: z.number(), from: z.string(), to: z.string(), rate: z.number() }),
+    outputSchema: z.object({ success: z.boolean(), original: z.number(), converted: z.number(), from: z.string(), to: z.string(), rate: z.number() }),
   },
   async ({ amount, from, to }) => {
     const fromRate = EXCHANGE_RATES[from.toUpperCase()] ?? 1;
@@ -854,7 +946,7 @@ export const convertCurrencyTool = ai.defineTool(
     const inEUR = amount / fromRate;
     const converted = Math.round(inEUR * toRate * 100) / 100;
     const rate = Math.round((toRate / fromRate) * 10000) / 10000;
-    return { original: amount, converted, from: from.toUpperCase(), to: to.toUpperCase(), rate };
+    return { success: true, original: amount, converted, from: from.toUpperCase(), to: to.toUpperCase(), rate };
   }
 );
 
@@ -868,19 +960,32 @@ export const createMultiCurrencyInvoiceTool = ai.defineTool(
       currency: z.string().default('EUR'), dueInDays: z.number().optional().default(30),
       taxRate: z.number().optional().default(20), notes: z.string().optional(),
     }),
-    outputSchema: z.object({ invoiceId: z.string(), number: z.string(), totalTTC: z.number(), currency: z.string(), eurEquivalent: z.number(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean(), invoiceId: z.string(), number: z.string(), totalTTC: z.number(), currency: z.string(), eurEquivalent: z.number(), message: z.string() }),
   },
   async ({ companyId, client, clientEmail, items, currency, dueInDays, taxRate, notes }) => {
-    const result = await createInvoiceTool({ companyId, client, clientEmail, items, currency, dueInDays, taxRate, notes });
+    let result;
+    try {
+      result = await createInvoiceTool({ companyId, client, clientEmail, items, currency, dueInDays, taxRate, notes });
+    } catch (err) {
+      logger.error('[Accounting] createMultiCurrencyInvoice base failed', { error: String(err) });
+      return { success: false, invoiceId: '', number: '', totalTTC: 0, currency: currency.toUpperCase(), eurEquivalent: 0, message: 'Creation de la facture impossible.' };
+    }
+    if (!result.success) {
+      return { success: false, invoiceId: '', number: '', totalTTC: 0, currency: currency.toUpperCase(), eurEquivalent: 0, message: result.message };
+    }
     const cur = currency.toUpperCase();
     const rate = EXCHANGE_RATES[cur] ?? 1;
     const eurEquivalent = Math.round((result.totalTTC / rate) * 100) / 100;
 
     // Store EUR equivalent
     const db = getFirestore();
-    await db.collection(`companies/${companyId}/invoices`).doc(result.invoiceId).update({ eurEquivalent, originalCurrency: cur });
+    try {
+      await db.collection(`companies/${companyId}/invoices`).doc(result.invoiceId).update({ eurEquivalent, originalCurrency: cur });
+    } catch (err) {
+      logger.error('[Accounting] createMultiCurrencyInvoice update failed', { error: String(err) });
+    }
 
-    return { ...result, currency: cur, eurEquivalent, message: `${result.message} (Equivalent EUR: ${eurEquivalent} EUR)` };
+    return { success: true, invoiceId: result.invoiceId, number: result.number, totalTTC: result.totalTTC, currency: cur, eurEquivalent, message: `${result.message} (Equivalent EUR: ${eurEquivalent} EUR)` };
   }
 );
 
@@ -895,6 +1000,8 @@ export const vatReportTool = ai.defineTool(
       quarter: z.number().optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       period: z.string(), vatCollected: z.number(), vatDeductible: z.number(), vatDue: z.number(),
       invoiceCount: z.number(), expenseCount: z.number(), currency: z.string(),
       breakdown: z.array(z.object({ rate: z.number(), base: z.number(), vat: z.number() })),
@@ -906,7 +1013,11 @@ export const vatReportTool = ai.defineTool(
     const periodLabel = period === 'quarter' ? `Q${quarter ?? Math.ceil((new Date().getMonth() + 1) / 3)} ${y}` : `${period} ${y}`;
 
     // TVA collectee (sur factures)
-    const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(500).get();
+    const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(500).get().catch(() => null);
+    if (!invSnap) {
+      logger.error('[Accounting] vatReport invoices read failed');
+      return { success: false, message: 'Lecture des factures impossible.', period: periodLabel, vatCollected: 0, vatDeductible: 0, vatDue: 0, invoiceCount: 0, expenseCount: 0, currency: 'XOF', breakdown: [] };
+    }
     let vatCollected = 0;
     const rateBreakdown = new Map<number, { base: number; vat: number }>();
 
@@ -922,9 +1033,10 @@ export const vatReportTool = ai.defineTool(
     });
 
     // TVA deductible (sur depenses approuvees — estimation 20%)
-    const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get();
+    const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get().catch(() => null);
     let vatDeductible = 0;
-    expSnap.docs.forEach(d => {
+    const expCount = expSnap?.size ?? 0;
+    expSnap?.docs.forEach(d => {
       const amount = num(d.data()['amount']);
       vatDeductible += Math.round(amount * 0.2 / 1.2 * 100) / 100; // Reverse TVA from TTC
     });
@@ -934,11 +1046,12 @@ export const vatReportTool = ai.defineTool(
     }));
 
     return {
+      success: true,
       period: periodLabel,
       vatCollected: safe(Math.round(vatCollected * 100) / 100),
       vatDeductible: safe(Math.round(vatDeductible * 100) / 100),
       vatDue: safe(Math.round((vatCollected - vatDeductible) * 100) / 100),
-      invoiceCount: invSnap.size, expenseCount: expSnap.size, currency: 'XOF',
+      invoiceCount: invSnap.size, expenseCount: expCount, currency: 'XOF',
       breakdown: breakdown.map(b => ({ rate: safe(b.rate), base: safe(b.base), vat: safe(b.vat) })),
     };
   }
@@ -954,6 +1067,8 @@ export const bankReconciliationTool = ai.defineTool(
       bankCurrency: z.string().optional().default('EUR'),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       bankBalance: z.number(), bookBalance: z.number(), difference: z.number(),
       status: z.string(),
       unreconciledInvoices: z.array(z.object({ number: z.string(), amount: z.number(), status: z.string() })),
@@ -965,8 +1080,12 @@ export const bankReconciliationTool = ai.defineTool(
     const db = getFirestore();
 
     // Calculate book balance
-    const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(500).get();
-    const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get();
+    const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(500).get().catch(() => null);
+    const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get().catch(() => null);
+    if (!invSnap || !expSnap) {
+      logger.error('[Accounting] bankReconciliation read failed');
+      return { success: false, message: 'Lecture des donnees impossible.', bankBalance, bookBalance: 0, difference: 0, status: 'unknown', unreconciledInvoices: [], unreconciledExpenses: [], recommendations: [] };
+    }
 
     const totalReceived = invSnap.docs.filter(d => d.data()['status'] === 'paid').reduce((s, d) => s + num(d.data()['totalTTC']), 0);
     const totalExpenses = expSnap.docs.reduce((s, d) => s + num(d.data()['amount']), 0);
@@ -993,6 +1112,7 @@ export const bankReconciliationTool = ai.defineTool(
     if (unreconciledExpenses.length > 0) recommendations.push(`${unreconciledExpenses.length} depense(s) non rapprochee(s).`);
 
     return {
+      success: true,
       bankBalance, bookBalance, difference,
       status: Math.abs(difference) < 1 ? 'rapproche' : Math.abs(difference) < 100 ? 'ecart_mineur' : 'ecart_significatif',
       unreconciledInvoices, unreconciledExpenses, recommendations,
@@ -1009,61 +1129,66 @@ export const exportFinanceTool = ai.defineTool(
       dataType: z.enum(['invoices', 'expenses', 'payments', 'ledger']).default('invoices'),
       status: z.string().optional(),
     }),
-    outputSchema: z.object({ csv: z.string(), rowCount: z.number(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean(), csv: z.string(), rowCount: z.number(), message: z.string() }),
   },
   async ({ companyId, dataType, status }) => {
     const db = getFirestore();
     let csv = '';
     let rowCount = 0;
 
-    if (dataType === 'invoices') {
-      csv = 'Numero;Client;Montant HT;TVA;Montant TTC;Devise;Statut;Echeance;Cree le\n';
-      let q = db.collection(`companies/${companyId}/invoices`) as FirebaseFirestore.Query;
-      if (status && status !== 'all') q = q.where('status', '==', status);
-      const snap = await q.limit(500).get();
-      snap.docs.forEach(d => {
-        const x = d.data();
-        const due = (x['dueDate'] as { toDate?: () => Date })?.toDate?.()?.toISOString().split('T')[0] ?? '';
-        const created = (x['createdAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString().split('T')[0] ?? '';
-        csv += `${x['number'] ?? ''};${x['client'] ?? ''};${x['totalHT'] ?? 0};${x['taxAmount'] ?? 0};${x['totalTTC'] ?? 0};${x['currency'] ?? 'EUR'};${x['status'] ?? ''};${due};${created}\n`;
-      });
-      rowCount = snap.size;
-    } else if (dataType === 'expenses') {
-      csv = 'ID;Employe;Montant;Devise;Categorie;Description;Statut;Date\n';
-      let q = db.collection(`companies/${companyId}/expenses`) as FirebaseFirestore.Query;
-      if (status && status !== 'all') q = q.where('status', '==', status);
-      const snap = await q.limit(500).get();
-      snap.docs.forEach(d => {
-        const x = d.data();
-        csv += `${d.id.slice(0, 8)};${x['submittedBy'] ?? ''};${x['amount'] ?? 0};${x['currency'] ?? 'EUR'};${x['category'] ?? ''};${x['description'] ?? ''};${x['status'] ?? ''};${x['date'] ?? ''}\n`;
-      });
-      rowCount = snap.size;
-    } else if (dataType === 'payments') {
-      csv = 'ID;Facture;Montant;Methode;Date\n';
-      const snap = await db.collection(`companies/${companyId}/payments`).limit(500).get();
-      snap.docs.forEach(d => {
-        const x = d.data();
-        csv += `${d.id.slice(0, 8)};${x['invoiceId'] ?? ''};${x['amount'] ?? 0};${x['method'] ?? ''};${x['date'] ?? ''}\n`;
-      });
-      rowCount = snap.size;
-    } else {
-      // Full ledger
-      csv = 'Date;Type;Reference;Description;Debit;Credit;Devise\n';
-      const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(500).get();
-      const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get();
-      invSnap.docs.forEach(d => {
-        const x = d.data();
-        const date = (x['createdAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString().split('T')[0] ?? '';
-        csv += `${date};Facture;${x['number'] ?? ''};${x['client'] ?? ''};0;${x['totalTTC'] ?? 0};${x['currency'] ?? 'EUR'}\n`;
-      });
-      expSnap.docs.forEach(d => {
-        const x = d.data();
-        csv += `${x['date'] ?? ''};Depense;${d.id.slice(0, 8)};${x['description'] ?? ''};${x['amount'] ?? 0};0;${x['currency'] ?? 'EUR'}\n`;
-      });
-      rowCount = invSnap.size + expSnap.size;
+    try {
+      if (dataType === 'invoices') {
+        csv = 'Numero;Client;Montant HT;TVA;Montant TTC;Devise;Statut;Echeance;Cree le\n';
+        let q = db.collection(`companies/${companyId}/invoices`) as FirebaseFirestore.Query;
+        if (status && status !== 'all') q = q.where('status', '==', status);
+        const snap = await q.limit(500).get();
+        snap.docs.forEach(d => {
+          const x = d.data();
+          const due = (x['dueDate'] as { toDate?: () => Date })?.toDate?.()?.toISOString().split('T')[0] ?? '';
+          const created = (x['createdAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString().split('T')[0] ?? '';
+          csv += `${x['number'] ?? ''};${x['client'] ?? ''};${x['totalHT'] ?? 0};${x['taxAmount'] ?? 0};${x['totalTTC'] ?? 0};${x['currency'] ?? 'EUR'};${x['status'] ?? ''};${due};${created}\n`;
+        });
+        rowCount = snap.size;
+      } else if (dataType === 'expenses') {
+        csv = 'ID;Employe;Montant;Devise;Categorie;Description;Statut;Date\n';
+        let q = db.collection(`companies/${companyId}/expenses`) as FirebaseFirestore.Query;
+        if (status && status !== 'all') q = q.where('status', '==', status);
+        const snap = await q.limit(500).get();
+        snap.docs.forEach(d => {
+          const x = d.data();
+          csv += `${d.id.slice(0, 8)};${x['submittedBy'] ?? ''};${x['amount'] ?? 0};${x['currency'] ?? 'EUR'};${x['category'] ?? ''};${x['description'] ?? ''};${x['status'] ?? ''};${x['date'] ?? ''}\n`;
+        });
+        rowCount = snap.size;
+      } else if (dataType === 'payments') {
+        csv = 'ID;Facture;Montant;Methode;Date\n';
+        const snap = await db.collection(`companies/${companyId}/payments`).limit(500).get();
+        snap.docs.forEach(d => {
+          const x = d.data();
+          csv += `${d.id.slice(0, 8)};${x['invoiceId'] ?? ''};${x['amount'] ?? 0};${x['method'] ?? ''};${x['date'] ?? ''}\n`;
+        });
+        rowCount = snap.size;
+      } else {
+        // Full ledger
+        csv = 'Date;Type;Reference;Description;Debit;Credit;Devise\n';
+        const invSnap = await db.collection(`companies/${companyId}/invoices`).limit(500).get();
+        const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get();
+        invSnap.docs.forEach(d => {
+          const x = d.data();
+          const date = (x['createdAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString().split('T')[0] ?? '';
+          csv += `${date};Facture;${x['number'] ?? ''};${x['client'] ?? ''};0;${x['totalTTC'] ?? 0};${x['currency'] ?? 'EUR'}\n`;
+        });
+        expSnap.docs.forEach(d => {
+          const x = d.data();
+          csv += `${x['date'] ?? ''};Depense;${d.id.slice(0, 8)};${x['description'] ?? ''};${x['amount'] ?? 0};0;${x['currency'] ?? 'EUR'}\n`;
+        });
+        rowCount = invSnap.size + expSnap.size;
+      }
+    } catch (err) {
+      logger.error('[Accounting] exportCSV failed', { error: String(err), dataType });
+      return { success: false, csv: '', rowCount: 0, message: 'Export impossible.' };
     }
 
-    return { csv, rowCount, message: `Export ${dataType}: ${rowCount} lignes generees (format CSV separateur ;).` };
+    return { success: true, csv, rowCount, message: `Export ${dataType}: ${rowCount} lignes generees (format CSV separateur ;).` };
   }
 );
 
@@ -1073,6 +1198,7 @@ export const autoRelanceTool = ai.defineTool(
     description: 'Run automatic payment reminder schedule: J+3 gentle, J+10 firm, J+20 urgent. Processes all overdue invoices.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
       processed: z.number(),
       gentle: z.array(z.object({ number: z.string(), client: z.string(), daysOverdue: z.number() })),
       firm: z.array(z.object({ number: z.string(), client: z.string(), daysOverdue: z.number() })),
@@ -1083,7 +1209,11 @@ export const autoRelanceTool = ai.defineTool(
   async ({ companyId }) => {
     const db = getFirestore();
     const today = Date.now();
-    const snap = await db.collection(`companies/${companyId}/invoices`).where('status', 'in', ['pending', 'overdue']).limit(200).get();
+    const snap = await db.collection(`companies/${companyId}/invoices`).where('status', 'in', ['pending', 'overdue']).limit(200).get().catch(() => null);
+    if (!snap) {
+      logger.error('[Accounting] autoRelance read failed');
+      return { success: false, processed: 0, gentle: [], firm: [], urgent: [], message: 'Lecture des factures impossible.' };
+    }
 
     const gentle: Array<{ number: string; client: string; daysOverdue: number }> = [];
     const firm: Array<{ number: string; client: string; daysOverdue: number }> = [];
@@ -1110,16 +1240,21 @@ export const autoRelanceTool = ai.defineTool(
       else continue;
 
       // Update invoice
-      await d.ref.update({
-        status: 'overdue',
-        lastReminderAt: FieldValue.serverTimestamp(),
-        reminderCount: FieldValue.increment(1),
-        lastReminderTone: tone,
-      });
+      try {
+        await d.ref.update({
+          status: 'overdue',
+          lastReminderAt: FieldValue.serverTimestamp(),
+          reminderCount: FieldValue.increment(1),
+          lastReminderTone: tone,
+        });
+      } catch (err) {
+        logger.error('[Accounting] autoRelance update failed', { error: String(err), invoice: d.id });
+      }
     }
 
     const total = gentle.length + firm.length + urgent.length;
     return {
+      success: true,
       processed: total, gentle, firm, urgent,
       message: total > 0
         ? `Auto-relance: ${gentle.length} cordial(s), ${firm.length} ferme(s), ${urgent.length} urgent(s). Total: ${total} facture(s) relancee(s).`
@@ -1142,6 +1277,8 @@ export const profitLossTool = ai.defineTool(
     description: 'Generate Profit & Loss statement (Compte de résultat) — revenue, expenses, net income by period.',
     inputSchema: z.object({ companyId: z.string(), period: z.enum(['month', 'quarter', 'year']).optional().default('quarter'), year: z.number().optional() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       period: z.string(), revenue: z.number(), costOfSales: z.number(), grossProfit: z.number(), grossMargin: z.number(),
       operatingExpenses: z.object({ salaries: z.number(), rent: z.number(), marketing: z.number(), it: z.number(), other: z.number(), total: z.number() }),
       operatingIncome: z.number(), taxes: z.number(), netIncome: z.number(), netMargin: z.number(),
@@ -1154,13 +1291,22 @@ export const profitLossTool = ai.defineTool(
     const months = period === 'month' ? 1 : period === 'quarter' ? 3 : 12;
 
     // Get invoices (revenue)
-    const invSnap = await db.collection(`companies/${companyId}/invoices`).where('status', 'in', ['paid', 'sent', 'overdue']).limit(500).get();
+    const invSnap = await db.collection(`companies/${companyId}/invoices`).where('status', 'in', ['paid', 'sent', 'overdue']).limit(500).get().catch(() => null);
+    const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get().catch(() => null);
+    if (!invSnap || !expSnap) {
+      logger.error('[Accounting] profitLoss read failed');
+      return {
+        success: false, message: 'Lecture des donnees impossible.',
+        period: `${period} ${currentYear}`, revenue: 0, costOfSales: 0, grossProfit: 0, grossMargin: 0,
+        operatingExpenses: { salaries: 0, rent: 0, marketing: 0, it: 0, other: 0, total: 0 },
+        operatingIncome: 0, taxes: 0, netIncome: 0, netMargin: 0,
+      };
+    }
     const invoices = invSnap.docs.map(d => d.data());
     const paidInvoices = invoices.filter(i => i['status'] === 'paid');
     const revenue = paidInvoices.reduce((s, i) => s + num(i['totalTTC'] ?? i['amount']), 0);
 
     // Get expenses
-    const expSnap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get();
     const expenses = expSnap.docs.map(d => d.data());
     const totalExpenses = expenses.reduce((s, e) => s + num(e['amount']), 0);
 
@@ -1183,6 +1329,7 @@ export const profitLossTool = ai.defineTool(
     const netIncome = operatingIncome - taxes;
 
     return {
+      success: true,
       period: `${period} ${currentYear}`,
       revenue: safe(revenue), costOfSales: safe(costOfSales), grossProfit: safe(grossProfit),
       grossMargin: revenue > 0 ? safe(Math.round(grossProfit / revenue * 100)) : 0,
@@ -1206,13 +1353,19 @@ export const agingReportTool = ai.defineTool(
     description: 'Accounts receivable aging report — invoices grouped by 0-30, 30-60, 60-90, 90+ days.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       buckets: z.array(z.object({ range: z.string(), count: z.number(), total: z.number(), invoices: z.array(z.object({ number: z.string(), client: z.string(), amount: z.number(), daysOverdue: z.number() })) })),
       totalOverdue: z.number(), totalOutstanding: z.number(), highestRisk: z.string(),
     }),
   },
   async ({ companyId }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/invoices`).where('status', 'in', ['sent', 'overdue']).limit(200).get();
+    const snap = await db.collection(`companies/${companyId}/invoices`).where('status', 'in', ['sent', 'overdue']).limit(200).get().catch(() => null);
+    if (!snap) {
+      logger.error('[Accounting] agingReport read failed');
+      return { success: false, message: 'Lecture des factures impossible.', buckets: [], totalOverdue: 0, totalOutstanding: 0, highestRisk: 'Aucun' };
+    }
     const now = Date.now();
 
     const buckets: Record<string, { count: number; total: number; invoices: { number: string; client: string; amount: number; daysOverdue: number }[] }> = {
@@ -1239,6 +1392,7 @@ export const agingReportTool = ai.defineTool(
     const highestRisk = buckets['90+'].invoices.sort((a, b) => b.amount - a.amount)[0]?.client ?? '';
 
     return {
+      success: true,
       buckets: Object.entries(buckets).map(([range, data]) => ({ range, ...data })),
       totalOverdue, totalOutstanding: totalOverdue,
       highestRisk: highestRisk || 'Aucun',
@@ -1260,7 +1414,7 @@ export const createRecurringInvoiceTool = ai.defineTool(
       frequency: z.enum(['monthly', 'quarterly', 'yearly']),
       startDate: z.string().optional(), taxRate: z.number().optional().default(20),
     }),
-    outputSchema: z.object({ recurringId: z.string(), frequency: z.string(), nextInvoiceDate: z.string(), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean(), recurringId: z.string(), frequency: z.string(), nextInvoiceDate: z.string(), message: z.string() }),
   },
   async ({ companyId, client, clientEmail, items, frequency, startDate, taxRate }) => {
     const db = getFirestore();
@@ -1275,13 +1429,18 @@ export const createRecurringInvoiceTool = ai.defineTool(
       else next.setFullYear(next.getFullYear() + 1, 0, 1);
     }
 
-    await db.collection(`companies/${companyId}/recurringInvoices`).doc(id).set({
-      id, client, clientEmail: clientEmail ?? '', items, frequency, taxRate: taxRate ?? 20,
-      totalHT, totalTTC, status: 'active', nextInvoiceDate: next.toISOString().split('T')[0],
-      generatedCount: 0, createdAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await db.collection(`companies/${companyId}/recurringInvoices`).doc(id).set({
+        id, client, clientEmail: clientEmail ?? '', items, frequency, taxRate: taxRate ?? 20,
+        totalHT, totalTTC, status: 'active', nextInvoiceDate: next.toISOString().split('T')[0],
+        generatedCount: 0, createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      logger.error('[Accounting] createRecurringInvoice write failed', { error: String(err) });
+      return { success: false, recurringId: '', frequency, nextInvoiceDate: '', message: 'Sauvegarde impossible.' };
+    }
 
-    return { recurringId: id, frequency, nextInvoiceDate: next.toISOString().split('T')[0], message: `Facture recurrente ${frequency} creee pour ${client} (${totalTTC}€). Prochaine: ${next.toLocaleDateString('fr-FR')}.` };
+    return { success: true, recurringId: id, frequency, nextInvoiceDate: next.toISOString().split('T')[0], message: `Facture recurrente ${frequency} creee pour ${client} (${totalTTC}€). Prochaine: ${next.toLocaleDateString('fr-FR')}.` };
   }
 );
 
@@ -1290,11 +1449,15 @@ export const getRecurringInvoicesTool = ai.defineTool(
     name: 'acc_getRecurringInvoices',
     description: 'List recurring invoice templates.',
     inputSchema: z.object({ companyId: z.string() }),
-    outputSchema: z.object({ recurring: z.array(z.object({ id: z.string(), client: z.string(), frequency: z.string(), totalTTC: z.number(), nextInvoiceDate: z.string(), status: z.string(), generatedCount: z.number() })) }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string().optional(), recurring: z.array(z.object({ id: z.string(), client: z.string(), frequency: z.string(), totalTTC: z.number(), nextInvoiceDate: z.string(), status: z.string(), generatedCount: z.number() })) }),
   },
   async ({ companyId }) => {
-    const snap = await getFirestore().collection(`companies/${companyId}/recurringInvoices`).limit(50).get();
-    return { recurring: snap.docs.map(d => { const data = d.data(); return { id: d.id, client: (data['client'] as string) ?? '', frequency: (data['frequency'] as string) ?? '', totalTTC: (data['totalTTC'] as number) ?? 0, nextInvoiceDate: (data['nextInvoiceDate'] as string) ?? '', status: (data['status'] as string) ?? 'active', generatedCount: (data['generatedCount'] as number) ?? 0 }; }) };
+    const snap = await getFirestore().collection(`companies/${companyId}/recurringInvoices`).limit(50).get().catch((err) => {
+      logger.error('[Accounting] getRecurringInvoices query failed', { error: String(err) });
+      return null;
+    });
+    if (!snap) return { success: false, message: 'Lecture impossible.', recurring: [] };
+    return { success: true, recurring: snap.docs.map(d => { const data = d.data(); return { id: d.id, client: (data['client'] as string) ?? '', frequency: (data['frequency'] as string) ?? '', totalTTC: (data['totalTTC'] as number) ?? 0, nextInvoiceDate: (data['nextInvoiceDate'] as string) ?? '', status: (data['status'] as string) ?? 'active', generatedCount: (data['generatedCount'] as number) ?? 0 }; }) };
   }
 );
 
@@ -1308,6 +1471,8 @@ export const expenseAnalyticsTool = ai.defineTool(
     description: 'Expense analytics — by category, by department, trends, top spenders.',
     inputSchema: z.object({ companyId: z.string(), period: z.enum(['month', 'quarter', 'year']).optional().default('quarter') }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       totalExpenses: z.number(), avgPerMonth: z.number(),
       byCategory: z.array(z.object({ category: z.string(), total: z.number(), percentage: z.number() })),
       byDepartment: z.array(z.object({ department: z.string(), total: z.number() })),
@@ -1317,7 +1482,11 @@ export const expenseAnalyticsTool = ai.defineTool(
   },
   async ({ companyId, period }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get();
+    const snap = await db.collection(`companies/${companyId}/expenses`).where('status', '==', 'approved').limit(500).get().catch(() => null);
+    if (!snap) {
+      logger.error('[Accounting] expenseAnalytics read failed');
+      return { success: false, message: 'Lecture impossible.', totalExpenses: 0, avgPerMonth: 0, byCategory: [], byDepartment: [], topSpenders: [], trend: 'unknown' };
+    }
     const expenses = snap.docs.map(d => d.data());
     const total = expenses.reduce((s, e) => s + num(e['amount']), 0);
 
@@ -1335,6 +1504,7 @@ export const expenseAnalyticsTool = ai.defineTool(
 
     const months = period === 'month' ? 1 : period === 'quarter' ? 3 : 12;
     return {
+      success: true,
       totalExpenses: total, avgPerMonth: Math.round(total / months),
       byCategory: Object.entries(byCat).map(([c, t]) => ({ category: c, total: t, percentage: total > 0 ? Math.round(t / total * 100) : 0 })).sort((a, b) => b.total - a.total),
       byDepartment: Object.entries(byDept).map(([d, t]) => ({ department: d, total: t })).sort((a, b) => b.total - a.total),
@@ -1353,65 +1523,74 @@ export const financeAutomationTool = ai.defineTool(
     name: 'acc_runAutomation',
     description: 'Finance automation: overdue → alert sales, budget exceeded → notification, recurring → generate.',
     inputSchema: z.object({ companyId: z.string(), type: z.enum(['overdue_alert', 'budget_check', 'generate_recurring']) }),
-    outputSchema: z.object({ actions: z.array(z.string()), message: z.string() }),
+    outputSchema: z.object({ success: z.boolean(), actions: z.array(z.string()), message: z.string() }),
   },
   async ({ companyId, type }) => {
     const db = getFirestore();
     const actions: string[] = [];
 
-    if (type === 'overdue_alert') {
-      // Alert sales team about overdue invoices
-      const snap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'overdue').limit(50).get();
-      if (snap.size > 0) {
-        const total = snap.docs.reduce((s, d) => s + num(d.data()['totalTTC'] ?? d.data()['amount']), 0);
-        const { createNotification } = await import('../services/notificationService');
-        createNotification({ companyId, type: 'system', title: `${snap.size} factures impayees (${total}€)`, message: `Relancez vos clients pour recuperer ${total}€ de creances.`, actionUrl: '/finance/invoices', icon: 'AlertTriangle', severity: 'warning' }).catch(() => {});
-        actions.push(`Alerte: ${snap.size} factures impayees — ${total}€`);
-      }
-    }
-
-    if (type === 'budget_check') {
-      const snap = await db.collection(`companies/${companyId}/budgets`).limit(20).get();
-      for (const doc of snap.docs) {
-        const b = doc.data();
-        const allocated = (b['allocated'] as number) ?? 0;
-        const spent = (b['spent'] as number) ?? 0;
-        if (allocated > 0 && spent > allocated * 0.9) {
+    try {
+      if (type === 'overdue_alert') {
+        // Alert sales team about overdue invoices
+        const snap = await db.collection(`companies/${companyId}/invoices`).where('status', '==', 'overdue').limit(50).get();
+        if (snap.size > 0) {
+          const total = snap.docs.reduce((s, d) => s + num(d.data()['totalTTC'] ?? d.data()['amount']), 0);
           const { createNotification } = await import('../services/notificationService');
-          createNotification({ companyId, type: 'system', title: `Budget ${b['department']} a ${Math.round(spent / allocated * 100)}%`, message: `Le departement ${b['department']} a depense ${spent}€ sur ${allocated}€ budgetes.`, actionUrl: '/finance/budget', icon: 'TrendingUp', severity: spent > allocated ? 'error' : 'warning' }).catch(() => {});
-          actions.push(`Budget ${b['department']}: ${Math.round(spent / allocated * 100)}% utilise`);
+          createNotification({ companyId, type: 'system', title: `${snap.size} factures impayees (${total}€)`, message: `Relancez vos clients pour recuperer ${total}€ de creances.`, actionUrl: '/finance/invoices', icon: 'AlertTriangle', severity: 'warning' }).catch(() => {});
+          actions.push(`Alerte: ${snap.size} factures impayees — ${total}€`);
         }
       }
-    }
 
-    if (type === 'generate_recurring') {
-      const snap = await db.collection(`companies/${companyId}/recurringInvoices`).where('status', '==', 'active').limit(20).get();
-      const today = new Date().toISOString().split('T')[0];
-      for (const doc of snap.docs) {
-        const r = doc.data();
-        if ((r['nextInvoiceDate'] as string) <= today) {
-          // Generate invoice
-          const invId = generateId();
-          const number = `FAC-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
-          await db.collection(`companies/${companyId}/invoices`).doc(invId).set({
-            id: invId, number, client: r['client'], clientEmail: r['clientEmail'] ?? '',
-            items: r['items'], totalHT: r['totalHT'], totalTTC: r['totalTTC'], taxRate: r['taxRate'],
-            status: 'sent', currency: 'EUR', source: 'recurring', recurringId: doc.id,
-            createdAt: new Date(), dueDate: new Date(Date.now() + 30 * 86400000),
-          });
-          // Update next date
-          const freq = (r['frequency'] as string) ?? 'monthly';
-          const next = new Date(r['nextInvoiceDate'] as string);
-          if (freq === 'monthly') next.setMonth(next.getMonth() + 1);
-          else if (freq === 'quarterly') next.setMonth(next.getMonth() + 3);
-          else next.setFullYear(next.getFullYear() + 1);
-          await doc.ref.update({ nextInvoiceDate: next.toISOString().split('T')[0], generatedCount: FieldValue.increment(1) });
-          actions.push(`Facture ${number} generee pour ${r['client']} (${r['totalTTC']}€)`);
+      if (type === 'budget_check') {
+        const snap = await db.collection(`companies/${companyId}/budgets`).limit(20).get();
+        for (const doc of snap.docs) {
+          const b = doc.data();
+          const allocated = (b['allocated'] as number) ?? 0;
+          const spent = (b['spent'] as number) ?? 0;
+          if (allocated > 0 && spent > allocated * 0.9) {
+            const { createNotification } = await import('../services/notificationService');
+            createNotification({ companyId, type: 'system', title: `Budget ${b['department']} a ${Math.round(spent / allocated * 100)}%`, message: `Le departement ${b['department']} a depense ${spent}€ sur ${allocated}€ budgetes.`, actionUrl: '/finance/budget', icon: 'TrendingUp', severity: spent > allocated ? 'error' : 'warning' }).catch(() => {});
+            actions.push(`Budget ${b['department']}: ${Math.round(spent / allocated * 100)}% utilise`);
+          }
         }
       }
+
+      if (type === 'generate_recurring') {
+        const snap = await db.collection(`companies/${companyId}/recurringInvoices`).where('status', '==', 'active').limit(20).get();
+        const today = new Date().toISOString().split('T')[0];
+        for (const doc of snap.docs) {
+          const r = doc.data();
+          if ((r['nextInvoiceDate'] as string) <= today) {
+            // Generate invoice
+            const invId = generateId();
+            const number = `FAC-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
+            try {
+              await db.collection(`companies/${companyId}/invoices`).doc(invId).set({
+                id: invId, number, client: r['client'], clientEmail: r['clientEmail'] ?? '',
+                items: r['items'], totalHT: r['totalHT'], totalTTC: r['totalTTC'], taxRate: r['taxRate'],
+                status: 'sent', currency: 'EUR', source: 'recurring', recurringId: doc.id,
+                createdAt: new Date(), dueDate: new Date(Date.now() + 30 * 86400000),
+              });
+              // Update next date
+              const freq = (r['frequency'] as string) ?? 'monthly';
+              const next = new Date(r['nextInvoiceDate'] as string);
+              if (freq === 'monthly') next.setMonth(next.getMonth() + 1);
+              else if (freq === 'quarterly') next.setMonth(next.getMonth() + 3);
+              else next.setFullYear(next.getFullYear() + 1);
+              await doc.ref.update({ nextInvoiceDate: next.toISOString().split('T')[0], generatedCount: FieldValue.increment(1) });
+              actions.push(`Facture ${number} generee pour ${r['client']} (${r['totalTTC']}€)`);
+            } catch (err) {
+              logger.error('[Accounting] runAutomation generate_recurring write failed', { error: String(err), recurring: doc.id });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.error('[Accounting] runAutomation failed', { error: String(err), type });
+      return { success: false, actions, message: 'Automation impossible.' };
     }
 
-    return { actions, message: actions.length > 0 ? `${actions.length} action(s) executee(s).` : 'Aucune action necessaire.' };
+    return { success: true, actions, message: actions.length > 0 ? `${actions.length} action(s) executee(s).` : 'Aucune action necessaire.' };
   }
 );
 
@@ -1425,6 +1604,8 @@ export const clientRiskScoreTool = ai.defineTool(
     description: 'Calculate client payment risk score based on invoice payment history — late payments, overdue amounts.',
     inputSchema: z.object({ companyId: z.string(), clientName: z.string().optional() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       clients: z.array(z.object({
         client: z.string(), riskLevel: z.string(), totalInvoiced: z.number(),
         totalPaid: z.number(), totalOverdue: z.number(), avgDaysLate: z.number(),
@@ -1434,7 +1615,11 @@ export const clientRiskScoreTool = ai.defineTool(
   },
   async ({ companyId, clientName }) => {
     const db = getFirestore();
-    const snap = await db.collection(`companies/${companyId}/invoices`).limit(500).get();
+    const snap = await db.collection(`companies/${companyId}/invoices`).limit(500).get().catch(() => null);
+    if (!snap) {
+      logger.error('[Accounting] clientRiskScore read failed');
+      return { success: false, message: 'Lecture des factures impossible.', clients: [] };
+    }
     const invoices = snap.docs.map(d => d.data());
 
     const clientMap = new Map<string, { totalInvoiced: number; totalPaid: number; totalOverdue: number; overdueCount: number; invoiceCount: number; lateDays: number[] }>();
@@ -1464,7 +1649,7 @@ export const clientRiskScoreTool = ai.defineTool(
       return { client, riskLevel, totalInvoiced: data.totalInvoiced, totalPaid: data.totalPaid, totalOverdue: data.totalOverdue, avgDaysLate, overdueCount: data.overdueCount, invoiceCount: data.invoiceCount };
     }).sort((a, b) => { const o = { high: 3, medium: 2, low: 1 }; return (o[b.riskLevel as keyof typeof o] ?? 0) - (o[a.riskLevel as keyof typeof o] ?? 0); });
 
-    return { clients };
+    return { success: true, clients };
   }
 );
 

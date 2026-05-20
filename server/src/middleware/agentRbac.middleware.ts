@@ -73,6 +73,11 @@ export function requireAgentRole(agentId: string, required: AgentRole = 'user') 
   return async (req: AuthenticatedRequest, _res: Response, next: NextFunction): Promise<void> => {
     const uid = req.user?.uid;
     if (!uid) { next(new AppError('Auth required', 401)); return; }
+    // Super-admins bypass per-agent RBAC — they manage every tenant and need full surface.
+    try {
+      const userDoc = await getFirestore().collection('users').doc(uid).get();
+      if (userDoc.data()?.['superAdmin'] === true) { next(); return; }
+    } catch { /* fall through to the role check below */ }
     const role = await getAgentRole(uid, agentId);
     if (!role) { next(new AppError(`Access refused to agent "${agentId}"`, 403)); return; }
     if (required === 'admin' && role !== 'admin') {

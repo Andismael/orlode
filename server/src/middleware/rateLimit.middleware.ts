@@ -1,16 +1,33 @@
 import rateLimit from 'express-rate-limit';
 
-// General API rate limiter
+// General API rate limiter — keyed per-user (auth UID) instead of per-IP so
+// that multiple legit users behind the same NAT (corporate WiFi, mobile
+// carrier) don't share a quota. 200/15min was way too low — a single pack
+// admin page fires 8-12 parallel requests at boot, and the polling clients
+// (notifications, insights) burn ~30/min. Bumped to a much higher ceiling
+// and scoped per-uid so honest users never hit it; only true abuse trips.
 export const apiRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200,
+  max: 2000,                // ~133 req/min — generous; per-user
   message: {
     success: false,
-    message: 'Too many requests. Please try again in 15 minutes.',
+    message: 'Too many requests. Please try again in a minute.',
     code: 'RATE_LIMIT_EXCEEDED',
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Don't burn the global IP bucket when an authenticated user calls many
+  // small endpoints in parallel — key each user separately. Fall back to IP
+  // only for un-authenticated calls (login, public storefront, webhooks).
+  keyGenerator: (req) => {
+    const authReq = req as { user?: { uid?: string }; ip?: string };
+    return authReq.user?.uid ?? (req.ip ?? 'anonymous');
+  },
+  // GET reads are cheap — don't count them against the bucket. Only POST /
+  // PATCH / DELETE / PUT (state-changing operations) consume tokens. This
+  // matches what every "abuse" actually looks like and lets dashboards
+  // refresh freely.
+  skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
 });
 
 // Strict limiter for AI endpoints (expensive operations)

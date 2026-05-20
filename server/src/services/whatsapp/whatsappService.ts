@@ -47,6 +47,8 @@ export interface IncomingMessage {
   timestamp: number;
   messageId: string;
   audioId?: string; // ID du média audio (si type === 'audio')
+  imageId?: string; // ID du média image (si type === 'image')
+  caption?: string; // Caption attached to image/video/document
   phoneNumberId?: string; // Meta Cloud API phone_number_id of the receiving business number
   referral?: AdReferral; // present when the customer arrived via a Click-to-WhatsApp ad
 }
@@ -360,19 +362,124 @@ export class WhatsAppService {
     }
   }
 
+  /**
+   * Upsert a product into the Meta Commerce catalog using the items_batch
+   * API. `retailerId` is our Boutique product id — used as the stable key
+   * Meta uses to deduplicate. Returns ok/error so the caller can decide
+   * whether to surface the failure (we treat it as non-blocking).
+   */
+  async upsertCatalogProduct(
+    companyId: string,
+    retailerId: string,
+    data: {
+      name: string;
+      description?: string;
+      price: number;          // smallest unit (e.g. XOF whole, USD cents)
+      currency: string;
+      imageUrl?: string;
+      url?: string;           // public storefront URL
+      availability: 'in stock' | 'out of stock';
+    },
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const config = await this.getConfig(companyId);
+      if (!config) return { ok: false, error: 'no whatsapp config' };
+      const catalogId = await this.getCatalogId(companyId);
+      if (!catalogId) return { ok: false, error: 'no catalog' };
+
+      const token = decrypt(config.accessToken);
+      // Meta Catalog price format: "1500 XOF" or "15.00 USD" (string with currency).
+      // For zero-decimal currencies we keep whole units; otherwise we send the
+      // decimal value. The Boutique stores price as smallest-unit-aware integer.
+      const noDecimal = ['XOF', 'XAF', 'JPY', 'GNF', 'KES', 'NGN', 'RWF', 'BIF', 'UGX']
+        .includes(data.currency);
+      const priceStr = noDecimal
+        ? `${Math.round(data.price)} ${data.currency}`
+        : `${(data.price / 100).toFixed(2)} ${data.currency}`;
+
+      const payload = {
+        access_token: token,
+        requests: [{
+          method: 'UPDATE',  // UPDATE = upsert (creates if retailer_id unknown)
+          retailer_id: retailerId,
+          data: {
+            name: data.name.slice(0, 150),
+            description: (data.description ?? data.name).slice(0, 9999),
+            price: priceStr,
+            currency: data.currency,
+            availability: data.availability,
+            condition: 'new',
+            ...(data.imageUrl ? { image_url: data.imageUrl } : {}),
+            ...(data.url ? { url: data.url } : {}),
+            brand: 'Orlode',  // Meta requires a brand field
+          },
+        }],
+      };
+      const r = await fetch(`${GRAPH_API}/${catalogId}/items_batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await r.json().catch(() => ({})) as { error?: { message: string }; handles?: string[] };
+      if (!r.ok || body.error) {
+        const msg = body.error?.message ?? `HTTP ${r.status}`;
+        logger.warn('[WhatsApp/Catalog] upsert failed', { retailerId, msg });
+        return { ok: false, error: msg };
+      }
+      return { ok: true };
+    } catch (err) {
+      logger.warn('[WhatsApp/Catalog] upsert threw', { error: String(err) });
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  /** Remove a product from the Meta catalog by retailer_id. */
+  async deleteCatalogProduct(
+    companyId: string,
+    retailerId: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const config = await this.getConfig(companyId);
+      if (!config) return { ok: false, error: 'no whatsapp config' };
+      const catalogId = await this.getCatalogId(companyId);
+      if (!catalogId) return { ok: false, error: 'no catalog' };
+      const token = decrypt(config.accessToken);
+
+      const payload = {
+        access_token: token,
+        requests: [{ method: 'DELETE', retailer_id: retailerId }],
+        // allow_upsert=false: don't recreate accidentally
+      };
+      const r = await fetch(`${GRAPH_API}/${catalogId}/items_batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await r.json().catch(() => ({})) as { error?: { message: string } };
+      if (!r.ok || body.error) {
+        const msg = body.error?.message ?? `HTTP ${r.status}`;
+        logger.warn('[WhatsApp/Catalog] delete failed', { retailerId, msg });
+        return { ok: false, error: msg };
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
   /** Envoie un message texte */
-  async sendMessage(config: WhatsAppConfig, to: string, text: string): Promise<string | null> {
+  async sendMessage(
+    config: WhatsAppConfig,
+    to: string,
+    text: string,
+    /** Persist the outbound message under companies/{companyId}/whatsappMessages
+     *  so it appears in the Inbox UI. Pass when known — silently skips otherwise. */
+    companyId?: string,
+    /** Tag the origin (auto-reply, admin-inbox, broadcast…) for analytics. */
+    sentFrom: string = 'agent-auto-reply',
+  ): Promise<string | null> {
     try {
       const token = decrypt(config.accessToken);
-      // Diagnostic: log token shape without exposing it
-      logger.info('[WhatsApp] Token check', {
-        storedLen: config.accessToken.length,
-        storedPrefix: config.accessToken.slice(0, 20),
-        decryptedLen: token.length,
-        decryptedPrefix: token.slice(0, 20),
-        decryptedSuffix: token.slice(-10),
-        looksLikeMetaToken: token.startsWith('EAA'),
-      });
       const res = await fetch(`${GRAPH_API}/${config.phoneNumberId}/messages`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -394,9 +501,101 @@ export class WhatsAppService {
         return null;
       }
       logger.info('[WhatsApp] sendMessage OK', { to, messageId });
+
+      // Persist outbound to Firestore so the Inbox UI shows it alongside
+      // inbound messages from this same contact. Best-effort — the message
+      // is already on Meta's side, no point failing the call if Firestore
+      // write fails.
+      if (companyId) {
+        try {
+          await getFirestore()
+            .collection(`companies/${companyId}/whatsappMessages`)
+            .add({
+              direction: 'outbound' as const,
+              to: String(to),
+              body: text,
+              messageId,
+              waMessageId: messageId,
+              processed: true,
+              sentFrom,
+              createdAt: new Date(),
+            });
+        } catch (persistErr) {
+          logger.warn('[WhatsApp] sendMessage — failed to persist outbound (non-blocking)', {
+            companyId, to, messageId, error: String(persistErr),
+          });
+        }
+      }
+
       return messageId;
     } catch (err) {
       logger.error('[WhatsApp] sendMessage threw exception', { error: String(err), to });
+      return null;
+    }
+  }
+
+  /** Envoie une image native (URL publique). Optionnellement avec une caption. */
+  async sendImage(
+    config: WhatsAppConfig,
+    to: string,
+    imageUrl: string,
+    caption?: string,
+  ): Promise<string | null> {
+    try {
+      const token = decrypt(config.accessToken);
+      const res = await fetch(`${GRAPH_API}/${config.phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to, type: 'image',
+          image: { link: imageUrl, ...(caption ? { caption: caption.slice(0, 1024) } : {}) },
+        }),
+      });
+      const raw = await res.text();
+      const data = raw ? JSON.parse(raw) as { messages?: Array<{ id: string }>; error?: unknown } : {};
+      const messageId = data.messages?.[0]?.id;
+      if (!messageId) {
+        logger.warn('[WhatsApp] sendImage — no messageId', { httpStatus: res.status, to, error: data.error });
+        return null;
+      }
+      return messageId;
+    } catch (err) {
+      logger.error('[WhatsApp] sendImage threw', { error: String(err), to });
+      return null;
+    }
+  }
+
+  /** Envoie un message location interactif (épingle GPS native dans WhatsApp). */
+  async sendLocation(
+    config: WhatsAppConfig,
+    to: string,
+    coords: { latitude: number; longitude: number; name?: string; address?: string },
+  ): Promise<string | null> {
+    try {
+      const token = decrypt(config.accessToken);
+      const res = await fetch(`${GRAPH_API}/${config.phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to, type: 'location',
+          location: {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            ...(coords.name ? { name: coords.name } : {}),
+            ...(coords.address ? { address: coords.address } : {}),
+          },
+        }),
+      });
+      const raw = await res.text();
+      const data = raw ? JSON.parse(raw) as { messages?: Array<{ id: string }>; error?: unknown } : {};
+      const messageId = data.messages?.[0]?.id;
+      if (!messageId) {
+        logger.warn('[WhatsApp] sendLocation — no messageId', { httpStatus: res.status, to, error: data.error });
+        return null;
+      }
+      return messageId;
+    } catch (err) {
+      logger.error('[WhatsApp] sendLocation threw', { error: String(err), to });
       return null;
     }
   }
@@ -535,6 +734,45 @@ export class WhatsAppService {
    * 2. Télécharge le fichier audio
    * 3. Envoie à Whisper pour transcription
    */
+  /** Whisper transcription from a raw audio buffer (channel-agnostic).
+   *  Used by Telegram + any other channel that gets the audio bytes directly. */
+  async transcribeAudioBuffer(
+    audioBuffer: Buffer,
+    mimeType: string,
+    companyId = 'default',
+  ): Promise<string | null> {
+    if (!audioBuffer.length) return null;
+    const openaiKey = await this.getOpenAIKey(companyId);
+    if (!openaiKey) return null;
+    const ext = mimeType.includes('ogg') ? 'ogg'
+      : mimeType.includes('mp3') ? 'mp3'
+      : mimeType.includes('mp4') || mimeType.includes('m4a') ? 'm4a'
+      : 'ogg';
+    const safeMime = mimeType.startsWith('audio/') ? mimeType : 'audio/ogg';
+    const call = async (): Promise<{ ok: boolean; status: number; raw: string }> => {
+      const fd = new FormData();
+      fd.append('file', new Blob([audioBuffer], { type: safeMime }), `audio.${ext}`);
+      fd.append('model', 'whisper-1');
+      fd.append('language', 'fr');
+      const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${openaiKey}` },
+        body: fd,
+      });
+      return { ok: res.ok, status: res.status, raw: await res.text() };
+    };
+    let attempt = await call();
+    if (!attempt.ok && (attempt.status >= 500 || attempt.status === 429)) {
+      await new Promise(r => setTimeout(r, 800));
+      attempt = await call();
+    }
+    if (!attempt.ok) return null;
+    try {
+      const j = JSON.parse(attempt.raw) as { text?: string };
+      return j.text?.trim() ?? null;
+    } catch { return null; }
+  }
+
   async transcribeAudio(audioId: string, accessToken: string, companyId = 'default'): Promise<string> {
     // 1. Obtenir URL média Meta
     const mediaRes = await fetch(`${GRAPH_API}/${audioId}`, {
@@ -704,6 +942,10 @@ export class WhatsAppService {
       const textBody = (msg['text'] as Record<string, string>)?.['body'];
       const interactiveTitle = ((msg['interactive'] as Record<string, unknown>)?.['button_reply'] as Record<string, string>)?.['title'];
       const audioId = (msg['audio'] as Record<string, string>)?.['id'];
+      const imageId = (msg['image'] as Record<string, string>)?.['id'];
+      const imageCaption = (msg['image'] as Record<string, string>)?.['caption'];
+      const docCaption = (msg['document'] as Record<string, string>)?.['caption'];
+      const videoCaption = (msg['video'] as Record<string, string>)?.['caption'];
       const phoneNumberId = (value?.['metadata'] as Record<string, string> | undefined)?.['phone_number_id'];
       // Click-to-WhatsApp ad referral — Meta attaches this when a customer
       // arrives via a Facebook/Instagram ad with the "Send WhatsApp message" CTA.
@@ -723,11 +965,13 @@ export class WhatsAppService {
 
       return {
         from:      msg['from'] as string,
-        message:   textBody ?? interactiveTitle ?? '',
+        message:   textBody ?? interactiveTitle ?? imageCaption ?? videoCaption ?? docCaption ?? '',
         type:      (msg['type'] as IncomingMessage['type']) ?? 'text',
         timestamp: parseInt(msg['timestamp'] as string) * 1000,
         messageId: msg['id'] as string,
         audioId,
+        imageId,
+        caption:   imageCaption ?? videoCaption ?? docCaption,
         phoneNumberId,
         referral,
       };

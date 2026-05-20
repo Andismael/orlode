@@ -58,6 +58,15 @@ function requireAgentRole(agentId, required = 'user') {
             next(new error_middleware_1.AppError('Auth required', 401));
             return;
         }
+        // Super-admins bypass per-agent RBAC — they manage every tenant and need full surface.
+        try {
+            const userDoc = await (0, firebase_config_1.getFirestore)().collection('users').doc(uid).get();
+            if (userDoc.data()?.['superAdmin'] === true) {
+                next();
+                return;
+            }
+        }
+        catch { /* fall through to the role check below */ }
         const role = await getAgentRole(uid, agentId);
         if (!role) {
             next(new error_middleware_1.AppError(`Access refused to agent "${agentId}"`, 403));

@@ -265,6 +265,82 @@ exports.commsAgentTool = genkit_config_1.ai.defineTool({
     inputSchema: INPUT,
     outputSchema: OUTPUT,
 }, (input) => (0, exports.commsAgentFlow)(input));
+// ── Module-scoped tools for the chat flow ──────────────────────────────────────
+// These MUST be defined at module load time (Genkit forbids defining new actions
+// at runtime). The flow's manual exec loop merges companyId into the input before
+// dispatching, the same pattern used by HR / Sales / Support agents.
+const reliableSendEmailTool = genkit_config_1.ai.defineTool({
+    name: 'comms_sendEmail',
+    description: "Envoie VRAIMENT un email via la boîte de l'entreprise (Gmail si connecté, sinon Resend en fallback). Toujours préférer cet outil à draftCommunication pour un envoi réel. Si l'envoi échoue, dis-le HONNÊTEMENT — ne fabrique JAMAIS un succès.",
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string().optional(),
+        to: zod_1.z.string().describe('Email destinataire'),
+        subject: zod_1.z.string(),
+        body: zod_1.z.string().describe('Corps du message (HTML ou markdown)'),
+        cc: zod_1.z.string().optional(),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        provider: zod_1.z.string().optional(),
+        from: zod_1.z.string().optional(),
+        message: zod_1.z.string(),
+    }),
+}, async ({ companyId, to, subject, body, cc }) => {
+    if (!companyId)
+        return { success: false, message: 'companyId manquant — impossible d\'envoyer.' };
+    try {
+        const { sendEmail: sendUnified } = await Promise.resolve().then(() => __importStar(require('../services/email/emailService')));
+        const html = body.includes('<')
+            ? body
+            : `<div style="font-family:system-ui,sans-serif;line-height:1.6">${body.replace(/\n/g, '<br>')}</div>`;
+        const result = await sendUnified({
+            to, subject, html, cc, companyId,
+            tags: [{ name: 'type', value: 'comms-agent' }],
+        });
+        return {
+            success: true,
+            provider: result.provider,
+            from: result.from,
+            message: `Email envoyé à ${to} via ${result.provider}${result.from ? ` (depuis ${result.from})` : ''}.`,
+        };
+    }
+    catch (err) {
+        return {
+            success: false,
+            message: `Échec de l'envoi : ${err.message ?? String(err)}. Gmail probablement pas connecté pour cette entreprise. Configurer dans /admin/gmail ou utiliser Resend.`,
+        };
+    }
+});
+const slackNotifyTool = genkit_config_1.ai.defineTool({
+    name: 'comms_notifySlack',
+    description: "Envoie une notification Slack. Si MCP Slack n'est pas configuré pour l'entreprise, renvoie success=false avec une raison explicite. Toujours appeler ce tool pour toute demande Slack — n'invente JAMAIS un envoi.",
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string().optional(),
+        channel: zod_1.z.string().describe('Canal Slack (#general, #commercial, ...)'),
+        text: zod_1.z.string().describe('Message à envoyer'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        message: zod_1.z.string(),
+    }),
+}, async ({ channel, text }) => {
+    if (!mcp_config_1.mcpAvailability.slack) {
+        return {
+            success: false,
+            message: `MCP Slack non configuré pour cette entreprise. Impossible d'envoyer "${text.slice(0, 60)}..." vers ${channel}. Configurer Slack dans /admin/integrations pour activer l'envoi réel.`,
+        };
+    }
+    try {
+        const { slackSendMessageTool } = await Promise.resolve().then(() => __importStar(require('./tools/mcp/slack')));
+        const result = await slackSendMessageTool({ channel, text });
+        if (result?.ok || result?.ts)
+            return { success: true, message: `Message posté dans ${channel}.` };
+        return { success: false, message: `Slack a refusé le message dans ${channel}.` };
+    }
+    catch (err) {
+        return { success: false, message: `Échec Slack : ${err.message ?? String(err)}` };
+    }
+});
 // ── Chat-mode wrapper — for conversational use via the orchestrator/UI ─────────
 // Accepts the standard { request, companyId, history } signature like other agents.
 const CHAT_INPUT = zod_1.z.object({
@@ -293,79 +369,10 @@ exports.commsAgentChatFlow = genkit_config_1.ai.defineFlow({ name: 'commsAgentCh
         }
     }
     messages.push({ role: 'user', content: [{ text: request }] });
-    // Reliable email tool — uses Gmail (if connected for the company) or Resend fallback
-    // This works without MCP and supports attachments out of the box
-    const reliableSendEmailTool = genkit_config_1.ai.defineTool({
-        name: 'comms_sendEmail',
-        description: "Envoie VRAIMENT un email via la boîte de l'entreprise (Gmail si connecté, sinon Resend en fallback). Toujours préférer cet outil à draftCommunication pour un envoi réel. Si l'envoi échoue, dis-le HONNÊTEMENT — ne fabrique JAMAIS un succès.",
-        inputSchema: zod_1.z.object({
-            to: zod_1.z.string().describe('Email destinataire'),
-            subject: zod_1.z.string(),
-            body: zod_1.z.string().describe('Corps du message (HTML ou markdown)'),
-            cc: zod_1.z.string().optional(),
-        }),
-        outputSchema: zod_1.z.object({
-            success: zod_1.z.boolean(),
-            provider: zod_1.z.string().optional(),
-            from: zod_1.z.string().optional(),
-            message: zod_1.z.string(),
-        }),
-    }, async ({ to, subject, body, cc }) => {
-        try {
-            const { sendEmail: sendUnified } = await Promise.resolve().then(() => __importStar(require('../services/email/emailService')));
-            const html = body.includes('<')
-                ? body
-                : `<div style="font-family:system-ui,sans-serif;line-height:1.6">${body.replace(/\n/g, '<br>')}</div>`;
-            const result = await sendUnified({
-                to, subject, html, cc, companyId,
-                tags: [{ name: 'type', value: 'comms-agent' }],
-            });
-            return {
-                success: true,
-                provider: result.provider,
-                from: result.from,
-                message: `Email envoyé à ${to} via ${result.provider}${result.from ? ` (depuis ${result.from})` : ''}.`,
-            };
-        }
-        catch (err) {
-            return {
-                success: false,
-                message: `Échec de l'envoi : ${err.message ?? String(err)}. Gmail probablement pas connecté pour cette entreprise. Configurer dans /admin/gmail ou utiliser Resend.`,
-            };
-        }
-    });
-    // Slack notify — always available. Forwards to MCP if configured, otherwise
-    // returns explicit failure so the LLM cannot fabricate "Notification envoyée".
-    const slackNotifyTool = genkit_config_1.ai.defineTool({
-        name: 'comms_notifySlack',
-        description: "Envoie une notification Slack. Si MCP Slack n'est pas configuré pour l'entreprise, renvoie success=false avec une raison explicite. Toujours appeler ce tool pour toute demande Slack — n'invente JAMAIS un envoi.",
-        inputSchema: zod_1.z.object({
-            channel: zod_1.z.string().describe('Canal Slack (#general, #commercial, ...)'),
-            text: zod_1.z.string().describe('Message à envoyer'),
-        }),
-        outputSchema: zod_1.z.object({
-            success: zod_1.z.boolean(),
-            message: zod_1.z.string(),
-        }),
-    }, async ({ channel, text }) => {
-        if (!mcp_config_1.mcpAvailability.slack) {
-            return {
-                success: false,
-                message: `MCP Slack non configuré pour cette entreprise. Impossible d'envoyer "${text.slice(0, 60)}..." vers ${channel}. Configurer Slack dans /admin/integrations pour activer l'envoi réel.`,
-            };
-        }
-        try {
-            const { slackSendMessageTool } = await Promise.resolve().then(() => __importStar(require('./tools/mcp/slack')));
-            const result = await slackSendMessageTool({ channel, text });
-            if (result?.ok || result?.ts)
-                return { success: true, message: `Message posté dans ${channel}.` };
-            return { success: false, message: `Slack a refusé le message dans ${channel}.` };
-        }
-        catch (err) {
-            return { success: false, message: `Échec Slack : ${err.message ?? String(err)}` };
-        }
-    });
     // Tools available: reliable email + slack notify + structured drafter + (optional) MCP Google/Slack
+    // Both reliableSendEmailTool and slackNotifyTool are now module-scoped (defined above)
+    // to satisfy Genkit's "no actions at runtime" rule. companyId is merged into tool inputs
+    // by the manual exec loop below.
     const allTools = [
         reliableSendEmailTool,
         slackNotifyTool,
@@ -426,9 +433,12 @@ ${langInstr}`,
         const toolResults = await Promise.all(response.toolRequests.map(async (p) => {
             const { name, input, ref } = p.toolRequest;
             const tool = allTools.find(t => t.__action?.name === name);
+            // Merge companyId into the tool input so module-scoped tools can use it
+            // without relying on closures (Genkit forbids defining actions at runtime).
+            const inp = { ...input, companyId };
             let output;
             try {
-                output = tool ? await tool(input) : { error: `Tool inconnu: ${name}` };
+                output = tool ? await tool(inp) : { error: `Tool inconnu: ${name}` };
             }
             catch (err) {
                 output = { error: String(err) };

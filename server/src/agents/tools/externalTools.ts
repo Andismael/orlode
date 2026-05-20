@@ -113,11 +113,47 @@ export const sendEmailTool = ai.defineTool(
               logger.warn('[sendEmail] attachInvoiceId not found', { invoiceId: input.attachInvoiceId });
             }
           }
+
+          // ── Contract attachment (Wemas-managed legal contracts) ──────────
+          // Cached at companies/{cid}/contracts/{id} when createAndSendContract ran.
+          // If the cache is missing contractContent (e.g. contract created before
+          // we started caching), fall back to surfacing the signing URL only.
+          if (input.attachContractId) {
+            const cdoc = await db.collection(`companies/${input.companyId}/contracts`).doc(input.attachContractId).get();
+            if (cdoc.exists) {
+              const cdata = cdoc.data() ?? {};
+              const contractContent = cdata['contractContent'] as string | undefined;
+              const signingUrl = cdata['signingUrl'] as string | undefined;
+              const signatoryName = (cdata['signatoryName'] as string | undefined) ?? 'Signataire';
+              const signatoryEmail = (cdata['signatoryEmail'] as string | undefined) ?? input.to;
+              const contractType = cdata['contractType'] as string | undefined;
+              const verificationCode = cdata['verificationCode'] as string | undefined;
+              const expiresAt = cdata['expiresAt'] as string | undefined;
+
+              if (contractContent && contractContent.trim().length > 50) {
+                const { renderWemasContractPdf } = await import('../../services/wemas/wemasContractPdf');
+                const buf = await renderWemasContractPdf(input.companyId, {
+                  signatoryName, signatoryEmail, contractType, contractContent,
+                  signingUrl, verificationCode, expiresAt,
+                });
+                const safeName = signatoryName.replace(/[^a-zA-Z0-9]+/g, '-');
+                attachments.push({ filename: `Contrat-${contractType ?? 'orlode'}-${safeName}.pdf`, content: buf });
+                attachmentsIncluded.push(`contract:${input.attachContractId}`);
+              } else {
+                logger.warn('[sendEmail] attachContractId has no content cached, sending signing link only', {
+                  contractId: input.attachContractId, hasSigningUrl: !!signingUrl,
+                });
+              }
+            } else {
+              logger.warn('[sendEmail] attachContractId not found', { contractId: input.attachContractId });
+            }
+          }
         } catch (attachErr) {
           logger.error('[sendEmail] Attachment loading failed', {
             error: attachErr instanceof Error ? attachErr.message : String(attachErr),
             attachQuoteId: input.attachQuoteId,
             attachInvoiceId: input.attachInvoiceId,
+            attachContractId: input.attachContractId,
           });
           // Don't fail the whole email — send without attachment but note in response.
         }

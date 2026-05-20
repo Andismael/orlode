@@ -85,11 +85,18 @@ exports.visionAgentFlow = genkit_config_1.ai.defineFlow({ name: 'visionAgent', i
             {
                 text: `${taskPrompt}${contextNote}
 
+🚫 RÈGLE ABSOLUE — ZÉRO FABRICATION
+- N'invente PAS ce que tu ne vois pas clairement. Si l'image est floue, sombre, ou ambiguë, retourne confidence: "low" et description honnête ("image trop sombre pour identifier").
+- Pour peopleCount : si tu n'es pas sûr, retourne null (pas une devinette).
+- Pour textFound : ne retourne que le texte EFFECTIVEMENT visible — ne complète pas / ne reformule pas / ne traduis pas.
+- N'affirme PAS reconnaître quelqu'un par le visage — c'est le rôle de face-api.js.
+- Pour sentiment : "unknown" est OK si tu ne peux pas juger.
+
 Return JSON:
 {
-  "description": "detailed description",
-  "peopleCount": <number or null>,
-  "textFound": "any text visible or null",
+  "description": "detailed description (honest about what you cannot see)",
+  "peopleCount": <number or null if unsure>,
+  "textFound": "actual visible text or null",
   "objects": ["object1", "object2"],
   "sentiment": "positive|neutral|negative|unknown",
   "confidence": "high|medium|low"

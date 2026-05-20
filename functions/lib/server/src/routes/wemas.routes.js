@@ -581,6 +581,40 @@ exports.publicContractRouter.post('/contract/:uniqueLink/sign', (0, asyncHandler
     if (!signatureData)
         throw new error_middleware_1.AppError('signatureData is required', 400);
     const result = await wemasService_1.wemasService.signContract(contract.companyId, contract.id, signatureData, req.ip ?? undefined, req.headers['user-agent'] ?? undefined, signingLink);
+    // Fire-and-forget confirmation email (with embedded signature image).
+    // Pulls fresh contract state to get signedAt + signatureData saved by signContract().
+    if (result.success) {
+        void (async () => {
+            try {
+                const fresh = await wemasService_1.wemasService.getContract(contract.companyId, contract.id);
+                if (!fresh)
+                    return;
+                const { renderSignedConfirmationEmail } = await Promise.resolve().then(() => __importStar(require('../agents/legal.agent')));
+                const { sendEmail } = await Promise.resolve().then(() => __importStar(require('../services/email/emailService')));
+                const PUBLIC_APP_URL = process.env['PUBLIC_APP_URL'] ?? 'https://mon-assistant-86bbd.web.app';
+                const html = renderSignedConfirmationEmail({
+                    signatoryName: fresh.signatoryName,
+                    signatoryEmail: fresh.signatoryEmail,
+                    senderName: fresh.senderName ?? 'Orlode',
+                    contractType: fresh.contractType,
+                    signedAt: fresh.signedAt ?? new Date().toISOString(),
+                    signatureData: fresh.signatureData ?? signatureData,
+                    contractContent: fresh.contractContent,
+                    contractLink: `${PUBLIC_APP_URL}/sign/${fresh.uniqueLink}`,
+                });
+                await sendEmail({
+                    companyId: contract.companyId,
+                    to: fresh.signatoryEmail,
+                    subject: `Votre contrat a été signé avec succès`,
+                    html,
+                });
+            }
+            catch (err) {
+                // Non-blocking — signature is saved, email is bonus.
+                // (logger imported at top of file)
+            }
+        })();
+    }
     res.json({ success: result.success, data: result });
 }));
 exports.publicContractRouter.get('/upload/:token', (0, asyncHandler_1.asyncHandler)(async (req, res) => {

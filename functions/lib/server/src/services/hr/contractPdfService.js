@@ -52,7 +52,12 @@ async function renderContractPdf(company, employee) {
     const salary = employee.baseSalary ?? 0;
     return new Promise((resolve, reject) => {
         try {
-            const doc = new pdfkit_1.default({ size: 'A4', margin: 50 });
+            // bufferPages=true so we can stamp the footer on every page after we're done.
+            const doc = new pdfkit_1.default({
+                size: 'A4',
+                margins: { top: 50, left: 50, right: 50, bottom: 60 },
+                bufferPages: true,
+            });
             const chunks = [];
             doc.on('data', (c) => chunks.push(c));
             doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -154,9 +159,6 @@ async function renderContractPdf(company, employee) {
             doc.font('Helvetica').fontSize(10).fillColor('#374151');
             doc.text(`La rémunération mensuelle brute est fixée à ${salary.toLocaleString()} ${currency}, versée au plus tard le 5 du mois suivant. Le/la Salarié(e) bénéficiera également des avantages sociaux en vigueur dans l'entreprise.`, 50, doc.y, { width: 495, align: 'justify' });
             doc.moveDown(1);
-            // New page if needed for remaining articles
-            if (doc.y > 650)
-                doc.addPage();
             // ── ARTICLE 5 — Congés payés
             doc.font('Helvetica-Bold').fontSize(11).fillColor('#7c3aed');
             doc.text('Article 5 — Congés payés', 50, doc.y);
@@ -189,12 +191,10 @@ async function renderContractPdf(company, employee) {
             doc.font('Helvetica').fontSize(10).fillColor('#374151');
             doc.text("Le présent contrat est régi par le Code du travail en vigueur. Tout différend non résolu à l'amiable sera soumis aux juridictions compétentes.", 50, doc.y, { width: 495, align: 'justify' });
             doc.moveDown(2);
-            // ── SIGNATURES
-            if (doc.y > 680)
-                doc.addPage();
+            // ── SIGNATURES (in-flow — let pdfkit auto-page only if truly needed)
             doc.font('Helvetica').fontSize(10).fillColor('#374151');
             doc.text(`Fait à ${company.address?.split(',')[0] ?? '____________'}, le ${new Date().toLocaleDateString('fr-FR')}, en deux exemplaires originaux.`, 50, doc.y, { width: 495 });
-            doc.moveDown(2);
+            doc.moveDown(1.5);
             const sigY = doc.y;
             doc.font('Helvetica-Bold').fontSize(10);
             doc.text('Pour l\'Employeur', 50, sigY, { width: 240, align: 'center' });
@@ -204,13 +204,19 @@ async function renderContractPdf(company, employee) {
             doc.font('Helvetica').fontSize(8).fillColor('#9ca3af');
             doc.text('(Signature + cachet)', 50, sigY + 45, { width: 240, align: 'center' });
             doc.text(`(Signature précédée de "Lu et approuvé")`, 305, sigY + 45, { width: 240, align: 'center' });
-            // ── FOOTER
-            const pageH = 842; // A4 height in points
-            doc.moveTo(50, pageH - 40).lineTo(545, pageH - 40).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
-            doc.fontSize(7).font('Helvetica').fillColor('#9ca3af');
+            // ── FOOTER on every page (via bufferedPageRange)
+            // We position above the bottom margin (60) so pdfkit doesn't auto-add a page.
+            const pageH = 842;
+            const footerY = pageH - 32;
+            const range = doc.bufferedPageRange();
             const legal = [company.name, company.address, company.taxId ? `N° ${company.taxId}` : null].filter(Boolean).join(' · ');
-            doc.text(legal, 50, pageH - 34, { width: 350 });
-            doc.text('Powered by Orlode', 50, pageH - 34, { width: 495, align: 'right' });
+            for (let i = range.start; i < range.start + range.count; i++) {
+                doc.switchToPage(i);
+                doc.moveTo(50, footerY - 6).lineTo(545, footerY - 6).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
+                doc.fontSize(7).font('Helvetica').fillColor('#9ca3af');
+                doc.text(legal, 50, footerY, { width: 350, lineBreak: false });
+                doc.text('Powered by Orlode', 50, footerY, { width: 495, align: 'right', lineBreak: false });
+            }
             doc.end();
         }
         catch (err) {

@@ -52,25 +52,101 @@ router.post('/leads/:companyId', asyncHandler(async (req: Request, res: Response
 }));
 
 // GET /api/website/preview/:companyId — public site JSON for static rendering
+// Serves a rendered HTML preview of the site.
+// Default response = HTML (what users open in a browser tab).
+// Pass `?format=json` to get the raw config payload instead (for API consumers).
+//
+// Status check:
+//   - status='published' → public preview anyone can view
+//   - status='draft'     → also returns HTML but only when an authenticated admin
+//                          of THIS company calls it (we accept Bearer token here
+//                          so the in-app "Aperçu" button works on drafts too).
 router.get('/preview/:companyId', asyncHandler(async (req: Request, res: Response) => {
   const { companyId } = req.params as { companyId: string };
   const db = getFirestore();
   const doc = await db.collection(`companies/${companyId}/website`).doc('config').get();
-  if (!doc.exists) throw new AppError('Site not found', 404);
+  if (!doc.exists) throw new AppError('Site not found — generate it first via /admin/website/builder.', 404);
   const data = doc.data()!;
-  // Only expose published sites publicly
-  if ((data['status'] as string) !== 'published') throw new AppError('Site not published', 404);
-  res.json({
-    success: true,
-    data: {
-      content:      data['content']      ?? {},
-      template:     data['template']     ?? 'vitrine',
-      style:        data['style']        ?? 'modern',
-      color:        data['color']        ?? '#6c3ce0',
-      companyName:  data['companyName']  ?? '',
-      widgetEnabled: data['widgetEnabled'] ?? true,
-    },
-  });
+  const status = (data['status'] as string) ?? 'draft';
+
+  // Drafts: require the caller to be an authenticated admin of the same company.
+  if (status !== 'published') {
+    const authHeader = (req.header('authorization') ?? '').trim();
+    const isAdminOfSameCompany = await (async () => {
+      if (!authHeader.startsWith('Bearer ')) return false;
+      try {
+        const { getAuth } = await import('../config/firebase.config');
+        const decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+        return decoded.companyId === companyId;
+      } catch { return false; }
+    })();
+    if (!isAdminOfSameCompany) {
+      // Public draft = friendly stub instead of JSON 404 — guides the user
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.status(404).send(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Site non publié</title></head><body style="font-family:system-ui;max-width:520px;margin:80px auto;padding:32px;text-align:center;">
+<h1 style="font-size:22px;margin:0 0 12px;">Ce site n'est pas encore publié</h1>
+<p style="color:#6b7280;font-size:14px;">L'administrateur peut publier le site depuis le builder pour le rendre visible publiquement.</p>
+</body></html>`);
+      return;
+    }
+  }
+
+  // JSON API response when explicitly requested
+  if ((req.query['format'] as string) === 'json') {
+    res.json({
+      success: true,
+      data: {
+        content:      data['content']      ?? {},
+        template:     data['template']     ?? 'vitrine',
+        style:        data['style']        ?? 'modern',
+        color:        data['color']        ?? '#6c3ce0',
+        companyName:  data['companyName']  ?? '',
+        widgetEnabled: data['widgetEnabled'] ?? true,
+        status,
+      },
+    });
+    return;
+  }
+
+  // Two paths:
+  //   (a) Imported HTML — user pasted a full HTML page from Claude/Gemini/Bolt → we serve it as-is.
+  //       We inject the Orlode chat widget before </body> so the imported site keeps the AI assistant.
+  //   (b) Generated content — we build the page from the structured `content` object using our template.
+  const content = (data['content'] as Record<string, unknown>) ?? {};
+  const importedHtml = (content['rawHtml'] as string) ?? (data['rawHtml'] as string) ?? '';
+
+  let html: string;
+  if (importedHtml && importedHtml.trim().length > 100) {
+    const widgetEnabled = (data['widgetEnabled'] as boolean) ?? true;
+    const color = (data['color'] as string) ?? (data['primaryColor'] as string) ?? '#6c3ce0';
+    const widgetSnippet = widgetEnabled
+      ? `<script src="https://orlode.com/embed.js" data-company="${companyId}" data-color="${color}"></script>`
+      : '';
+    // Inject the widget right before </body>, or append if no </body> tag found
+    html = importedHtml.includes('</body>')
+      ? importedHtml.replace('</body>', `${widgetSnippet}</body>`)
+      : importedHtml + widgetSnippet;
+  } else {
+    const { generateStaticHTML } = await import('../agents/website.agent');
+    html = generateStaticHTML(
+      content,
+      (data['companyName'] as string) ?? (data['name'] as string) ?? 'Mon Site',
+      (data['color'] as string) ?? (data['primaryColor'] as string) ?? '#6c3ce0',
+      companyId,
+      (data['widgetEnabled'] as boolean) ?? true,
+      (data['template'] as string) ?? undefined,
+    );
+  }
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  // Light cache so repeat opens are fast (5 min) but still pick up updates
+  res.set('Cache-Control', 'public, max-age=300');
+  // Add a banner if it's a draft preview (so admin knows it's not live yet)
+  if (status !== 'published') {
+    const banner = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#fbbf24;color:#78350f;padding:8px 14px;font-family:system-ui;font-size:13px;font-weight:600;text-align:center;border-bottom:1px solid #f59e0b;">⚠️ Aperçu BROUILLON — non publié. Visible uniquement par toi.</div>`;
+    res.send(html.replace('<body', '<body style="padding-top:36px"').replace(/(<body[^>]*>)/, `$1${banner}`));
+  } else {
+    res.send(html);
+  }
 }));
 
 // ── AUTHENTICATED endpoints ──────────────────────────────────────────────────
@@ -119,6 +195,53 @@ router.put('/config', asyncHandler(async (req: AuthenticatedRequest, res: Respon
 
   await db.collection(`companies/${companyId}/website`).doc('config').set(update, { merge: true });
   res.json({ success: true, data: { fieldsSaved: Object.keys(update).length } });
+}));
+
+// POST /api/website/import — accept HTML pasted from Claude / Gemini / Bolt / v0 / etc.
+// The user generates the site on whatever AI platform they prefer, then drops the
+// HTML here. Orlode hosts it + auto-injects the chat widget. Zero coupling to a
+// specific AI provider — it's a "bring-your-own-site" pattern.
+router.post('/import', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new AppError('Company required', 400);
+
+  const { rawHtml, importedFrom, companyName, color, publish } = req.body as {
+    rawHtml?: string;
+    importedFrom?: 'claude' | 'gemini' | 'openai' | 'bolt' | 'v0' | 'other';
+    companyName?: string;
+    color?: string;
+    publish?: boolean;
+  };
+  if (!rawHtml?.trim()) throw new AppError('rawHtml required', 400);
+  if (rawHtml.length > 5_000_000) throw new AppError('HTML too large (max 5MB)', 413);
+
+  // Sanity check — refuse if it doesn't look like HTML at all
+  const looksLikeHtml = /<\/?(html|head|body|div|section|article|main|h1|p|a|img)\b/i.test(rawHtml);
+  if (!looksLikeHtml) throw new AppError('Content does not appear to be HTML', 400);
+
+  const db = getFirestore();
+  await db.collection(`companies/${companyId}/website`).doc('config').set({
+    content: { rawHtml: rawHtml.trim() },
+    importedFrom: importedFrom ?? 'other',
+    importedAt: FieldValue.serverTimestamp(),
+    template: 'imported',
+    style: 'imported',
+    color: color ?? '#6c3ce0',
+    companyName: companyName ?? '',
+    widgetEnabled: true,
+    status: publish ? 'published' : 'draft',
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  logger.info('[Website] Imported HTML', { companyId, source: importedFrom, sizeBytes: rawHtml.length });
+  res.json({
+    success: true,
+    data: {
+      previewUrl: `/api/website/preview/${companyId}`,
+      published: !!publish,
+      sizeBytes: rawHtml.length,
+    },
+  });
 }));
 
 // POST /api/website/generate — AI generation (lazy-import to keep cold-start lean)

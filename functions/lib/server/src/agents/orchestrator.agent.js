@@ -57,12 +57,17 @@ const coach_agent_1 = require("./coach.agent");
 const datascientist_agent_1 = require("./datascientist.agent");
 const approval_agent_1 = require("./approval.agent");
 const website_agent_1 = require("./website.agent");
+const commerce_agent_1 = require("./commerce.agent");
+const metaAds_agent_1 = require("./metaAds.agent");
 // commercialAgentTool is for the PUBLIC landing page chatbot only — NOT for internal use
 const firestoreTools_1 = require("./tools/firestoreTools");
 const ragTools_1 = require("./tools/ragTools");
 const logger_1 = require("../utils/logger");
 const marketplaceAgentService_1 = require("../services/marketplaceAgentService");
 const marketplaceTools_1 = require("./tools/marketplaceTools");
+// The plain `sendEmail` tool (no PDF attachments) lives in externalTools.
+// The orchestrator needs it registered so the LLM can call `sendEmail` directly.
+const externalTools_1 = require("./tools/externalTools");
 const teamAgentTools_1 = require("./tools/teamAgentTools");
 // All tools available to the orchestrator
 // MCP-backed tools are included dynamically based on availability
@@ -108,7 +113,8 @@ const ORCHESTRATOR_TOOLS = [
     marketplaceTools_1.deleteWorkItemTool,
     marketplaceTools_1.sendWhatsAppMessageTool,
     marketplaceTools_1.sendTelegramMessageTool,
-    marketplaceTools_1.sendEmailTool,
+    externalTools_1.sendEmailTool, // name: 'sendEmail' — plain emails (from externalTools)
+    marketplaceTools_1.sendEmailTool, // name: 'sendEmailWithDocs' — emails with PDF attachments
     // Team (in-house Slack-clone) — agents post AND read in channels / DMs / mentions
     teamAgentTools_1.listTeamChannelsTool,
     teamAgentTools_1.listTeamMembersTool,
@@ -116,6 +122,11 @@ const ORCHESTRATOR_TOOLS = [
     teamAgentTools_1.sendTeamChannelMessageTool,
     teamAgentTools_1.sendTeamDirectMessageTool,
     teamAgentTools_1.mentionTeamMemberTool,
+    teamAgentTools_1.createTeamTaskTool,
+    teamAgentTools_1.proposeClientReplyTool,
+    teamAgentTools_1.captureWhatsAppLeadTool,
+    teamAgentTools_1.sendWhatsAppProductTool,
+    teamAgentTools_1.getTopWhatsAppProductsTool,
     marketplaceTools_1.addClientTool,
     marketplaceTools_1.searchClientsTool,
     marketplaceTools_1.checkStockTool,
@@ -123,6 +134,10 @@ const ORCHESTRATOR_TOOLS = [
     marketplaceTools_1.createQuoteTool,
     marketplaceTools_1.sendAlertTool,
     marketplaceTools_1.generateReportTool,
+    // Commerce (Boutique WhatsApp) — list products, place orders, owner ops
+    ...commerce_agent_1.COMMERCE_TOOLS,
+    // Meta Ads — manage CTW campaigns from chat ("@admin lance une promo X")
+    ...metaAds_agent_1.META_ADS_TOOLS,
 ];
 const SYSTEM_PROMPT_TEMPLATE = `You are the intelligent AI assistant for "{{COMPANY_NAME}}".
 You are an INTERNAL business tool — NOT a product salesperson. Never promote Orlode, pricing plans, or platform features.
@@ -165,7 +180,16 @@ You help employees of this company do their daily work using specialized agents.
   - To find an existing member by name → **listTeamMembers**. Channel discovery (listTeamChannels) is only for "quels canaux on a ?" questions, NOT for pre-checking before posting.
   - All your Team posts will appear under "Orlode AI · <agentName>" — never impersonate a human.
   - Always pass triggerReason (1 phrase) so admins can audit why the message was sent.
-- **Email simple**: Send plain text emails — confirmations, reminders, reports, follow-ups (use sendEmail)
+- **Email simple**: Send plain text emails — confirmations, reminders, reports, follow-ups (use sendEmail). The body is auto-wrapped in a branded HTML template with the company logo. ALWAYS pass:
+  - recipientName if known (extract from contacts/leads, or first part of the email if obvious like "marie.dupont@..." → "Marie")
+  - ctaLabel + ctaUrl when there is an action: "Voir l'offre" + product link, "Confirmer le RDV" + booking link, "Payer la facture" + payment link.
+  RULES TO AVOID SPAM FOLDER:
+  - Body must be 2-4 short paragraphs MAX (no walls of text).
+  - NEVER all-caps words, NEVER more than ONE exclamation mark per email.
+  - NEVER spam-trigger phrases: "100 percent FREE", "ACT NOW", "CLICK HERE", "URGENT", "GUARANTEE", "WINNER".
+  - For promo emails: focus on VALUE ("economise 30 percent"), not PRESSURE ("achete vite").
+  - Personalize: mention what the recipient did/bought before, or why this matters to them.
+  - End with a real human signature line (the agent will add the company footer + unsubscribe automatically).
 - **Email + document**: Send a quote/invoice/contract email WITH the actual PDF attached (use sendEmailWithDocs with attachQuoteId / attachInvoiceId / attachContractId). NEVER write "ci-joint" / "en pièce jointe" / "attached" with sendEmail — only sendEmailWithDocs attaches files.
 - **CRM**: Add and search clients (use addClient, searchClients)
 - **Inventory**: Check and update stock (use checkStock, updateStock)
@@ -241,6 +265,7 @@ Examples:
 - Always cite which agent/source provided the information
 - If you used multiple agents, synthesize their outputs cohesively
 - Respond in the same language as the user's message
+- **Preserve URLs verbatim**: when a tool result contains an http(s):// URL, include it AS-IS in your reply. Never replace it with link text alone — the user must be able to copy/click it. Critical for setup error messages that point to admin pages.
 - ALWAYS include relevant navigation links in your responses using markdown format:
   - After creating an appointment → [Voir le calendrier](/calendar)
   - After creating a quote/devis → [Voir l'espace de travail](/workspace)
@@ -325,7 +350,14 @@ async function runOrchestrator(input) {
 - NO internal markdown links like [X](/path).
 - WhatsApp formatting only: *bold*, _italic_, \`code\`.
 - Max 3 bullets if strictly needed.
-- Answer directly, no preamble.`,
+- Answer directly, no preamble.
+
+PRODUCT SENDING RULES (CRITICAL — don't break these):
+- DO NOT push a product on the customer's first message. Answer their question first, build rapport.
+- Wait until you have at least 2 customer messages with clear buying signals (asks price, asks availability, says "interested", "I want", "how much", "do you have").
+- BEFORE sending: call getTopWhatsAppProducts to see which product converts best for this company. Pick from the top 3 if multiple match the customer's need.
+- After 1 send with no reply within ~24h, you may suggest an ALTERNATIVE product from the top list — frame it as a softer option ("if you want something simpler, we also have…").
+- Never send the same product twice to the same customer.`,
         telegram: `
 === TELEGRAM CHANNEL OVERRIDE ===
 - Concise (max 5 sentences).
@@ -363,6 +395,13 @@ TONE & STYLE:
 BEHAVIOR:
 - If the user asks a question → answer directly. Don't restate the question.
 - If the user asks to summarize / search / read the channel → CALL readTeamChannelMessages first, then synthesize. Do NOT say "je n'ai pas accès".
+- If the user asks to create a task / log a to-do / "rappelle-moi de…" / "crée une tâche pour…" → CALL createTeamTask. Confirm in 1 sentence with the task title.
+- If the user asks to draft / write / send a reply to a client ("répond à X", "envoie un message à Y", "rédige un email à Z") → CALL proposeClientReply (NEVER sendWhatsAppMessage/sendEmail/sendTelegramMessage directly). Then your reply MUST be exactly: "[[ACTION:<proposalId>]] Voici ma proposition pour <recipient>:" followed by a 1-line preview. The UI renders the action card with [Modifier] [Valider] [Annuler] buttons; the user clicks Valider to actually send. Do NOT include the full draft in your text reply — the card shows it.
+
+CONTEXT RESOLUTION (CRITICAL):
+- If the user uses a vague reference like "le client", "ce monsieur", "elle", "le rendez-vous", "ce truc" → look at the prior 20 messages in the channel context to resolve who/what they mean. Don't ask "quel client ?" if the answer is in the last 5 messages.
+- If you genuinely cannot resolve from context → ask ONE specific follow-up: "Tu parles de Mr Loba ou de l'autre client ?" — never the generic "Pouvez-vous préciser ?".
+- If a phone number, email, or name was mentioned earlier → reuse it without asking. The user already said it once.
 - If the message is ambiguous → ask a SHORT, contextual follow-up (max 1 sentence) — never "comment puis-je vous aider ?".
 - Never propose other channels (WhatsApp, Telegram) — you ARE the team channel right now.
 - Refer to the user by first name when known (extract from the message author).
@@ -448,7 +487,7 @@ IMPORTANT: Never ask the user for their company ID or any technical identifier. 
         ['sendTeamChannelMessage', (i) => (0, teamAgentTools_1.sendTeamChannelMessageTool)(i)],
         ['sendTeamDirectMessage', (i) => (0, teamAgentTools_1.sendTeamDirectMessageTool)(i)],
         ['mentionTeamMember', (i) => (0, teamAgentTools_1.mentionTeamMemberTool)(i)],
-        ['sendEmail', (i) => (0, marketplaceTools_1.sendEmailTool)(i)],
+        ['sendEmail', (i) => (0, externalTools_1.sendEmailTool)(i)],
         ['sendEmailWithDocs', (i) => (0, marketplaceTools_1.sendEmailTool)(i)],
         ['listAppointments', (i) => (0, marketplaceTools_1.listAppointmentsTool)(i)],
         ['addClient', (i) => (0, marketplaceTools_1.addClientTool)(i)],

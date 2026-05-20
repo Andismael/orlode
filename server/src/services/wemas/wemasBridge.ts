@@ -151,6 +151,10 @@ export async function createAndSendContract(args: CreateContractArgs): Promise<C
       signatoryName:   args.signatoryName,
       signatoryEmail:  args.signatoryEmail,
       contractType:    args.contractType ?? 'prestation_services',
+      // Cache the contract body so the email tool can attach it as a PDF
+      // without round-tripping to Wemas. Source of truth remains Wemas.
+      contractContent: args.contractContent,
+      senderName:      args.senderName ?? null,
       signingUrl:      result.signingUrl,
       verificationCode: result.verificationCode,
       status:          result.status,

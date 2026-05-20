@@ -38,6 +38,8 @@ export const securityScoreTool = ai.defineTool(
     description: 'Get the company security score (0-100) with multi-category breakdown, grade, and trend.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       score: z.number(), grade: z.string(), trend: z.string(),
       categories: z.array(z.object({ name: z.string(), score: z.number(), status: z.string() })),
       recommendations: z.array(z.string()), lastUpdated: z.string(),
@@ -46,14 +48,15 @@ export const securityScoreTool = ai.defineTool(
   async ({ companyId }) => {
     try {
       const db = getFirestore();
-      const snap = await db.collection(`companies/${companyId}/securityScore`).orderBy('date', 'desc').limit(2).get();
+      const snap = await db.collection(`companies/${companyId}/securityScore`).orderBy('date', 'desc').limit(2).get().catch(() => null);
 
-      if (!snap.empty) {
+      if (snap && !snap.empty) {
         const d = snap.docs[0].data();
         const prev = snap.docs[1]?.data();
         const score = (d['overallScore'] as number) ?? 75;
         const prevScore = prev ? ((prev['overallScore'] as number) ?? score) : score;
         return {
+          success: true,
           score,
           grade: score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F',
           trend: score > prevScore ? 'up' : score < prevScore ? 'down' : 'stable',
@@ -65,15 +68,15 @@ export const securityScoreTool = ai.defineTool(
 
       // Compute score from actual data
       const [incSnap, usersSnap, vulnSnap] = await Promise.all([
-        db.collection(`companies/${companyId}/securityIncidents`).where('status', 'in', ['detected', 'investigating']).limit(50).get(),
-        db.collection('users').where('companyId', '==', companyId).limit(200).get(),
-        db.collection(`companies/${companyId}/vulnerabilities`).where('status', '==', 'open').limit(50).get(),
+        db.collection(`companies/${companyId}/securityIncidents`).where('status', 'in', ['detected', 'investigating']).limit(50).get().catch(() => null),
+        db.collection('users').where('companyId', '==', companyId).limit(200).get().catch(() => null),
+        db.collection(`companies/${companyId}/vulnerabilities`).where('status', '==', 'open').limit(50).get().catch(() => null),
       ]);
 
-      const users = usersSnap.docs.map(d => d.data());
+      const users = usersSnap?.docs.map(d => d.data()) ?? [];
       const mfaRate = users.length > 0 ? Math.round(users.filter(u => u['mfaEnabled']).length / users.length * 100) : 50;
-      const openIncidents = incSnap.size;
-      const openVulns = vulnSnap.size;
+      const openIncidents = incSnap?.size ?? 0;
+      const openVulns = vulnSnap?.size ?? 0;
 
       const accessScore = Math.min(100, mfaRate + 10);
       const incidentScore = Math.max(0, 100 - openIncidents * 15);
@@ -95,18 +98,23 @@ export const securityScoreTool = ai.defineTool(
       if (recommendations.length === 0) recommendations.push('Maintenir le niveau de securite actuel');
 
       // Save score
-      await db.collection(`companies/${companyId}/securityScore`).doc(generateId()).set({
-        overallScore, categories, recommendations, date: FieldValue.serverTimestamp(),
-      });
+      try {
+        await db.collection(`companies/${companyId}/securityScore`).doc(generateId()).set({
+          overallScore, categories, recommendations, date: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        logger.error('[Cyber] securityScore write failed', { error: String(err) });
+      }
 
       return {
+        success: true,
         score: overallScore,
         grade: overallScore >= 90 ? 'A' : overallScore >= 80 ? 'B' : overallScore >= 70 ? 'C' : overallScore >= 60 ? 'D' : 'F',
         trend: 'stable', categories, recommendations, lastUpdated: new Date().toISOString(),
       };
     } catch (err) {
-      logger.error('[sec_getSecurityScore] Error:', err);
-      return { score: 0, grade: 'N/A', trend: 'unknown', categories: [], recommendations: [], lastUpdated: new Date().toISOString() };
+      logger.error('[Cyber] sec_getSecurityScore failed', { error: String(err) });
+      return { success: false, message: `Calcul du score impossible: ${err instanceof Error ? err.message : String(err)}`, score: 0, grade: 'N/A', trend: 'unknown', categories: [], recommendations: [], lastUpdated: new Date().toISOString() };
     }
   }
 );
@@ -128,6 +136,8 @@ export const incidentResponseTool = ai.defineTool(
       source: z.string().optional().describe('Detection source: manual | siem | ids | user_report | automated'),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       incidentId: z.string(), priority: z.string(),
       nextSteps: z.array(z.string()), alertSent: z.boolean(),
       estimatedResponseTime: z.string(),
@@ -140,26 +150,36 @@ export const incidentResponseTool = ai.defineTool(
       const now = new Date();
 
       // Create incident
-      await db.collection(`companies/${companyId}/securityIncidents`).doc(incidentId).set({
-        id: incidentId, type, description, priority,
-        affectedSystems: affectedSystems ?? [],
-        source: source ?? 'manual',
-        status: 'detected',
-        assignee: null,
-        detectedAt: FieldValue.serverTimestamp(),
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-        slaDeadline: priority === 'P1_critical' ? new Date(now.getTime() + 60 * 60 * 1000).toISOString()
-          : priority === 'P2_high' ? new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString()
-          : priority === 'P3_medium' ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
-          : new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
-      });
+      try {
+        await db.collection(`companies/${companyId}/securityIncidents`).doc(incidentId).set({
+          id: incidentId, type, description, priority,
+          affectedSystems: affectedSystems ?? [],
+          source: source ?? 'manual',
+          status: 'detected',
+          assignee: null,
+          detectedAt: FieldValue.serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          slaDeadline: priority === 'P1_critical' ? new Date(now.getTime() + 60 * 60 * 1000).toISOString()
+            : priority === 'P2_high' ? new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString()
+            : priority === 'P3_medium' ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
+            : new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+        });
+      } catch (err) {
+        logger.error('[Cyber] reportIncident write failed', { error: String(err) });
+        return { success: false, message: 'Sauvegarde de l\'incident impossible.', incidentId: '', priority, nextSteps: [], alertSent: false, estimatedResponseTime: 'N/A' };
+      }
 
       // Create initial timeline entry
-      await db.collection(`companies/${companyId}/securityIncidents/${incidentId}/timeline`).doc(generateId()).set({
-        action: 'Incident detecte', status: 'detected', user: 'system',
-        details: description, timestamp: FieldValue.serverTimestamp(),
-      });
+      try {
+        await db.collection(`companies/${companyId}/securityIncidents/${incidentId}/timeline`).doc(generateId()).set({
+          action: 'Incident detecte', status: 'detected', user: 'system',
+          details: description, timestamp: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        logger.error('[Cyber] reportIncident timeline write failed', { error: String(err) });
+        // Non-fatal — incident is saved
+      }
 
       const nextSteps: Record<string, string[]> = {
         P1_critical: ['Isoler les systemes affectes IMMEDIATEMENT', 'Alerter tous les admins', 'Activer equipe reponse incident', 'Preserver les preuves', 'Evaluer obligation notification RGPD (72h)', 'Documenter chaque action'],
@@ -173,14 +193,15 @@ export const incidentResponseTool = ai.defineTool(
       };
 
       return {
+        success: true,
         incidentId, priority,
         nextSteps: nextSteps[priority] ?? nextSteps['P3_medium'],
         alertSent: priority === 'P1_critical' || priority === 'P2_high',
         estimatedResponseTime: responseTime[priority] ?? '< 24 heures',
       };
     } catch (err) {
-      logger.error('[sec_reportIncident] Error:', err);
-      return { incidentId: '', priority, nextSteps: [], alertSent: false, estimatedResponseTime: 'N/A' };
+      logger.error('[Cyber] sec_reportIncident failed', { error: String(err) });
+      return { success: false, message: `Signalement impossible: ${err instanceof Error ? err.message : String(err)}`, incidentId: '', priority, nextSteps: [], alertSent: false, estimatedResponseTime: 'N/A' };
     }
   }
 );
@@ -195,6 +216,8 @@ export const accessReviewTool = ai.defineTool(
     description: 'Review user access: MFA, dormant accounts, privilege analysis, suspicious logins.',
     inputSchema: z.object({ companyId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       totalUsers: z.number(), activeUsers: z.number(),
       dormantUsers: z.array(z.string()), mfaAdoption: z.number(),
       adminCount: z.number(), suspiciousLogins: z.number(),
@@ -204,7 +227,8 @@ export const accessReviewTool = ai.defineTool(
   async ({ companyId }) => {
     try {
       const db = getFirestore();
-      const snap = await db.collection('users').where('companyId', '==', companyId).limit(500).get();
+      const snap = await db.collection('users').where('companyId', '==', companyId).limit(500).get().catch(() => null);
+      if (!snap) return { success: false, message: 'Lecture des utilisateurs impossible.', totalUsers: 0, activeUsers: 0, dormantUsers: [], mfaAdoption: 0, adminCount: 0, suspiciousLogins: 0, recommendations: [] };
       const users = snap.docs.map(d => d.data());
       const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
@@ -223,13 +247,14 @@ export const accessReviewTool = ai.defineTool(
       recommendations.push('Revue trimestrielle des privileges admin');
 
       return {
+        success: true,
         totalUsers: users.length, activeUsers: users.length - dormantUsers.length,
         dormantUsers, mfaAdoption: users.length > 0 ? Math.round((mfaCount / users.length) * 100) : 0,
         adminCount, suspiciousLogins: 0, recommendations,
       };
     } catch (err) {
-      logger.error('[sec_reviewAccess] Error:', err);
-      return { totalUsers: 0, activeUsers: 0, dormantUsers: [], mfaAdoption: 0, adminCount: 0, suspiciousLogins: 0, recommendations: [] };
+      logger.error('[Cyber] sec_reviewAccess failed', { error: String(err) });
+      return { success: false, message: `Revue d'acces impossible: ${err instanceof Error ? err.message : String(err)}`, totalUsers: 0, activeUsers: 0, dormantUsers: [], mfaAdoption: 0, adminCount: 0, suspiciousLogins: 0, recommendations: [] };
     }
   }
 );
@@ -247,6 +272,8 @@ export const complianceCheckerTool = ai.defineTool(
       framework: z.enum(FRAMEWORKS).default('GDPR'),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       framework: z.string(), status: z.string(), score: z.number(),
       controls: z.array(z.object({ id: z.string(), name: z.string(), status: z.string(), evidence: z.string() })),
       gaps: z.array(z.string()), nextActions: z.array(z.string()),
@@ -255,11 +282,12 @@ export const complianceCheckerTool = ai.defineTool(
   async ({ companyId, framework }) => {
     try {
       const db = getFirestore();
-      const doc = await db.collection(`companies/${companyId}/compliance`).doc(framework).get();
+      const doc = await db.collection(`companies/${companyId}/compliance`).doc(framework).get().catch(() => null);
 
-      if (doc.exists) {
+      if (doc?.exists) {
         const d = doc.data() as Record<string, unknown>;
         return {
+          success: true,
           framework, status: (d['status'] as string) ?? 'in_progress', score: (d['score'] as number) ?? 60,
           controls: (d['controls'] as { id: string; name: string; status: string; evidence: string }[]) ?? [],
           gaps: (d['gaps'] as string[]) ?? [], nextActions: (d['nextActions'] as string[]) ?? [],
@@ -319,13 +347,14 @@ export const complianceCheckerTool = ai.defineTool(
       const gaps = controls.filter(c => c.status === 'missing').map(c => c.name);
 
       return {
+        success: true,
         framework, status: score >= 80 ? 'compliant' : score >= 40 ? 'partial' : 'not_started',
         score, controls, gaps,
         nextActions: gaps.slice(0, 3).map(g => `Implementer: ${g}`),
       };
     } catch (err) {
-      logger.error('[sec_checkCompliance] Error:', err);
-      return { framework, status: 'error', score: 0, controls: [], gaps: [], nextActions: [] };
+      logger.error('[Cyber] sec_checkCompliance failed', { error: String(err) });
+      return { success: false, message: `Verification conformite impossible: ${err instanceof Error ? err.message : String(err)}`, framework, status: 'error', score: 0, controls: [], gaps: [], nextActions: [] };
     }
   }
 );
@@ -344,6 +373,8 @@ export const scanVulnerabilitiesTool = ai.defineTool(
       targetSystem: z.string().optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       scanId: z.string(), totalFound: z.number(),
       critical: z.number(), high: z.number(), medium: z.number(), low: z.number(),
       vulnerabilities: z.array(z.object({
@@ -353,55 +384,75 @@ export const scanVulnerabilitiesTool = ai.defineTool(
     }),
   },
   async ({ companyId, scanType, targetSystem }) => {
-    const db = getFirestore();
-    const scanId = generateId();
+    try {
+      const db = getFirestore();
+      const scanId = generateId();
 
-    // Use AI to generate realistic vulnerability scan results
-    const { text } = await ai.generate({
-      model: GEMINI_FLASH,
-      prompt: `Generate a realistic ${scanType} cybersecurity vulnerability scan report for a company.${targetSystem ? ` Target: ${targetSystem}.` : ''}
+      // Use AI to generate realistic vulnerability scan results
+      let text = '';
+      try {
+        const result = await ai.generate({
+          model: GEMINI_FLASH,
+          prompt: `Generate a realistic ${scanType} cybersecurity vulnerability scan report for a company.${targetSystem ? ` Target: ${targetSystem}.` : ''}
 Generate 3-6 vulnerabilities with realistic CVE IDs, severities, affected assets, descriptions, and remediation steps.
 Return JSON ONLY: {"vulnerabilities":[{"cve":"CVE-2024-XXXX","severity":"critical|high|medium|low","asset":"server/app/network","description":"...","remediation":"..."}]}`,
-      config: { temperature: 0.4 },
-    });
+          config: { temperature: 0.4 },
+        });
+        text = result.text;
+      } catch (err) {
+        logger.error('[Cyber] scanVulnerabilities AI generation failed', { error: String(err) });
+      }
 
-    let vulns: { cve: string; severity: string; asset: string; description: string; remediation: string }[] = [];
-    try { vulns = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')).vulnerabilities; } catch {
-      vulns = [
-        { cve: 'CVE-2024-3094', severity: 'critical', asset: 'xz-utils', description: 'Backdoor in xz/liblzma', remediation: 'Downgrade xz-utils to 5.4.x' },
-        { cve: 'CVE-2024-21762', severity: 'high', asset: 'FortiOS SSL-VPN', description: 'Out-of-bounds write vulnerability', remediation: 'Upgrade FortiOS to latest' },
-        { cve: 'CVE-2023-44487', severity: 'medium', asset: 'HTTP/2 stack', description: 'Rapid Reset DDoS vector', remediation: 'Apply HTTP/2 rate limiting' },
-      ];
+      let vulns: { cve: string; severity: string; asset: string; description: string; remediation: string }[] = [];
+      try { vulns = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')).vulnerabilities; } catch {
+        vulns = [
+          { cve: 'CVE-2024-3094', severity: 'critical', asset: 'xz-utils', description: 'Backdoor in xz/liblzma', remediation: 'Downgrade xz-utils to 5.4.x' },
+          { cve: 'CVE-2024-21762', severity: 'high', asset: 'FortiOS SSL-VPN', description: 'Out-of-bounds write vulnerability', remediation: 'Upgrade FortiOS to latest' },
+          { cve: 'CVE-2023-44487', severity: 'medium', asset: 'HTTP/2 stack', description: 'Rapid Reset DDoS vector', remediation: 'Apply HTTP/2 rate limiting' },
+        ];
+      }
+
+      // Save vulnerabilities
+      for (const v of vulns) {
+        const vid = generateId();
+        try {
+          await db.collection(`companies/${companyId}/vulnerabilities`).doc(vid).set({
+            id: vid, scanId, cve: v.cve, severity: v.severity, asset: v.asset,
+            description: v.description, remediation: v.remediation,
+            status: 'open', detectedAt: FieldValue.serverTimestamp(),
+          });
+        } catch (err) {
+          logger.error('[Cyber] vulnerability write failed', { error: String(err) });
+        }
+      }
+
+      // Save scan record
+      try {
+        await db.collection(`companies/${companyId}/securityScans`).doc(scanId).set({
+          id: scanId, type: scanType, target: targetSystem ?? 'all', totalFound: vulns.length,
+          critical: vulns.filter(v => v.severity === 'critical').length,
+          high: vulns.filter(v => v.severity === 'high').length,
+          medium: vulns.filter(v => v.severity === 'medium').length,
+          low: vulns.filter(v => v.severity === 'low').length,
+          completedAt: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        logger.error('[Cyber] scan record write failed', { error: String(err) });
+      }
+
+      return {
+        success: true,
+        scanId, totalFound: vulns.length,
+        critical: vulns.filter(v => v.severity === 'critical').length,
+        high: vulns.filter(v => v.severity === 'high').length,
+        medium: vulns.filter(v => v.severity === 'medium').length,
+        low: vulns.filter(v => v.severity === 'low').length,
+        vulnerabilities: vulns.map((v, i) => ({ id: `vuln-${i}`, ...v })),
+      };
+    } catch (err) {
+      logger.error('[Cyber] sec_scanVulnerabilities failed', { error: String(err) });
+      return { success: false, message: `Scan impossible: ${err instanceof Error ? err.message : String(err)}`, scanId: '', totalFound: 0, critical: 0, high: 0, medium: 0, low: 0, vulnerabilities: [] };
     }
-
-    // Save vulnerabilities
-    for (const v of vulns) {
-      const vid = generateId();
-      await db.collection(`companies/${companyId}/vulnerabilities`).doc(vid).set({
-        id: vid, scanId, cve: v.cve, severity: v.severity, asset: v.asset,
-        description: v.description, remediation: v.remediation,
-        status: 'open', detectedAt: FieldValue.serverTimestamp(),
-      });
-    }
-
-    // Save scan record
-    await db.collection(`companies/${companyId}/securityScans`).doc(scanId).set({
-      id: scanId, type: scanType, target: targetSystem ?? 'all', totalFound: vulns.length,
-      critical: vulns.filter(v => v.severity === 'critical').length,
-      high: vulns.filter(v => v.severity === 'high').length,
-      medium: vulns.filter(v => v.severity === 'medium').length,
-      low: vulns.filter(v => v.severity === 'low').length,
-      completedAt: FieldValue.serverTimestamp(),
-    });
-
-    return {
-      scanId, totalFound: vulns.length,
-      critical: vulns.filter(v => v.severity === 'critical').length,
-      high: vulns.filter(v => v.severity === 'high').length,
-      medium: vulns.filter(v => v.severity === 'medium').length,
-      low: vulns.filter(v => v.severity === 'low').length,
-      vulnerabilities: vulns.map((v, i) => ({ id: `vuln-${i}`, ...v })),
-    };
   }
 );
 
@@ -421,66 +472,95 @@ export const launchPhishingTool = ai.defineTool(
       department: z.string().optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
       campaignId: z.string(), name: z.string(), targetCount: z.number(),
       emailSubject: z.string(), message: z.string(),
     }),
   },
   async ({ companyId, name, template, targetGroup, department }) => {
-    const db = getFirestore();
-    const campaignId = generateId();
+    try {
+      const db = getFirestore();
+      const campaignId = generateId();
 
-    // Get target users
-    let q = db.collection('users').where('companyId', '==', companyId) as FirebaseFirestore.Query;
-    if (targetGroup === 'department' && department) q = q.where('department', '==', department);
-    const usersSnap = await q.limit(200).get();
-    const targetCount = targetGroup === 'random_sample' ? Math.min(10, usersSnap.size) : usersSnap.size;
+      // Get target users
+      let q = db.collection('users').where('companyId', '==', companyId) as FirebaseFirestore.Query;
+      if (targetGroup === 'department' && department) q = q.where('department', '==', department);
+      const usersSnap = await q.limit(200).get().catch(() => null);
+      if (!usersSnap) {
+        return { success: false, campaignId: '', name, targetCount: 0, emailSubject: '', message: 'Lecture des utilisateurs cibles impossible.' };
+      }
+      const targetCount = targetGroup === 'random_sample' ? Math.min(10, usersSnap.size) : usersSnap.size;
 
-    // Generate phishing email with AI
-    const { text } = await ai.generate({
-      model: GEMINI_FLASH,
-      prompt: `Generate a realistic phishing email for a security awareness simulation. Template: "${template}".
+      // Generate phishing email with AI
+      let text = '';
+      try {
+        const result = await ai.generate({
+          model: GEMINI_FLASH,
+          prompt: `Generate a realistic phishing email for a security awareness simulation. Template: "${template}".
 Return JSON ONLY: {"subject":"...","body":"...","sender":"...","redFlags":["indicator1","indicator2"]}`,
-      config: { temperature: 0.5 },
-    });
+          config: { temperature: 0.5 },
+        });
+        text = result.text;
+      } catch (err) {
+        logger.error('[Cyber] launchPhishing AI generation failed', { error: String(err) });
+      }
 
-    let email = { subject: 'Urgent: Reset your password', body: 'Your account needs verification...', sender: 'security@company-verify.com', redFlags: ['Urgency', 'External domain'] };
-    try { email = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')); } catch {}
+      let email = { subject: 'Urgent: Reset your password', body: 'Your account needs verification...', sender: 'security@company-verify.com', redFlags: ['Urgency', 'External domain'] };
+      try { email = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')); } catch {}
 
-    // Save campaign
-    await db.collection(`companies/${companyId}/phishingCampaigns`).doc(campaignId).set({
-      id: campaignId, name, template, targetGroup, department: department ?? null,
-      targetCount, status: 'active',
-      emailSubject: email.subject, emailBody: email.body, emailSender: email.sender,
-      redFlags: email.redFlags,
-      clickedCount: 0, reportedCount: 0, openedCount: 0,
-      launchedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
-    });
+      // Save campaign
+      try {
+        await db.collection(`companies/${companyId}/phishingCampaigns`).doc(campaignId).set({
+          id: campaignId, name, template, targetGroup, department: department ?? null,
+          targetCount, status: 'active',
+          emailSubject: email.subject, emailBody: email.body, emailSender: email.sender,
+          redFlags: email.redFlags,
+          clickedCount: 0, reportedCount: 0, openedCount: 0,
+          launchedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        logger.error('[Cyber] phishing campaign write failed', { error: String(err) });
+        return { success: false, campaignId: '', name, targetCount: 0, emailSubject: email.subject, message: 'Sauvegarde de la campagne impossible.' };
+      }
 
-    // Create per-user tracking (simulated results)
-    const userDocs = targetGroup === 'random_sample' ? usersSnap.docs.slice(0, targetCount) : usersSnap.docs;
-    for (const uDoc of userDocs) {
-      const r = Math.random();
-      await db.collection(`companies/${companyId}/phishingCampaigns/${campaignId}/targets`).doc(uDoc.id).set({
-        userId: uDoc.id, email: uDoc.data()['email'] ?? '',
-        name: uDoc.data()['displayName'] ?? uDoc.data()['email'] ?? '',
-        opened: r > 0.3, clicked: r > 0.7, reported: r < 0.2,
-        openedAt: r > 0.3 ? new Date() : null, clickedAt: r > 0.7 ? new Date() : null,
-      });
+      // Create per-user tracking (simulated results)
+      const userDocs = targetGroup === 'random_sample' ? usersSnap.docs.slice(0, targetCount) : usersSnap.docs;
+      for (const uDoc of userDocs) {
+        const r = Math.random();
+        try {
+          await db.collection(`companies/${companyId}/phishingCampaigns/${campaignId}/targets`).doc(uDoc.id).set({
+            userId: uDoc.id, email: uDoc.data()['email'] ?? '',
+            name: uDoc.data()['displayName'] ?? uDoc.data()['email'] ?? '',
+            opened: r > 0.3, clicked: r > 0.7, reported: r < 0.2,
+            openedAt: r > 0.3 ? new Date() : null, clickedAt: r > 0.7 ? new Date() : null,
+          });
+        } catch (err) {
+          logger.error('[Cyber] phishing target write failed', { error: String(err) });
+        }
+      }
+
+      // Update aggregate counts
+      const clicked = Math.round(targetCount * 0.25);
+      const reported = Math.round(targetCount * 0.15);
+      const opened = Math.round(targetCount * 0.65);
+      try {
+        await db.collection(`companies/${companyId}/phishingCampaigns`).doc(campaignId).update({
+          clickedCount: clicked, reportedCount: reported, openedCount: opened,
+        });
+      } catch (err) {
+        logger.error('[Cyber] phishing aggregate update failed', { error: String(err) });
+      }
+
+      return {
+        success: true,
+        campaignId, name, targetCount,
+        emailSubject: email.subject,
+        message: `Campagne "${name}" lancee — ${targetCount} cibles. Template: ${template}.`,
+      };
+    } catch (err) {
+      logger.error('[Cyber] sec_launchPhishing failed', { error: String(err) });
+      return { success: false, campaignId: '', name, targetCount: 0, emailSubject: '', message: `Lancement impossible: ${err instanceof Error ? err.message : String(err)}` };
     }
-
-    // Update aggregate counts
-    const clicked = Math.round(targetCount * 0.25);
-    const reported = Math.round(targetCount * 0.15);
-    const opened = Math.round(targetCount * 0.65);
-    await db.collection(`companies/${companyId}/phishingCampaigns`).doc(campaignId).update({
-      clickedCount: clicked, reportedCount: reported, openedCount: opened,
-    });
-
-    return {
-      campaignId, name, targetCount,
-      emailSubject: email.subject,
-      message: `Campagne "${name}" lancee — ${targetCount} cibles. Template: ${template}.`,
-    };
   }
 );
 
@@ -494,6 +574,8 @@ export const getPhishingResultsTool = ai.defineTool(
     description: 'Get phishing simulation campaign results and employee scores.',
     inputSchema: z.object({ companyId: z.string(), campaignId: z.string().optional() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       campaigns: z.array(z.object({
         id: z.string(), name: z.string(), status: z.string(),
         targetCount: z.number(), openRate: z.number(), clickRate: z.number(), reportRate: z.number(),
@@ -503,32 +585,39 @@ export const getPhishingResultsTool = ai.defineTool(
     }),
   },
   async ({ companyId, campaignId }) => {
-    const db = getFirestore();
-    let q = db.collection(`companies/${companyId}/phishingCampaigns`) as FirebaseFirestore.Query;
-    if (campaignId) q = q.where('id', '==', campaignId);
-    const snap = await q.orderBy('createdAt', 'desc').limit(20).get();
+    try {
+      const db = getFirestore();
+      let q = db.collection(`companies/${companyId}/phishingCampaigns`) as FirebaseFirestore.Query;
+      if (campaignId) q = q.where('id', '==', campaignId);
+      const snap = await q.orderBy('createdAt', 'desc').limit(20).get().catch(() => null);
+      if (!snap) return { success: false, message: 'Lecture des campagnes impossible.', campaigns: [], overallClickRate: 0, overallReportRate: 0 };
 
-    const campaigns = snap.docs.map(d => {
-      const data = d.data();
-      const tc = (data['targetCount'] as number) || 1;
+      const campaigns = snap.docs.map(d => {
+        const data = d.data();
+        const tc = (data['targetCount'] as number) || 1;
+        return {
+          id: d.id, name: (data['name'] as string) ?? '', status: (data['status'] as string) ?? 'completed',
+          targetCount: tc,
+          openRate: Math.round(((data['openedCount'] as number) ?? 0) / tc * 100),
+          clickRate: Math.round(((data['clickedCount'] as number) ?? 0) / tc * 100),
+          reportRate: Math.round(((data['reportedCount'] as number) ?? 0) / tc * 100),
+          launchedAt: (data['launchedAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
+        };
+      });
+
+      const totalClicks = campaigns.reduce((s, c) => s + c.clickRate, 0);
+      const totalReports = campaigns.reduce((s, c) => s + c.reportRate, 0);
+
       return {
-        id: d.id, name: (data['name'] as string) ?? '', status: (data['status'] as string) ?? 'completed',
-        targetCount: tc,
-        openRate: Math.round(((data['openedCount'] as number) ?? 0) / tc * 100),
-        clickRate: Math.round(((data['clickedCount'] as number) ?? 0) / tc * 100),
-        reportRate: Math.round(((data['reportedCount'] as number) ?? 0) / tc * 100),
-        launchedAt: (data['launchedAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
+        success: true,
+        campaigns,
+        overallClickRate: campaigns.length > 0 ? Math.round(totalClicks / campaigns.length) : 0,
+        overallReportRate: campaigns.length > 0 ? Math.round(totalReports / campaigns.length) : 0,
       };
-    });
-
-    const totalClicks = campaigns.reduce((s, c) => s + c.clickRate, 0);
-    const totalReports = campaigns.reduce((s, c) => s + c.reportRate, 0);
-
-    return {
-      campaigns,
-      overallClickRate: campaigns.length > 0 ? Math.round(totalClicks / campaigns.length) : 0,
-      overallReportRate: campaigns.length > 0 ? Math.round(totalReports / campaigns.length) : 0,
-    };
+    } catch (err) {
+      logger.error('[Cyber] sec_getPhishingResults failed', { error: String(err) });
+      return { success: false, message: `Lecture impossible: ${err instanceof Error ? err.message : String(err)}`, campaigns: [], overallClickRate: 0, overallReportRate: 0 };
+    }
   }
 );
 
@@ -548,6 +637,8 @@ export const managePoliciesTool = ai.defineTool(
       content: z.string().optional(),
     }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       policies: z.array(z.object({
         id: z.string(), title: z.string(), category: z.string(), status: z.string(),
         version: z.string(), lastUpdated: z.string(),
@@ -556,50 +647,68 @@ export const managePoliciesTool = ai.defineTool(
     }),
   },
   async ({ companyId, action, title, category, content }) => {
-    const db = getFirestore();
+    try {
+      const db = getFirestore();
 
-    if (action === 'list') {
-      const snap = await db.collection(`companies/${companyId}/securityPolicies`).orderBy('updatedAt', 'desc').limit(50).get();
-      return {
-        policies: snap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id, title: (data['title'] as string) ?? '', category: (data['category'] as string) ?? '',
-            status: (data['status'] as string) ?? 'draft', version: (data['version'] as string) ?? '1.0',
-            lastUpdated: (data['updatedAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
-          };
-        }),
-      };
-    }
+      if (action === 'list') {
+        const snap = await db.collection(`companies/${companyId}/securityPolicies`).orderBy('updatedAt', 'desc').limit(50).get().catch(() => null);
+        if (!snap) return { success: false, message: 'Lecture des politiques impossible.', policies: [] };
+        return {
+          success: true,
+          policies: snap.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id, title: (data['title'] as string) ?? '', category: (data['category'] as string) ?? '',
+              status: (data['status'] as string) ?? 'draft', version: (data['version'] as string) ?? '1.0',
+              lastUpdated: (data['updatedAt'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
+            };
+          }),
+        };
+      }
 
-    if (action === 'generate' || action === 'create') {
-      let policyContent = content ?? '';
-      if (action === 'generate') {
-        const { text } = await ai.generate({
-          model: GEMINI_FLASH,
-          prompt: `Generate a professional security policy document in French for category "${category ?? 'general'}".
+      if (action === 'generate' || action === 'create') {
+        let policyContent = content ?? '';
+        if (action === 'generate') {
+          try {
+            const { text } = await ai.generate({
+              model: GEMINI_FLASH,
+              prompt: `Generate a professional security policy document in French for category "${category ?? 'general'}".
 Title: "${title ?? 'Politique de securite'}".
 Include: objectif, perimetre, regles, responsabilites, sanctions, revision.
 Format: markdown structured document. Be thorough and professional.`,
-          config: { temperature: 0.3 },
-        });
-        policyContent = text;
+              config: { temperature: 0.3 },
+            });
+            policyContent = text;
+          } catch (err) {
+            logger.error('[Cyber] managePolicies AI generation failed', { error: String(err) });
+            return { success: false, message: `Generation de politique impossible: ${err instanceof Error ? err.message : String(err)}`, policies: [] };
+          }
+        }
+
+        const id = generateId();
+        try {
+          await db.collection(`companies/${companyId}/securityPolicies`).doc(id).set({
+            id, title: title ?? 'Politique de securite', category: category ?? 'general',
+            content: policyContent, status: 'draft', version: '1.0',
+            attestations: [], createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+          });
+        } catch (err) {
+          logger.error('[Cyber] managePolicies write failed', { error: String(err) });
+          return { success: false, message: 'Sauvegarde de la politique impossible.', policies: [] };
+        }
+
+        return {
+          success: true,
+          policies: [{ id, title: title ?? 'Politique de securite', category: category ?? 'general', status: 'draft', version: '1.0', lastUpdated: new Date().toISOString() }],
+          generatedContent: action === 'generate' ? policyContent : undefined,
+        };
       }
 
-      const id = generateId();
-      await db.collection(`companies/${companyId}/securityPolicies`).doc(id).set({
-        id, title: title ?? 'Politique de securite', category: category ?? 'general',
-        content: policyContent, status: 'draft', version: '1.0',
-        attestations: [], createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      });
-
-      return {
-        policies: [{ id, title: title ?? 'Politique de securite', category: category ?? 'general', status: 'draft', version: '1.0', lastUpdated: new Date().toISOString() }],
-        generatedContent: action === 'generate' ? policyContent : undefined,
-      };
+      return { success: true, policies: [] };
+    } catch (err) {
+      logger.error('[Cyber] sec_managePolicies failed', { error: String(err) });
+      return { success: false, message: `Operation impossible: ${err instanceof Error ? err.message : String(err)}`, policies: [] };
     }
-
-    return { policies: [] };
   }
 );
 
@@ -613,6 +722,8 @@ export const getThreatFeedTool = ai.defineTool(
     description: 'Get real-time threat feed with alerts, IOCs, and trending attack patterns.',
     inputSchema: z.object({ companyId: z.string(), severity: z.enum(SEVERITY_LEVELS).optional() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       threats: z.array(z.object({
         id: z.string(), type: z.string(), severity: z.string(),
         source: z.string(), description: z.string(), timestamp: z.string(),
@@ -622,53 +733,64 @@ export const getThreatFeedTool = ai.defineTool(
     }),
   },
   async ({ companyId, severity }) => {
-    const db = getFirestore();
+    try {
+      const db = getFirestore();
 
-    // Get stored threats
-    let q = db.collection(`companies/${companyId}/threatFeed`) as FirebaseFirestore.Query;
-    if (severity) q = q.where('severity', '==', severity);
-    const snap = await q.orderBy('timestamp', 'desc').limit(50).get();
+      // Get stored threats
+      let q = db.collection(`companies/${companyId}/threatFeed`) as FirebaseFirestore.Query;
+      if (severity) q = q.where('severity', '==', severity);
+      const snap = await q.orderBy('timestamp', 'desc').limit(50).get().catch(() => null);
 
-    if (snap.size > 0) {
-      const threats = snap.docs.map(d => {
-        const data = d.data();
+      if (snap && snap.size > 0) {
+        const threats = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id, type: (data['type'] as string) ?? '', severity: (data['severity'] as string) ?? 'info',
+            source: (data['source'] as string) ?? '', description: (data['description'] as string) ?? '',
+            timestamp: (data['timestamp'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
+            ioc: (data['ioc'] as string) ?? undefined,
+          };
+        });
         return {
-          id: d.id, type: (data['type'] as string) ?? '', severity: (data['severity'] as string) ?? 'info',
-          source: (data['source'] as string) ?? '', description: (data['description'] as string) ?? '',
-          timestamp: (data['timestamp'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
-          ioc: (data['ioc'] as string) ?? undefined,
+          success: true,
+          threats,
+          stats: {
+            total: threats.length,
+            critical: threats.filter(t => t.severity === 'critical').length,
+            high: threats.filter(t => t.severity === 'high').length,
+            blocked: Math.round(threats.length * 0.85),
+          },
         };
-      });
+      }
+
+      // Generate sample threat feed
+      const now = new Date();
+      const sampleThreats = [
+        { id: generateId(), type: 'Brute Force', severity: 'high', source: 'Firewall', description: 'Tentatives de connexion multiples depuis IP 192.168.1.x', timestamp: now.toISOString(), ioc: '192.168.1.100' },
+        { id: generateId(), type: 'Phishing Email', severity: 'medium', source: 'Email Gateway', description: 'Email suspect bloque — lien malveillant detecte', timestamp: new Date(now.getTime() - 3600000).toISOString(), ioc: 'evil-domain.xyz' },
+        { id: generateId(), type: 'Malware Signature', severity: 'critical', source: 'Endpoint Protection', description: 'Signature Emotet detectee sur poste DESKTOP-014', timestamp: new Date(now.getTime() - 7200000).toISOString(), ioc: 'emotet-c2.bad' },
+        { id: generateId(), type: 'Port Scan', severity: 'low', source: 'IDS', description: 'Scan de ports detecte depuis sous-reseau externe', timestamp: new Date(now.getTime() - 10800000).toISOString() },
+        { id: generateId(), type: 'Privilege Escalation', severity: 'high', source: 'SIEM', description: 'Elevation de privileges non autorisee detectee — compte service', timestamp: new Date(now.getTime() - 14400000).toISOString() },
+      ];
+
+      // Save to Firestore
+      for (const t of sampleThreats) {
+        try {
+          await db.collection(`companies/${companyId}/threatFeed`).doc(t.id).set({ ...t, timestamp: new Date(t.timestamp), blocked: Math.random() > 0.15 });
+        } catch (err) {
+          logger.error('[Cyber] threatFeed write failed', { error: String(err) });
+        }
+      }
+
       return {
-        threats,
-        stats: {
-          total: threats.length,
-          critical: threats.filter(t => t.severity === 'critical').length,
-          high: threats.filter(t => t.severity === 'high').length,
-          blocked: Math.round(threats.length * 0.85),
-        },
+        success: true,
+        threats: sampleThreats,
+        stats: { total: sampleThreats.length, critical: 1, high: 2, blocked: 4 },
       };
+    } catch (err) {
+      logger.error('[Cyber] sec_getThreatFeed failed', { error: String(err) });
+      return { success: false, message: `Lecture des menaces impossible: ${err instanceof Error ? err.message : String(err)}`, threats: [], stats: { total: 0, critical: 0, high: 0, blocked: 0 } };
     }
-
-    // Generate sample threat feed
-    const now = new Date();
-    const sampleThreats = [
-      { id: generateId(), type: 'Brute Force', severity: 'high', source: 'Firewall', description: 'Tentatives de connexion multiples depuis IP 192.168.1.x', timestamp: now.toISOString(), ioc: '192.168.1.100' },
-      { id: generateId(), type: 'Phishing Email', severity: 'medium', source: 'Email Gateway', description: 'Email suspect bloque — lien malveillant detecte', timestamp: new Date(now.getTime() - 3600000).toISOString(), ioc: 'evil-domain.xyz' },
-      { id: generateId(), type: 'Malware Signature', severity: 'critical', source: 'Endpoint Protection', description: 'Signature Emotet detectee sur poste DESKTOP-014', timestamp: new Date(now.getTime() - 7200000).toISOString(), ioc: 'emotet-c2.bad' },
-      { id: generateId(), type: 'Port Scan', severity: 'low', source: 'IDS', description: 'Scan de ports detecte depuis sous-reseau externe', timestamp: new Date(now.getTime() - 10800000).toISOString() },
-      { id: generateId(), type: 'Privilege Escalation', severity: 'high', source: 'SIEM', description: 'Elevation de privileges non autorisee detectee — compte service', timestamp: new Date(now.getTime() - 14400000).toISOString() },
-    ];
-
-    // Save to Firestore
-    for (const t of sampleThreats) {
-      await db.collection(`companies/${companyId}/threatFeed`).doc(t.id).set({ ...t, timestamp: new Date(t.timestamp), blocked: Math.random() > 0.15 });
-    }
-
-    return {
-      threats: sampleThreats,
-      stats: { total: sampleThreats.length, critical: 1, high: 2, blocked: 4 },
-    };
   }
 );
 
@@ -682,6 +804,8 @@ export const getIncidentTimelineTool = ai.defineTool(
     description: 'Get the complete timeline of an incident with all actions taken.',
     inputSchema: z.object({ companyId: z.string(), incidentId: z.string() }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       incidentId: z.string(), status: z.string(),
       timeline: z.array(z.object({
         action: z.string(), status: z.string(), user: z.string(),
@@ -690,24 +814,32 @@ export const getIncidentTimelineTool = ai.defineTool(
     }),
   },
   async ({ companyId, incidentId }) => {
-    const db = getFirestore();
-    const incDoc = await db.collection(`companies/${companyId}/securityIncidents`).doc(incidentId).get();
-    const status = incDoc.exists ? ((incDoc.data()!['status'] as string) ?? 'unknown') : 'unknown';
+    try {
+      const db = getFirestore();
+      const incDoc = await db.collection(`companies/${companyId}/securityIncidents`).doc(incidentId).get().catch(() => null);
+      const status = incDoc?.exists ? ((incDoc.data()!['status'] as string) ?? 'unknown') : 'unknown';
 
-    const snap = await db.collection(`companies/${companyId}/securityIncidents/${incidentId}/timeline`)
-      .orderBy('timestamp', 'asc').limit(50).get();
+      const snap = await db.collection(`companies/${companyId}/securityIncidents/${incidentId}/timeline`)
+        .orderBy('timestamp', 'asc').limit(50).get().catch(() => null);
 
-    return {
-      incidentId, status,
-      timeline: snap.docs.map(d => {
-        const data = d.data();
-        return {
-          action: (data['action'] as string) ?? '', status: (data['status'] as string) ?? '',
-          user: (data['user'] as string) ?? 'system', details: (data['details'] as string) ?? '',
-          timestamp: (data['timestamp'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
-        };
-      }),
-    };
+      if (!snap) return { success: false, message: 'Lecture de la timeline impossible.', incidentId, status, timeline: [] };
+
+      return {
+        success: true,
+        incidentId, status,
+        timeline: snap.docs.map(d => {
+          const data = d.data();
+          return {
+            action: (data['action'] as string) ?? '', status: (data['status'] as string) ?? '',
+            user: (data['user'] as string) ?? 'system', details: (data['details'] as string) ?? '',
+            timestamp: (data['timestamp'] as { toDate?: () => Date })?.toDate?.()?.toISOString() ?? '',
+          };
+        }),
+      };
+    } catch (err) {
+      logger.error('[Cyber] sec_getIncidentTimeline failed', { error: String(err) });
+      return { success: false, message: `Lecture impossible: ${err instanceof Error ? err.message : String(err)}`, incidentId, status: 'unknown', timeline: [] };
+    }
   }
 );
 
@@ -721,56 +853,74 @@ export const runSecurityAuditTool = ai.defineTool(
     description: 'Run a comprehensive AI-powered security audit with prioritized recommendations.',
     inputSchema: z.object({ companyId: z.string(), scope: z.enum(['full', 'access', 'network', 'compliance', 'data']).optional().default('full') }),
     outputSchema: z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
       auditId: z.string(), scope: z.string(), score: z.number(), grade: z.string(),
       findings: z.array(z.object({ severity: z.string(), category: z.string(), finding: z.string(), recommendation: z.string() })),
       summary: z.string(),
     }),
   },
   async ({ companyId, scope }) => {
-    const db = getFirestore();
+    try {
+      const db = getFirestore();
 
-    // Gather data for audit
-    const [incSnap, usersSnap, vulnSnap, compSnap] = await Promise.all([
-      db.collection(`companies/${companyId}/securityIncidents`).limit(50).get(),
-      db.collection('users').where('companyId', '==', companyId).limit(200).get(),
-      db.collection(`companies/${companyId}/vulnerabilities`).where('status', '==', 'open').limit(50).get(),
-      db.collection(`companies/${companyId}/compliance`).limit(6).get(),
-    ]);
+      // Gather data for audit
+      const [incSnap, usersSnap, vulnSnap, compSnap] = await Promise.all([
+        db.collection(`companies/${companyId}/securityIncidents`).limit(50).get().catch(() => null),
+        db.collection('users').where('companyId', '==', companyId).limit(200).get().catch(() => null),
+        db.collection(`companies/${companyId}/vulnerabilities`).where('status', '==', 'open').limit(50).get().catch(() => null),
+        db.collection(`companies/${companyId}/compliance`).limit(6).get().catch(() => null),
+      ]);
 
-    const users = usersSnap.docs.map(d => d.data());
-    const mfaRate = users.length > 0 ? Math.round(users.filter(u => u['mfaEnabled']).length / users.length * 100) : 0;
-    const openIncidents = incSnap.docs.filter(d => d.data()['status'] !== 'closed' && d.data()['status'] !== 'recovered').length;
-    const openVulns = vulnSnap.size;
-    const adminCount = users.filter(u => u['role'] === 'admin' || u['role'] === 'superadmin').length;
+      const users = usersSnap?.docs.map(d => d.data()) ?? [];
+      const mfaRate = users.length > 0 ? Math.round(users.filter(u => u['mfaEnabled']).length / users.length * 100) : 0;
+      const openIncidents = incSnap?.docs.filter(d => d.data()['status'] !== 'closed' && d.data()['status'] !== 'recovered').length ?? 0;
+      const openVulns = vulnSnap?.size ?? 0;
+      const adminCount = users.filter(u => u['role'] === 'admin' || u['role'] === 'superadmin').length;
 
-    const { text } = await ai.generate({
-      model: GEMINI_FLASH,
-      prompt: `Run a ${scope} security audit for this company. Context:
+      let text = '';
+      try {
+        const result = await ai.generate({
+          model: GEMINI_FLASH,
+          prompt: `Run a ${scope} security audit for this company. Context:
 - ${users.length} users, MFA adoption: ${mfaRate}%
 - ${adminCount} admin accounts
 - ${openIncidents} open incidents
 - ${openVulns} open vulnerabilities
-- ${compSnap.size} compliance frameworks tracked
+- ${compSnap?.size ?? 0} compliance frameworks tracked
 
 Generate 5-8 prioritized findings with severity (critical/high/medium/low), category, finding, and recommendation.
 Return JSON ONLY: {"findings":[{"severity":"...","category":"...","finding":"...","recommendation":"..."}],"summary":"1-2 sentence summary","score":75}`,
-      config: { temperature: 0.3 },
-    });
+          config: { temperature: 0.3 },
+        });
+        text = result.text;
+      } catch (err) {
+        logger.error('[Cyber] runSecurityAudit AI generation failed', { error: String(err) });
+      }
 
-    let result = { findings: [] as { severity: string; category: string; finding: string; recommendation: string }[], summary: 'Audit complete.', score: 70 };
-    try { result = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')); } catch {}
+      let result = { findings: [] as { severity: string; category: string; finding: string; recommendation: string }[], summary: 'Audit complete.', score: 70 };
+      try { result = JSON.parse(text.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '')); } catch {}
 
-    const auditId = generateId();
-    await db.collection(`companies/${companyId}/securityAudits`).doc(auditId).set({
-      id: auditId, scope, score: result.score, findings: result.findings,
-      summary: result.summary, completedAt: FieldValue.serverTimestamp(),
-    });
+      const auditId = generateId();
+      try {
+        await db.collection(`companies/${companyId}/securityAudits`).doc(auditId).set({
+          id: auditId, scope, score: result.score, findings: result.findings,
+          summary: result.summary, completedAt: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        logger.error('[Cyber] securityAudit write failed', { error: String(err) });
+      }
 
-    return {
-      auditId, scope, score: result.score,
-      grade: result.score >= 90 ? 'A' : result.score >= 80 ? 'B' : result.score >= 70 ? 'C' : result.score >= 60 ? 'D' : 'F',
-      findings: result.findings, summary: result.summary,
-    };
+      return {
+        success: true,
+        auditId, scope: scope ?? 'full', score: result.score,
+        grade: result.score >= 90 ? 'A' : result.score >= 80 ? 'B' : result.score >= 70 ? 'C' : result.score >= 60 ? 'D' : 'F',
+        findings: result.findings, summary: result.summary,
+      };
+    } catch (err) {
+      logger.error('[Cyber] sec_runSecurityAudit failed', { error: String(err) });
+      return { success: false, message: `Audit impossible: ${err instanceof Error ? err.message : String(err)}`, auditId: '', scope: scope ?? 'full', score: 0, grade: 'N/A', findings: [], summary: '' };
+    }
   }
 );
 

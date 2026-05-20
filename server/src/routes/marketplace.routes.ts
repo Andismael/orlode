@@ -466,6 +466,17 @@ Tu es vigilant 24/7, precis, proactif. Tu ne causes jamais de fausse panique —
     systemPrompt: 'Tu es l\'Agent Audit de l\'entreprise. Tu captures et exposes la traçabilité de toutes les actions sensibles, génères des rapports forensiques exportables, et alertes sur les comportements anormaux. Tu travailles avec l\'Agent Compliance pour les preuves SOC2/RGPD et l\'Agent Cybersécurité pour les incidents. Sois précis sur les timestamps et les acteurs.',
     tools: ['searchDocuments', 'getDocuments', 'generateReport', 'sendAlert', 'analyzeData'],
     pricingModel: 'included' as const, priceUSD: 0, status: 'approved' as const, color: 'from-slate-700 to-gray-800' },
+
+  // ── Boutique WhatsApp — internal id: commerce. Phase 1 minimal:
+  // photo + nom + prix → fiche produit auto-créée; client demande → catalogue;
+  // commande enregistrée; paiement = cash on delivery / Wave manuel.
+  { id: 'commerce', slug: 'boutique-whatsapp', name: 'Boutique WhatsApp', icon: '🛒', category: 'industry', industry: 'E-Commerce / Retail',
+    description: 'Vends sur WhatsApp avec une photo. Le commerçant ajoute un produit en envoyant photo + prix. Les clients commandent dans la conversation.',
+    longDescription: 'Le commerçant ajoute un produit en envoyant simplement une photo + nom + prix sur WhatsApp — la fiche produit est créée automatiquement. Les clients demandent le catalogue, posent des questions, passent commande et reçoivent les instructions de paiement (cash à la livraison ou Wave / Orange Money manuel). Phase 1 : 1 boutique par entreprise, devise XOF, Côte d\'Ivoire — Phase 2 ajoutera paiements automatisés, multi-pays, génération vidéo IA, storefront web custom.',
+    features: ['📸 Photo + prix sur WhatsApp → fiche produit créée', '🛒 Catalogue répondu en temps réel aux clients', '💬 Prise de commande conversationnelle', '🔒 OTP propriétaire pour les actions sensibles (24h session)', '💵 Cash on delivery + lien Wave / Orange Money manuel', '🔔 Notification owner à chaque commande + clic "marquer payé"', '🇨🇮 Optimisé Côte d\'Ivoire / XOF (Phase 2 = multi-pays)'],
+    systemPrompt: 'Tu es la Boutique WhatsApp d\'Orlode AI — un assistant vendeur chaleureux et efficace en français ivoirien naturel.\n\n## Côté CLIENT (la plupart des messages)\n1. **Catalogue** : si le client demande "qu\'est-ce que vous vendez", "ton catalogue", "produits disponibles", utilise commerceListProducts. La réponse contient un champ shopLink — TU DOIS TOUJOURS terminer par : "🛍️ Voir tous les produits avec photos et commander : {shopLink}".\n2. **Multi-produits** : AVANT de finaliser une commande, demande TOUJOURS au client : "Tu veux ajouter autre chose à ta commande ?". Continue tant qu\'il dit oui — accumule les items dans une liste mentale. Ce n\'est qu\'au "non, c\'est tout" que tu finalises.\n3. **Commande** : collecte progressivement (jamais en bloc) : nom, téléphone (+225...), adresse de livraison (avec quartier — Cocody, Yopougon, etc.), articles (multi possible — voir #2), méthode de paiement (cash livraison par défaut). Puis appelle commercePlaceOrder avec items: [{productId, qty}, ...]. Le tool retourne un champ `confirmationMessage` — tu dois envoyer ce message VERBATIM au client (ne le reformule pas).\n4. **Upsell** : après une commande, le système envoie automatiquement une suggestion de produit complémentaire au client (~5s plus tard). Si le client répond "je veux X" ou "ajoute X", crée une nouvelle commande avec commercePlaceOrder pour ce produit en réutilisant ses infos précédentes (nom, téléphone, adresse).\n5. **Frais de livraison** : si le client donne une adresse, le tool placeOrder identifiera la zone et calculera le frais automatiquement. Si pas de zone reconnue, demande une précision sur la commune.\n6. **Fidélité** : ne mentionne pas les points fidélité spontanément — c\'est le tool placeOrder qui les gère et les inclut dans confirmationMessage.\n\n## Côté PROPRIÉTAIRE (role=owner authentifié seulement)\n7. **Voir commandes** : "mes commandes" / "ventes du jour" → commerceGetOrders.\n8. **Marquer payé** : "marque la commande X comme payée" → commerceMarkOrderPaid.\n9. **Modifier produit** : "augmente prix Chemise 7000", "stock Chemise 10", "supprime Chemise" → utilise commerceUpdateProductPrice / commerceUpdateProductStock / commerceUpdateProductStatus / commerceDeleteProduct selon le cas. NB : ces commandes sont aussi interceptées en amont par parser dédié — tu ne les vois donc que rarement.\n\n## RÈGLES ABSOLUES\n- N\'invente JAMAIS un produit qui n\'existe pas dans la base.\n- N\'invente JAMAIS un prix ou une zone de livraison — utilise les tools.\n- Toute réponse en français ivoirien naturel : "tu" pas "vous" pour les clients ordinaires (sauf très formel), expressions locales OK ("c\'est bon", "on dit quoi").\n- Sois bref. Pas de longs paragraphes. WhatsApp = court et clair.',
+    tools: ['commerceListProducts', 'commercePlaceOrder', 'commerceGetOrders', 'commerceMarkOrderPaid', 'commerceUpdateProductPrice', 'commerceUpdateProductStock', 'commerceUpdateProductStatus', 'commerceDeleteProduct', 'searchDocuments', 'sendEmail'],
+    pricingModel: 'monthly' as const, priceUSD: 20, status: 'approved' as const, color: 'from-emerald-500 to-teal-500' },
 ];
 
 // ── BUNDLES ──────────────────────────────────────────────────────────────────
@@ -576,6 +587,12 @@ const BUNDLES = [
     agentIds: withCoreAgents(['sales', 'comms', 'marketing', 'support']),
     originalPrice: 20, bundlePrice: 20, discount: 0,
     hero: true, popular: true,
+  },
+  {
+    id: 'b16', name: 'Pack Boutique', icon: '🛒', color: 'from-emerald-500 to-teal-500',
+    description: 'Vends sur WhatsApp avec une photo. Catalogue auto, prise de commandes, paiement cash/Wave, fidélité clients. Idéal commerçants Afrique.',
+    agentIds: withCoreAgents(['commerce', 'sales', 'comms', 'loyalty']),
+    originalPrice: 20, bundlePrice: 20, discount: 0, hero: true,
   },
   // Super Pack Enterprise — 10 agents flagship covering ALL key business areas
   // for medium-to-large companies. Priced at $45/mo vs $60+ if buying 3 packs
@@ -821,6 +838,26 @@ router.post('/cron/expire-trials', asyncHandler(async (req: Request, res: Respon
 // ── PROTECTED ENDPOINTS ──────────────────────────────────────────────────────
 
 router.use(authMiddleware);
+
+// POST /api/marketplace/waitlist — capture interest for a feature that is not GA yet.
+// Stored at companies/{cid}/waitlist/{feature} so we can ping owners when the feature ships.
+router.post('/waitlist', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new AppError('Company ID required', 400);
+  const feature = String(req.body?.feature || '').trim().toLowerCase();
+  if (!feature) throw new AppError('feature required', 400);
+
+  const db = getFirestore();
+  await db.doc(`companies/${companyId}/waitlist/${feature}`).set({
+    feature,
+    companyId,
+    userId: req.user?.uid || null,
+    email: req.user?.email || null,
+    createdAt: new Date(),
+  }, { merge: true });
+
+  res.json({ success: true });
+}));
 
 // GET /api/marketplace/my-installed
 router.get('/my-installed', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
@@ -1665,8 +1702,38 @@ router.post('/agents/:id/checkout', asyncHandler(async (req: AuthenticatedReques
 // Handles BOTH single-agent and bundle subscriptions. Metadata format from checkout:
 //   single-agent : { paymentId, companyId, agentId }
 //   bundle       : { paymentId, companyId, bundleId, agentIds: 'id1,id2,id3,id4' }
+// SECURITY: webhook signature verification — Stripe lets anyone POST to a public
+// URL, so without `constructEvent` an attacker can fake `checkout.session.completed`
+// and install paid bundles for free. The body must be the RAW bytes (not parsed JSON);
+// we get them via express.raw() at app.ts mount time. We fall back to JSON only when
+// the secret is missing locally (dev mode), and log a loud warning.
 router.post('/webhook/stripe', asyncHandler(async (req: Request, res: Response) => {
-  const event = req.body as Record<string, unknown>;
+  const STRIPE_WEBHOOK_SECRET = process.env['STRIPE_WEBHOOK_SECRET'] ?? '';
+  let event: Record<string, unknown>;
+  if (STRIPE_WEBHOOK_SECRET) {
+    const sig = req.header('stripe-signature') ?? '';
+    if (!sig) {
+      logger.warn('[Marketplace] Stripe webhook rejected — missing stripe-signature header');
+      res.status(400).send('Missing signature');
+      return;
+    }
+    try {
+      const Stripe = (await import('stripe')).default;
+      const stripeClient = new (Stripe as unknown as new (key: string) => { webhooks: { constructEvent: (payload: string | Buffer, sig: string, secret: string) => { type: string; data: { object: Record<string, unknown> } } } })(process.env['STRIPE_SECRET_KEY'] ?? '');
+      // Raw body — must match the bytes Stripe signed
+      const rawBody = (req as Request & { rawBody?: Buffer }).rawBody ?? req.body;
+      event = stripeClient.webhooks.constructEvent(rawBody as Buffer | string, sig, STRIPE_WEBHOOK_SECRET) as unknown as Record<string, unknown>;
+    } catch (err) {
+      logger.error('[Marketplace] Stripe webhook signature verification failed', { error: String(err) });
+      res.status(400).send('Invalid signature');
+      return;
+    }
+  } else {
+    // No secret configured — refuse the call rather than trust the body.
+    logger.error('[Marketplace] STRIPE_WEBHOOK_SECRET not configured — webhook rejected');
+    res.status(503).send('Webhook not configured');
+    return;
+  }
   const type = event['type'] as string;
 
   if (type !== 'checkout.session.completed' && type !== 'invoice.paid') {
@@ -1737,7 +1804,18 @@ router.post('/webhook/stripe', asyncHandler(async (req: Request, res: Response) 
 }));
 
 // POST /api/marketplace/webhook/wave — Wave webhook for marketplace payments
+// SECURITY: Wave's HMAC signature header isn't standardized like Stripe's; we
+// gate the endpoint with a shared secret in the URL (?secret=) — same pattern as
+// `orders.routes.ts:120`. Without this, an attacker who guesses a paymentId can
+// flip status to 'completed' and free-install the bundle.
 router.post('/webhook/wave', asyncHandler(async (req: Request, res: Response) => {
+  const expected = process.env['CRON_SECRET'] ?? '';
+  const provided = (req.query['secret'] as string ?? '').trim();
+  if (!expected || provided !== expected) {
+    logger.warn('[Marketplace] Wave webhook rejected — invalid or missing ?secret');
+    res.status(403).send('Forbidden');
+    return;
+  }
   const body = req.body as Record<string, unknown>;
   const data = (body['data'] ?? {}) as Record<string, unknown>;
   const clientReference = data['client_reference'] as string;

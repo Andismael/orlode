@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.hrAgentTool = exports.hrAgentFlow = exports.employeeSurveyTool = exports.employeeAnalyticsTool = exports.offboardingTool = exports.createPerformanceReviewTool = exports.getOrgChartTool = exports.employeeDirectoryTool = exports.onboardingChecklistTool = exports.policySearchTool = exports.publishJobTool = exports.createHRTicketTool = exports.attendanceSummaryTool = exports.teamCalendarTool = exports.updateEmployeeTool = exports.hrSendEmailTool = exports.createEmployeeTool = exports.generateContractTool = exports.generateEmployeeUploadLinkTool = exports.listEmployeePortfolioTool = exports.uploadEmployeeDocTool = exports.generatePayslipTool = exports.generateCertificateTool = exports.listEmployeeDocsTool = exports.employeeProfileTool = exports.scheduleInterviewTool = exports.listCandidatesTool = exports.addCandidateTool = exports.listJobsTool = exports.createJobPostingTool = exports.leaveStatusTool = exports.leaveRequestTool = exports.leaveBalanceTool = void 0;
+exports.hrAgentTool = exports.hrAgentFlow = exports.sendContractForSignatureTool = exports.employeeSurveyTool = exports.employeeAnalyticsTool = exports.offboardingTool = exports.createPerformanceReviewTool = exports.getOrgChartTool = exports.employeeDirectoryTool = exports.onboardingChecklistTool = exports.policySearchTool = exports.publishJobTool = exports.createHRTicketTool = exports.attendanceSummaryTool = exports.teamCalendarTool = exports.updateEmployeeTool = exports.hrSendEmailTool = exports.createEmployeeTool = exports.generateContractTool = exports.generateEmployeeUploadLinkTool = exports.listEmployeePortfolioTool = exports.uploadEmployeeDocTool = exports.generatePayslipTool = exports.generateCertificateTool = exports.listEmployeeDocsTool = exports.employeeProfileTool = exports.scheduleInterviewTool = exports.listCandidatesTool = exports.addCandidateTool = exports.listJobsTool = exports.createJobPostingTool = exports.leaveStatusTool = exports.leaveRequestTool = exports.leaveBalanceTool = void 0;
 /**
  * HR Agent V1+ — Gemini Flash
  * Full HR: conges, recrutement, profil employe, documents RH, calendrier equipe,
@@ -52,16 +52,16 @@ exports.leaveBalanceTool = genkit_config_1.ai.defineTool({
     name: 'hr_getLeaveBalance',
     description: 'Get employee leave balance (paid leave, sick, RTT, etc.).',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), userId: zod_1.z.string() }),
-    outputSchema: zod_1.z.object({ paidLeave: zod_1.z.number(), sickDays: zod_1.z.number(), rtt: zod_1.z.number(), other: zod_1.z.number(), year: zod_1.z.number() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(), paidLeave: zod_1.z.number(), sickDays: zod_1.z.number(), rtt: zod_1.z.number(), other: zod_1.z.number(), year: zod_1.z.number() }),
 }, async ({ companyId, userId }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const year = new Date().getFullYear();
-    const doc = await db.collection(`companies/${companyId}/leaveBalances`).doc(`${userId}_${year}`).get();
-    if (doc.exists) {
+    const doc = await db.collection(`companies/${companyId}/leaveBalances`).doc(`${userId}_${year}`).get().catch(() => null);
+    if (doc?.exists) {
         const d = doc.data();
-        return { paidLeave: d['paidLeave'] ?? 25, sickDays: d['sickDays'] ?? 0, rtt: d['rtt'] ?? 10, other: d['other'] ?? 0, year };
+        return { success: true, paidLeave: d['paidLeave'] ?? 25, sickDays: d['sickDays'] ?? 0, rtt: d['rtt'] ?? 10, other: d['other'] ?? 0, year };
     }
-    return { paidLeave: 25, sickDays: 0, rtt: 10, other: 0, year };
+    return { success: true, paidLeave: 25, sickDays: 0, rtt: 10, other: 0, year };
 });
 exports.leaveRequestTool = genkit_config_1.ai.defineTool({
     name: 'hr_submitLeaveRequest',
@@ -71,7 +71,7 @@ exports.leaveRequestTool = genkit_config_1.ai.defineTool({
         type: zod_1.z.enum(['paid', 'sick', 'rtt', 'unpaid', 'other']).default('paid'),
         startDate: zod_1.z.string(), endDate: zod_1.z.string(), reason: zod_1.z.string().optional(),
     }),
-    outputSchema: zod_1.z.object({ requestId: zod_1.z.string(), status: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), requestId: zod_1.z.string(), status: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, userId, type, startDate, endDate, reason }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const id = (0, helpers_1.generateId)();
@@ -82,31 +82,43 @@ exports.leaveRequestTool = genkit_config_1.ai.defineTool({
         empName = u.data()?.['displayName'] ?? '';
     }
     catch { }
-    await db.collection(`companies/${companyId}/leaveRequests`).doc(id).set({
-        id, userId, employeeName: empName, type, startDate, endDate,
-        reason: reason ?? '', status: 'pending',
-        submittedAt: firestore_1.FieldValue.serverTimestamp(), createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-    return { requestId: id, status: 'pending', message: `Demande #${id.slice(0, 8)} soumise (${type}, ${startDate} → ${endDate}). En attente d'approbation manager.` };
+    try {
+        await db.collection(`companies/${companyId}/leaveRequests`).doc(id).set({
+            id, userId, employeeName: empName, type, startDate, endDate,
+            reason: reason ?? '', status: 'pending',
+            submittedAt: firestore_1.FieldValue.serverTimestamp(), createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] submitLeaveRequest write failed', { error: String(err) });
+        return { success: false, requestId: '', status: 'error', message: 'Sauvegarde de la demande de congé impossible.' };
+    }
+    return { success: true, requestId: id, status: 'pending', message: `Demande #${id.slice(0, 8)} soumise (${type}, ${startDate} → ${endDate}). En attente d'approbation manager.` };
 });
 exports.leaveStatusTool = genkit_config_1.ai.defineTool({
     name: 'hr_getLeaveRequestStatus',
     description: 'Check the status of a leave request or list pending requests for a user.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), userId: zod_1.z.string(), requestId: zod_1.z.string().optional() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(),
         requests: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), type: zod_1.z.string(), startDate: zod_1.z.string(), endDate: zod_1.z.string(), status: zod_1.z.string(), reason: zod_1.z.string() })),
     }),
 }, async ({ companyId, userId, requestId }) => {
     const db = (0, firebase_config_1.getFirestore)();
     if (requestId) {
-        const doc = await db.collection(`companies/${companyId}/leaveRequests`).doc(requestId).get();
-        if (!doc.exists)
-            return { requests: [] };
+        const doc = await db.collection(`companies/${companyId}/leaveRequests`).doc(requestId).get().catch(() => null);
+        if (!doc?.exists)
+            return { success: true, requests: [] };
         const d = doc.data();
-        return { requests: [{ id: doc.id, type: d['type'] ?? '', startDate: d['startDate'] ?? '', endDate: d['endDate'] ?? '', status: d['status'] ?? '', reason: d['reason'] ?? '' }] };
+        return { success: true, requests: [{ id: doc.id, type: d['type'] ?? '', startDate: d['startDate'] ?? '', endDate: d['endDate'] ?? '', status: d['status'] ?? '', reason: d['reason'] ?? '' }] };
     }
-    const snap = await db.collection(`companies/${companyId}/leaveRequests`).where('userId', '==', userId).orderBy('createdAt', 'desc').limit(10).get();
-    return { requests: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: x['type'] ?? '', startDate: x['startDate'] ?? '', endDate: x['endDate'] ?? '', status: x['status'] ?? '', reason: x['reason'] ?? '' }; }) };
+    const snap = await db.collection(`companies/${companyId}/leaveRequests`).where('userId', '==', userId).orderBy('createdAt', 'desc').limit(10).get().catch((err) => {
+        logger_1.logger.error('[HR] getLeaveRequestStatus query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture des demandes impossible.', requests: [] };
+    return { success: true, requests: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: x['type'] ?? '', startDate: x['startDate'] ?? '', endDate: x['endDate'] ?? '', status: x['status'] ?? '', reason: x['reason'] ?? '' }; }) };
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // 2. RECRUTEMENT (nouveau)
@@ -120,30 +132,41 @@ exports.createJobPostingTool = genkit_config_1.ai.defineTool({
         employmentType: zod_1.z.enum(['full-time', 'part-time', 'contract', 'internship']).optional().default('full-time'),
         location: zod_1.z.string().optional(), salary: zod_1.z.string().optional(),
     }),
-    outputSchema: zod_1.z.object({ jobId: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), jobId: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, title, department, description, requirements, employmentType, location, salary }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const id = (0, helpers_1.generateId)();
-    await db.collection(`companies/${companyId}/jobPostings`).doc(id).set({
-        id, title, department: department ?? '', description, requirements: requirements ?? '',
-        employmentType, location: location ?? '', salary: salary ?? '',
-        status: 'open', applicantCount: 0,
-        createdAt: firestore_1.FieldValue.serverTimestamp(), updatedAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-    return { jobId: id, message: `Offre "${title}" creee (${employmentType}). Statut: ouverte.` };
+    try {
+        await db.collection(`companies/${companyId}/jobPostings`).doc(id).set({
+            id, title, department: department ?? '', description, requirements: requirements ?? '',
+            employmentType, location: location ?? '', salary: salary ?? '',
+            status: 'open', applicantCount: 0,
+            createdAt: firestore_1.FieldValue.serverTimestamp(), updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] createJobPosting write failed', { error: String(err) });
+        return { success: false, jobId: '', message: 'Sauvegarde de l\'offre impossible.' };
+    }
+    return { success: true, jobId: id, message: `Offre "${title}" creee (${employmentType}). Statut: ouverte.` };
 });
 exports.listJobsTool = genkit_config_1.ai.defineTool({
     name: 'hr_listJobs',
     description: 'List open job postings for the company.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), status: zod_1.z.enum(['open', 'closed', 'all']).optional().default('open') }),
-    outputSchema: zod_1.z.object({ jobs: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), title: zod_1.z.string(), department: zod_1.z.string(), status: zod_1.z.string(), applicantCount: zod_1.z.number() })) }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(), jobs: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), title: zod_1.z.string(), department: zod_1.z.string(), status: zod_1.z.string(), applicantCount: zod_1.z.number() })) }),
 }, async ({ companyId, status }) => {
     const db = (0, firebase_config_1.getFirestore)();
     let q = db.collection(`companies/${companyId}/jobPostings`);
     if (status !== 'all')
         q = q.where('status', '==', status);
-    const snap = await q.limit(50).get();
-    return { jobs: snap.docs.map(d => { const x = d.data(); return { id: d.id, title: x['title'] ?? '', department: x['department'] ?? '', status: x['status'] ?? '', applicantCount: x['applicantCount'] ?? 0 }; }) };
+    const snap = await q.limit(50).get().catch((err) => {
+        logger_1.logger.error('[HR] listJobs query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture des offres impossible.', jobs: [] };
+    return { success: true, jobs: snap.docs.map(d => { const x = d.data(); return { id: d.id, title: x['title'] ?? '', department: x['department'] ?? '', status: x['status'] ?? '', applicantCount: x['applicantCount'] ?? 0 }; }) };
 });
 exports.addCandidateTool = genkit_config_1.ai.defineTool({
     name: 'hr_addCandidate',
@@ -154,7 +177,7 @@ exports.addCandidateTool = genkit_config_1.ai.defineTool({
         cvSummary: zod_1.z.string().optional().describe('Summary or key points from their CV'),
         notes: zod_1.z.string().optional(),
     }),
-    outputSchema: zod_1.z.object({ candidateId: zod_1.z.string(), score: zod_1.z.number().optional(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), candidateId: zod_1.z.string(), score: zod_1.z.number().optional(), message: zod_1.z.string() }),
 }, async ({ companyId, jobId, name, email, phone, cvSummary, notes }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const id = (0, helpers_1.generateId)();
@@ -173,30 +196,43 @@ exports.addCandidateTool = genkit_config_1.ai.defineTool({
                 score = parseInt(text.trim()) || undefined;
             }
         }
-        catch { }
+        catch (err) {
+            logger_1.logger.warn('[HR] addCandidate scoring failed (non-blocking)', { error: String(err) });
+        }
     }
-    await db.collection(`companies/${companyId}/candidates`).doc(id).set({
-        id, jobId, name, email: email ?? '', phone: phone ?? '',
-        cvSummary: cvSummary ?? '', notes: notes ?? '',
-        score: score ?? null, status: 'new',
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    try {
+        await db.collection(`companies/${companyId}/candidates`).doc(id).set({
+            id, jobId, name, email: email ?? '', phone: phone ?? '',
+            cvSummary: cvSummary ?? '', notes: notes ?? '',
+            score: score ?? null, status: 'new',
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] addCandidate write failed', { error: String(err) });
+        return { success: false, candidateId: '', message: 'Sauvegarde du candidat impossible.' };
+    }
     // Increment applicant count
     try {
         await db.collection(`companies/${companyId}/jobPostings`).doc(jobId).update({ applicantCount: firestore_1.FieldValue.increment(1) });
     }
     catch { }
-    return { candidateId: id, score, message: `Candidat "${name}" ajoute${score ? ` (score: ${score}/100)` : ''}. Statut: nouveau.` };
+    return { success: true, candidateId: id, score, message: `Candidat "${name}" ajoute${score ? ` (score: ${score}/100)` : ''}. Statut: nouveau.` };
 });
 exports.listCandidatesTool = genkit_config_1.ai.defineTool({
     name: 'hr_listCandidates',
     description: 'List candidates for a job posting, with scores and status.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), jobId: zod_1.z.string() }),
-    outputSchema: zod_1.z.object({ candidates: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), name: zod_1.z.string(), email: zod_1.z.string(), score: zod_1.z.number().optional(), status: zod_1.z.string() })) }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(), candidates: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), name: zod_1.z.string(), email: zod_1.z.string(), score: zod_1.z.number().optional(), status: zod_1.z.string() })) }),
 }, async ({ companyId, jobId }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const snap = await db.collection(`companies/${companyId}/candidates`).where('jobId', '==', jobId).limit(100).get();
-    return { candidates: snap.docs.map(d => { const x = d.data(); return { id: d.id, name: x['name'] ?? '', email: x['email'] ?? '', score: x['score'], status: x['status'] ?? '' }; }) };
+    const snap = await db.collection(`companies/${companyId}/candidates`).where('jobId', '==', jobId).limit(100).get().catch((err) => {
+        logger_1.logger.error('[HR] listCandidates query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture des candidats impossible.', candidates: [] };
+    return { success: true, candidates: snap.docs.map(d => { const x = d.data(); return { id: d.id, name: x['name'] ?? '', email: x['email'] ?? '', score: x['score'], status: x['status'] ?? '' }; }) };
 });
 exports.scheduleInterviewTool = genkit_config_1.ai.defineTool({
     name: 'hr_scheduleInterview',
@@ -207,7 +243,7 @@ exports.scheduleInterviewTool = genkit_config_1.ai.defineTool({
         type: zod_1.z.enum(['phone', 'video', 'onsite']).optional().default('video'),
         notes: zod_1.z.string().optional(),
     }),
-    outputSchema: zod_1.z.object({ interviewId: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), interviewId: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, candidateId, date, time, interviewer, type, notes }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const id = (0, helpers_1.generateId)();
@@ -218,17 +254,23 @@ exports.scheduleInterviewTool = genkit_config_1.ai.defineTool({
         candidateName = c.data()?.['name'] ?? '';
     }
     catch { }
-    await db.collection(`companies/${companyId}/interviews`).doc(id).set({
-        id, candidateId, candidateName, date, time, interviewer: interviewer ?? '',
-        type, notes: notes ?? '', status: 'scheduled',
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    try {
+        await db.collection(`companies/${companyId}/interviews`).doc(id).set({
+            id, candidateId, candidateName, date, time, interviewer: interviewer ?? '',
+            type, notes: notes ?? '', status: 'scheduled',
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] scheduleInterview write failed', { error: String(err) });
+        return { success: false, interviewId: '', message: 'Sauvegarde de l\'entretien impossible.' };
+    }
     // Update candidate status
     try {
         await db.collection(`companies/${companyId}/candidates`).doc(candidateId).update({ status: 'interview_scheduled' });
     }
     catch { }
-    return { interviewId: id, message: `Entretien ${type} planifie pour "${candidateName}" le ${date} a ${time}.` };
+    return { success: true, interviewId: id, message: `Entretien ${type} planifie pour "${candidateName}" le ${date} a ${time}.` };
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // 3. PROFIL EMPLOYE (nouveau)
@@ -238,6 +280,7 @@ exports.employeeProfileTool = genkit_config_1.ai.defineTool({
     description: 'Get detailed employee profile — personal info, department, manager, start date, work mode.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), userId: zod_1.z.string().optional(), employeeName: zod_1.z.string().optional() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(),
         found: zod_1.z.boolean(), name: zod_1.z.string(), email: zod_1.z.string(), department: zod_1.z.string(),
         jobTitle: zod_1.z.string(), manager: zod_1.z.string(), startDate: zod_1.z.string(),
         employmentType: zod_1.z.string(), workMode: zod_1.z.string(), phone: zod_1.z.string(),
@@ -246,19 +289,24 @@ exports.employeeProfileTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     let data;
     if (userId) {
-        const doc = await db.collection('users').doc(userId).get();
-        if (doc.exists)
+        const doc = await db.collection('users').doc(userId).get().catch(() => null);
+        if (doc?.exists)
             data = doc.data();
     }
     else if (employeeName) {
-        const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get();
-        const q = employeeName.toLowerCase();
-        const match = snap.docs.find(d => (d.data()['displayName'] ?? '').toLowerCase().includes(q));
-        if (match)
-            data = match.data();
+        const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get().catch((err) => {
+            logger_1.logger.error('[HR] getEmployeeProfile query failed', { error: String(err) });
+            return null;
+        });
+        if (snap) {
+            const q = employeeName.toLowerCase();
+            const match = snap.docs.find(d => (d.data()['displayName'] ?? '').toLowerCase().includes(q));
+            if (match)
+                data = match.data();
+        }
     }
     if (!data)
-        return { found: false, name: '', email: '', department: '', jobTitle: '', manager: '', startDate: '', employmentType: '', workMode: '', phone: '' };
+        return { success: true, found: false, name: '', email: '', department: '', jobTitle: '', manager: '', startDate: '', employmentType: '', workMode: '', phone: '' };
     // Convert Firestore Timestamp (object with _seconds) to ISO date string
     const toDateString = (v) => {
         if (!v)
@@ -276,6 +324,7 @@ exports.employeeProfileTool = genkit_config_1.ai.defineTool({
         return '';
     };
     return {
+        success: true,
         found: true,
         name: data['displayName'] ?? '',
         email: data['email'] ?? '',
@@ -295,43 +344,62 @@ exports.listEmployeeDocsTool = genkit_config_1.ai.defineTool({
     name: 'hr_listEmployeeDocuments',
     description: 'List HR documents for an employee (contract, attestation, certificates, payslips).',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), userId: zod_1.z.string() }),
-    outputSchema: zod_1.z.object({ documents: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), type: zod_1.z.string(), title: zod_1.z.string(), date: zod_1.z.string() })) }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(), documents: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), type: zod_1.z.string(), title: zod_1.z.string(), date: zod_1.z.string() })) }),
 }, async ({ companyId, userId }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const snap = await db.collection(`companies/${companyId}/hrDocuments`).where('userId', '==', userId).limit(50).get();
-    return { documents: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: x['type'] ?? '', title: x['title'] ?? '', date: (x['createdAt']?.toDate?.()?.toISOString?.() ?? '') }; }) };
+    const snap = await db.collection(`companies/${companyId}/hrDocuments`).where('userId', '==', userId).limit(50).get().catch((err) => {
+        logger_1.logger.error('[HR] listEmployeeDocuments query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture des documents impossible.', documents: [] };
+    return { success: true, documents: snap.docs.map(d => { const x = d.data(); return { id: d.id, type: x['type'] ?? '', title: x['title'] ?? '', date: (x['createdAt']?.toDate?.()?.toISOString?.() ?? '') }; }) };
 });
 exports.generateCertificateTool = genkit_config_1.ai.defineTool({
     name: 'hr_generateEmploymentCertificate',
     description: 'Generate an employment certificate / attestation for an employee.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), userId: zod_1.z.string(), certificateType: zod_1.z.enum(['employment', 'salary', 'training', 'recommendation']).optional().default('employment') }),
-    outputSchema: zod_1.z.object({ documentId: zod_1.z.string(), content: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), documentId: zod_1.z.string(), content: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, userId, certificateType }) => {
     const db = (0, firebase_config_1.getFirestore)();
     // Get employee + company info
     const [empDoc, compDoc] = await Promise.all([
-        db.collection('users').doc(userId).get(),
-        db.collection('companies').doc(companyId).get(),
+        db.collection('users').doc(userId).get().catch(() => null),
+        db.collection('companies').doc(companyId).get().catch(() => null),
     ]);
-    const emp = empDoc.data() ?? {};
-    const comp = compDoc.data() ?? {};
-    const { text } = await genkit_config_1.ai.generate({
-        model: genkit_config_1.GEMINI_FLASH,
-        prompt: `Genere une attestation de type "${certificateType}" en francais, professionnelle et formelle.
+    const emp = empDoc?.data() ?? {};
+    const comp = compDoc?.data() ?? {};
+    let text;
+    try {
+        const result = await genkit_config_1.ai.generate({
+            model: genkit_config_1.GEMINI_FLASH,
+            prompt: `Genere une attestation de type "${certificateType}" en francais, professionnelle et formelle.
 Entreprise: ${comp['name'] ?? 'Orlode'}, ${comp['address'] ?? ''}
 Employe: ${emp['displayName'] ?? ''}, poste: ${emp['jobTitle'] ?? ''}, departement: ${emp['department'] ?? ''}
 Date d'embauche: ${emp['startDate'] ?? emp['createdAt'] ?? 'non specifiee'}
 Date du jour: ${new Date().toLocaleDateString('fr-FR')}
 
 Retourne UNIQUEMENT le texte de l'attestation, formate proprement.`,
-        config: { temperature: 0.2 },
-    });
+            config: { temperature: 0.2 },
+        });
+        text = result.text;
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] generateCertificate AI generation failed', { error: String(err) });
+        return { success: false, documentId: '', content: '', message: `Génération de l'attestation impossible: ${err instanceof Error ? err.message : String(err)}` };
+    }
     const docId = (0, helpers_1.generateId)();
-    await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
-        id: docId, userId, type: certificateType, title: `Attestation ${certificateType} - ${emp['displayName'] ?? ''}`,
-        content: text, createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-    return { documentId: docId, content: text, message: `Attestation "${certificateType}" generee pour ${emp['displayName'] ?? 'l\'employe'}.` };
+    try {
+        await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
+            id: docId, userId, type: certificateType, title: `Attestation ${certificateType} - ${emp['displayName'] ?? ''}`,
+            content: text, createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] generateCertificate write failed', { error: String(err) });
+        return { success: false, documentId: '', content: text, message: 'Sauvegarde de l\'attestation impossible.' };
+    }
+    return { success: true, documentId: docId, content: text, message: `Attestation "${certificateType}" generee pour ${emp['displayName'] ?? 'l\'employe'}.` };
 });
 // ──────────────────────────────────────────────────────────────────────────────
 // Payslip generator — generates a monthly payslip for an employee.
@@ -352,6 +420,7 @@ exports.generatePayslipTool = genkit_config_1.ai.defineTool({
         currency: zod_1.z.string().optional().default('XOF'),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(),
         documentId: zod_1.z.string(),
         employeeName: zod_1.z.string(),
         grossTotal: zod_1.z.number(),
@@ -364,16 +433,17 @@ exports.generatePayslipTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     // Check the formal employees collection first (has salary), then fall back to users
     const [empDocHR, empDocUser, compDoc] = await Promise.all([
-        db.collection(`companies/${companyId}/employees`).doc(employeeId).get(),
-        db.collection('users').doc(employeeId).get(),
-        db.collection('companies').doc(companyId).get(),
+        db.collection(`companies/${companyId}/employees`).doc(employeeId).get().catch(() => null),
+        db.collection('users').doc(employeeId).get().catch(() => null),
+        db.collection('companies').doc(companyId).get().catch(() => null),
     ]);
     // Merge: prefer HR employee data for salary, fall back to user profile for name/email
-    const emp = { ...(empDocUser.data() ?? {}), ...(empDocHR.data() ?? {}) };
-    const comp = compDoc.data() ?? {};
+    const emp = { ...(empDocUser?.data() ?? {}), ...(empDocHR?.data() ?? {}) };
+    const comp = compDoc?.data() ?? {};
     const baseSalary = grossSalary ?? emp['baseSalary'] ?? 0;
     if (baseSalary === 0) {
         return {
+            success: false,
             documentId: '',
             employeeName: emp['displayName'] ?? employeeId,
             grossTotal: 0,
@@ -425,23 +495,38 @@ exports.generatePayslipTool = genkit_config_1.ai.defineTool({
         currency,
         generatedAt: new Date().toISOString(),
     };
-    await db.collection(`companies/${companyId}/payslips`).doc(docId).set({
-        id: docId,
-        type: 'payslip',
-        ...content,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-    // Also add to employee documents for easy retrieval
-    await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
-        id: docId,
-        userId: employeeId,
-        type: 'payslip',
-        title: `Fiche de paie — ${monthNames[month - 1]} ${year}`,
-        period: content.period,
-        payslipId: docId,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    try {
+        await db.collection(`companies/${companyId}/payslips`).doc(docId).set({
+            id: docId,
+            type: 'payslip',
+            ...content,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        // Also add to employee documents for easy retrieval
+        await db.collection(`companies/${companyId}/hrDocuments`).doc(docId).set({
+            id: docId,
+            userId: employeeId,
+            type: 'payslip',
+            title: `Fiche de paie — ${monthNames[month - 1]} ${year}`,
+            period: content.period,
+            payslipId: docId,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] generatePayslip write failed', { error: String(err) });
+        return {
+            success: false,
+            documentId: '',
+            employeeName: content.employee.name,
+            grossTotal: gross,
+            socialCharges,
+            netPay,
+            message: 'Sauvegarde de la fiche de paie impossible.',
+        };
+    }
     return {
+        success: true,
         documentId: docId,
         employeeName: content.employee.name,
         grossTotal: gross,
@@ -468,29 +553,41 @@ exports.uploadEmployeeDocTool = genkit_config_1.ai.defineTool({
         fileName: zod_1.z.string(),
         fileSize: zod_1.z.number().optional().default(0),
     }),
-    outputSchema: zod_1.z.object({ documentId: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), documentId: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, employeeEmail, employeeName, documentType, label, fileUrl, fileName, fileSize }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const docId = (0, helpers_1.generateId)();
-    await db.collection(`companies/${companyId}/portfolioDocuments`).doc(docId).set({
-        id: docId, companyId, signatoryEmail: employeeEmail, signatoryName: employeeName,
-        documentType, label, fileUrl, fileName, fileSize: fileSize ?? 0,
-        createdAt: new Date().toISOString(),
-    });
-    return { documentId: docId, message: `Document "${label}" ajouté au portfolio de ${employeeName}.` };
+    try {
+        await db.collection(`companies/${companyId}/portfolioDocuments`).doc(docId).set({
+            id: docId, companyId, signatoryEmail: employeeEmail, signatoryName: employeeName,
+            documentType, label, fileUrl, fileName, fileSize: fileSize ?? 0,
+            createdAt: new Date().toISOString(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] uploadEmployeeDocument write failed', { error: String(err) });
+        return { success: false, documentId: '', message: 'Sauvegarde du document impossible.' };
+    }
+    return { success: true, documentId: docId, message: `Document "${label}" ajouté au portfolio de ${employeeName}.` };
 });
 exports.listEmployeePortfolioTool = genkit_config_1.ai.defineTool({
     name: 'hr_listEmployeePortfolio',
     description: "List all documents in an employee's portfolio folder.",
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), employeeEmail: zod_1.z.string() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(),
         documents: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), type: zod_1.z.string(), label: zod_1.z.string(), fileName: zod_1.z.string(), fileUrl: zod_1.z.string(), createdAt: zod_1.z.string() })),
         total: zod_1.z.number(),
     }),
 }, async ({ companyId, employeeEmail }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const snap = await db.collection(`companies/${companyId}/portfolioDocuments`)
-        .where('signatoryEmail', '==', employeeEmail).limit(100).get();
+        .where('signatoryEmail', '==', employeeEmail).limit(100).get().catch((err) => {
+        logger_1.logger.error('[HR] listEmployeePortfolio query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture du portfolio impossible.', documents: [], total: 0 };
     const documents = snap.docs.map(d => {
         const x = d.data();
         return {
@@ -499,7 +596,7 @@ exports.listEmployeePortfolioTool = genkit_config_1.ai.defineTool({
             createdAt: x['createdAt'] ?? '',
         };
     });
-    return { documents, total: documents.length };
+    return { success: true, documents, total: documents.length };
 });
 exports.generateEmployeeUploadLinkTool = genkit_config_1.ai.defineTool({
     name: 'hr_generateEmployeeUploadLink',
@@ -511,23 +608,35 @@ exports.generateEmployeeUploadLinkTool = genkit_config_1.ai.defineTool({
         requestedDocs: zod_1.z.array(zod_1.z.string()).optional(),
         expiresInDays: zod_1.z.number().optional().default(7),
     }),
-    outputSchema: zod_1.z.object({ uploadUrl: zod_1.z.string(), expiresAt: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), uploadUrl: zod_1.z.string(), expiresAt: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, employeeEmail, employeeName, requestedDocs, expiresInDays }) => {
-    const { wemasService } = await Promise.resolve().then(() => __importStar(require('../services/wemas/wemasService')));
-    const request = await wemasService.createUploadRequest(companyId, {
-        signatoryEmail: employeeEmail,
-        signatoryName: employeeName,
-        requestedTypes: requestedDocs ?? ['id_card', 'rib', 'photo'],
-        message: `Merci de fournir les documents demandés pour compléter ton dossier RH.`,
-        expiresInDays: expiresInDays ?? 7,
-    });
-    const uploadUrl = `https://mon-assistant-86bbd.web.app/upload/${request.token}`;
-    const expiresDate = request.expiresAt ? new Date(request.expiresAt).toLocaleDateString('fr-FR') : 'jamais';
-    return {
-        uploadUrl,
-        expiresAt: request.expiresAt ? request.expiresAt.split('T')[0] : '',
-        message: `Lien d'upload généré pour ${employeeName} (expire le ${expiresDate}) : ${uploadUrl}`,
-    };
+    try {
+        const { wemasService } = await Promise.resolve().then(() => __importStar(require('../services/wemas/wemasService')));
+        const request = await wemasService.createUploadRequest(companyId, {
+            signatoryEmail: employeeEmail,
+            signatoryName: employeeName,
+            requestedTypes: requestedDocs ?? ['id_card', 'rib', 'photo'],
+            message: `Merci de fournir les documents demandés pour compléter ton dossier RH.`,
+            expiresInDays: expiresInDays ?? 7,
+        });
+        const uploadUrl = `https://mon-assistant-86bbd.web.app/upload/${request.token}`;
+        const expiresDate = request.expiresAt ? new Date(request.expiresAt).toLocaleDateString('fr-FR') : 'jamais';
+        return {
+            success: true,
+            uploadUrl,
+            expiresAt: request.expiresAt ? request.expiresAt.split('T')[0] : '',
+            message: `Lien d'upload généré pour ${employeeName} (expire le ${expiresDate}) : ${uploadUrl}`,
+        };
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] generateEmployeeUploadLink failed', { error: String(err) });
+        return {
+            success: false,
+            uploadUrl: '',
+            expiresAt: '',
+            message: `Génération du lien d'upload impossible: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
 });
 // ──────────────────────────────────────────────────────────────────────────────
 // Generate employment contract PDF — creates a ready-to-sign contract with all
@@ -550,6 +659,7 @@ exports.generateContractTool = genkit_config_1.ai.defineTool({
         currency: zod_1.z.string().optional().default('XOF'),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(),
         contractId: zod_1.z.string(),
         employeeName: zod_1.z.string(),
         contractType: zod_1.z.string(),
@@ -560,10 +670,10 @@ exports.generateContractTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     // Gather employee info — check both employees/ and users/ collections
     const [empDocHR, empDocUser] = await Promise.all([
-        db.collection(`companies/${companyId}/employees`).doc(employeeId).get(),
-        db.collection('users').doc(employeeId).get(),
+        db.collection(`companies/${companyId}/employees`).doc(employeeId).get().catch(() => null),
+        db.collection('users').doc(employeeId).get().catch(() => null),
     ]);
-    const emp = { ...(empDocUser.data() ?? {}), ...(empDocHR.data() ?? {}) };
+    const emp = { ...(empDocUser?.data() ?? {}), ...(empDocHR?.data() ?? {}) };
     const contractId = (0, helpers_1.generateId)();
     const accessToken = (0, helpers_1.generateId)() + (0, helpers_1.generateId)(); // ~48 chars, unguessable
     // Always resolve contractType to a concrete value — Firestore rejects undefined
@@ -587,18 +697,32 @@ exports.generateContractTool = genkit_config_1.ai.defineTool({
     };
     // Strip any remaining undefined before Firestore write
     const safeContractData = Object.fromEntries(Object.entries(contractData).filter(([, v]) => v !== undefined));
-    await db.collection(`companies/${companyId}/contracts`).doc(contractId).set(safeContractData);
-    await db.collection(`companies/${companyId}/hrDocuments`).doc(contractId).set({
-        id: contractId,
-        userId: employeeId,
-        type: 'contract',
-        title: `Contrat ${resolvedContractType} — ${emp['displayName'] ?? 'Employé'}`,
-        contractId,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    try {
+        await db.collection(`companies/${companyId}/contracts`).doc(contractId).set(safeContractData);
+        await db.collection(`companies/${companyId}/hrDocuments`).doc(contractId).set({
+            id: contractId,
+            userId: employeeId,
+            type: 'contract',
+            title: `Contrat ${resolvedContractType} — ${emp['displayName'] ?? 'Employé'}`,
+            contractId,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] generateContract write failed', { error: String(err) });
+        return {
+            success: false,
+            contractId: '',
+            employeeName: emp['displayName'] ?? 'Employé',
+            contractType: resolvedContractType,
+            pdfUrl: '',
+            message: 'Sauvegarde du contrat impossible.',
+        };
+    }
     const baseUrl = process.env['APP_PUBLIC_URL'] ?? 'https://mon-assistant-86bbd.web.app';
     const pdfUrl = `${baseUrl}/api/hr/contracts/${contractId}/pdf?t=${accessToken}`;
     return {
+        success: true,
         contractId,
         employeeName: emp['displayName'] ?? 'Employé',
         contractType: resolvedContractType,
@@ -625,6 +749,7 @@ exports.createEmployeeTool = genkit_config_1.ai.defineTool({
         startDate: zod_1.z.string().optional().describe('ISO date YYYY-MM-DD — defaults to today'),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(),
         employeeId: zod_1.z.string(),
         message: zod_1.z.string(),
         reusedExisting: zod_1.z.boolean().optional(),
@@ -635,29 +760,36 @@ exports.createEmployeeTool = genkit_config_1.ai.defineTool({
     let employeeId = (0, helpers_1.generateId)();
     let reused = false;
     if (email) {
-        const existing = await db.collection('users').where('email', '==', email).limit(1).get();
-        if (!existing.empty) {
+        const existing = await db.collection('users').where('email', '==', email).limit(1).get().catch(() => null);
+        if (existing && !existing.empty) {
             employeeId = existing.docs[0].id;
             reused = true;
         }
     }
-    await db.collection(`companies/${companyId}/employees`).doc(employeeId).set({
-        id: employeeId,
-        userId: reused ? employeeId : null,
-        displayName,
-        email: email ?? '',
-        phone: phone ?? '',
-        jobTitle: jobTitle ?? '',
-        department: department ?? '',
-        baseSalary: baseSalary ?? 0,
-        currency: currency ?? 'XOF',
-        startDate: startDate ?? new Date().toISOString().split('T')[0],
-        status: 'active',
-        source: 'hr_agent_created',
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-        updatedAt: firestore_1.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    try {
+        await db.collection(`companies/${companyId}/employees`).doc(employeeId).set({
+            id: employeeId,
+            userId: reused ? employeeId : null,
+            displayName,
+            email: email ?? '',
+            phone: phone ?? '',
+            jobTitle: jobTitle ?? '',
+            department: department ?? '',
+            baseSalary: baseSalary ?? 0,
+            currency: currency ?? 'XOF',
+            startDate: startDate ?? new Date().toISOString().split('T')[0],
+            status: 'active',
+            source: 'hr_agent_created',
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        }, { merge: true });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] createEmployee write failed', { error: String(err) });
+        return { success: false, employeeId: '', message: 'Création de l\'employé impossible.' };
+    }
     return {
+        success: true,
         employeeId,
         message: reused
             ? `${displayName} lié à son compte utilisateur existant. Employé créé.`
@@ -747,7 +879,13 @@ exports.updateEmployeeTool = genkit_config_1.ai.defineTool({
     if (updatedFields.length === 0) {
         return { success: false, message: 'Aucun champ à mettre à jour.', updatedFields: [] };
     }
-    await db.collection(`companies/${companyId}/employees`).doc(employeeId).set(update, { merge: true });
+    try {
+        await db.collection(`companies/${companyId}/employees`).doc(employeeId).set(update, { merge: true });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] updateEmployee write failed', { error: String(err) });
+        return { success: false, message: 'Mise à jour impossible.', updatedFields: [] };
+    }
     return {
         success: true,
         message: `Mis à jour : ${updatedFields.join(', ')}.`,
@@ -762,6 +900,7 @@ exports.teamCalendarTool = genkit_config_1.ai.defineTool({
     description: 'Get team availability — who is on leave, absent, remote, or present today/this week.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), department: zod_1.z.string().optional(), date: zod_1.z.string().optional() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(),
         present: zod_1.z.array(zod_1.z.string()), onLeave: zod_1.z.array(zod_1.z.string()), remote: zod_1.z.array(zod_1.z.string()), absent: zod_1.z.array(zod_1.z.string()),
         totalEmployees: zod_1.z.number(), presenceRate: zod_1.z.number(),
     }),
@@ -772,15 +911,20 @@ exports.teamCalendarTool = genkit_config_1.ai.defineTool({
     let empQ = db.collection('users').where('companyId', '==', companyId);
     if (department)
         empQ = empQ.where('department', '==', department);
-    const empSnap = await empQ.limit(200).get();
+    const empSnap = await empQ.limit(200).get().catch((err) => {
+        logger_1.logger.error('[HR] teamCalendar employees query failed', { error: String(err) });
+        return null;
+    });
+    if (!empSnap)
+        return { success: false, message: 'Lecture des employés impossible.', present: [], onLeave: [], remote: [], absent: [], totalEmployees: 0, presenceRate: 0 };
     const empNames = new Map(empSnap.docs.map(d => [d.id, d.data()['displayName'] ?? d.data()['email'] ?? '']));
     // Get presence
-    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).limit(200).get();
-    const presentIds = new Set(presSnap.docs.filter(d => d.data()['status'] === 'present').map(d => d.data()['employeeId'] ?? ''));
+    const presSnap = await db.collection('presence').where('companyId', '==', companyId).where('date', '==', today).limit(200).get().catch(() => null);
+    const presentIds = new Set(presSnap?.docs.filter(d => d.data()['status'] === 'present').map(d => d.data()['employeeId'] ?? '') ?? []);
     // Get leaves
-    const leaveSnap = await db.collection(`companies/${companyId}/leaveRequests`).where('status', '==', 'approved').limit(200).get();
+    const leaveSnap = await db.collection(`companies/${companyId}/leaveRequests`).where('status', '==', 'approved').limit(200).get().catch(() => null);
     const onLeaveIds = new Set();
-    leaveSnap.docs.forEach(d => {
+    leaveSnap?.docs.forEach(d => {
         const data = d.data();
         if (data['startDate'] <= today && data['endDate'] >= today) {
             onLeaveIds.add(data['userId'] ?? '');
@@ -802,13 +946,13 @@ exports.teamCalendarTool = genkit_config_1.ai.defineTool({
         }
     });
     const total = empNames.size;
-    return { present, onLeave, remote, absent, totalEmployees: total, presenceRate: total > 0 ? Math.round((present.length / total) * 100) : 0 };
+    return { success: true, present, onLeave, remote, absent, totalEmployees: total, presenceRate: total > 0 ? Math.round((present.length / total) * 100) : 0 };
 });
 exports.attendanceSummaryTool = genkit_config_1.ai.defineTool({
     name: 'hr_getAttendanceSummary',
     description: 'Get attendance summary for an employee or team (hours worked, late arrivals, absences).',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), userId: zod_1.z.string().optional(), period: zod_1.z.enum(['today', 'week', 'month']).optional().default('week') }),
-    outputSchema: zod_1.z.object({ totalHours: zod_1.z.number(), daysPresent: zod_1.z.number(), daysAbsent: zod_1.z.number(), lateArrivals: zod_1.z.number(), avgArrivalTime: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(), totalHours: zod_1.z.number(), daysPresent: zod_1.z.number(), daysAbsent: zod_1.z.number(), lateArrivals: zod_1.z.number(), avgArrivalTime: zod_1.z.string() }),
 }, async ({ companyId, userId, period }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const now = new Date();
@@ -817,7 +961,12 @@ exports.attendanceSummaryTool = genkit_config_1.ai.defineTool({
     let q = db.collection('presence').where('companyId', '==', companyId).where('date', '>=', from);
     if (userId)
         q = q.where('employeeId', '==', userId);
-    const snap = await q.limit(500).get();
+    const snap = await q.limit(500).get().catch((err) => {
+        logger_1.logger.error('[HR] attendanceSummary query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture de la présence impossible.', totalHours: 0, daysPresent: 0, daysAbsent: 0, lateArrivals: 0, avgArrivalTime: '09:00' };
     let totalHours = 0;
     let lateCount = 0;
     const arrivalTimes = [];
@@ -835,6 +984,7 @@ exports.attendanceSummaryTool = genkit_config_1.ai.defineTool({
     const daysPresent = snap.docs.length;
     const avgHour = arrivalTimes.length > 0 ? Math.round(arrivalTimes.reduce((a, b) => a + b, 0) / arrivalTimes.length) : 9;
     return {
+        success: true,
         totalHours: Math.round(totalHours * 10) / 10,
         daysPresent,
         daysAbsent: Math.max(0, cutoff - daysPresent),
@@ -854,15 +1004,21 @@ exports.createHRTicketTool = genkit_config_1.ai.defineTool({
         category: zod_1.z.enum(['question', 'complaint', 'request', 'payroll', 'benefits', 'other']).optional().default('question'),
         priority: zod_1.z.enum(['low', 'medium', 'high']).optional().default('medium'),
     }),
-    outputSchema: zod_1.z.object({ ticketId: zod_1.z.string(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), ticketId: zod_1.z.string(), message: zod_1.z.string() }),
 }, async ({ companyId, userId, subject, description, category, priority }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const id = (0, helpers_1.generateId)();
-    await db.collection(`companies/${companyId}/hrTickets`).doc(id).set({
-        id, userId, subject, description, category, priority,
-        status: 'open', createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-    return { ticketId: id, message: `Ticket RH #${id.slice(0, 8)} cree: "${subject}" (${category}, priorite ${priority}).` };
+    try {
+        await db.collection(`companies/${companyId}/hrTickets`).doc(id).set({
+            id, userId, subject, description, category, priority,
+            status: 'open', createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] createTicket write failed', { error: String(err) });
+        return { success: false, ticketId: '', message: 'Sauvegarde du ticket impossible.' };
+    }
+    return { success: true, ticketId: id, message: `Ticket RH #${id.slice(0, 8)} cree: "${subject}" (${category}, priorite ${priority}).` };
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // 6bis. PUBLIER OFFRE SUR LINKEDIN / RESEAUX (nouveau)
@@ -877,6 +1033,7 @@ exports.publishJobTool = genkit_config_1.ai.defineTool({
         customMessage: zod_1.z.string().optional().describe('Optional custom intro or message to add'),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(),
         results: zod_1.z.array(zod_1.z.object({ platform: zod_1.z.string(), success: zod_1.z.boolean(), url: zod_1.z.string().optional(), error: zod_1.z.string().optional() })),
         postContent: zod_1.z.string(),
         message: zod_1.z.string(),
@@ -884,9 +1041,9 @@ exports.publishJobTool = genkit_config_1.ai.defineTool({
 }, async ({ companyId, jobId, platforms, customMessage }) => {
     const db = (0, firebase_config_1.getFirestore)();
     // Get job details
-    const jobDoc = await db.collection(`companies/${companyId}/jobPostings`).doc(jobId).get();
-    if (!jobDoc.exists)
-        return { results: [], postContent: '', message: 'Offre non trouvee.' };
+    const jobDoc = await db.collection(`companies/${companyId}/jobPostings`).doc(jobId).get().catch(() => null);
+    if (!jobDoc?.exists)
+        return { success: false, results: [], postContent: '', message: 'Offre non trouvee.' };
     const job = jobDoc.data();
     // Get company name
     let companyName = 'Notre entreprise';
@@ -896,9 +1053,11 @@ exports.publishJobTool = genkit_config_1.ai.defineTool({
     }
     catch { }
     // Generate attractive social post
-    const { text: postContent } = await genkit_config_1.ai.generate({
-        model: genkit_config_1.GEMINI_FLASH,
-        prompt: `Genere un post de recrutement attractif pour les reseaux sociaux (LinkedIn, Facebook).
+    let postContent;
+    try {
+        const result = await genkit_config_1.ai.generate({
+            model: genkit_config_1.GEMINI_FLASH,
+            prompt: `Genere un post de recrutement attractif pour les reseaux sociaux (LinkedIn, Facebook).
 
 Entreprise: ${companyName}
 Poste: ${job['title']}
@@ -917,8 +1076,14 @@ Regles:
 - Ajoute 3-5 hashtags pertinents (#recrutement #emploi etc.)
 - Maximum 300 mots
 - Ton professionnel mais engageant`,
-        config: { temperature: 0.5 },
-    });
+            config: { temperature: 0.5 },
+        });
+        postContent = result.text;
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] publishJobPosting AI generation failed', { error: String(err) });
+        return { success: false, results: [], postContent: '', message: `Génération du post impossible: ${err instanceof Error ? err.message : String(err)}` };
+    }
     // Publish to social platforms
     const socialPlatforms = platforms.filter(p => p !== 'website');
     const results = [];
@@ -954,6 +1119,7 @@ Regles:
     catch { }
     const successCount = results.filter(r => r.success).length;
     return {
+        success: true,
         results,
         postContent,
         message: `Offre "${job['title']}" publiee sur ${successCount}/${results.length} plateforme(s).`,
@@ -964,28 +1130,33 @@ exports.policySearchTool = genkit_config_1.ai.defineTool({
     name: 'hr_searchPolicy',
     description: 'Search HR policies, employee handbook, internal rules.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), query: zod_1.z.string() }),
-    outputSchema: zod_1.z.object({ results: zod_1.z.array(zod_1.z.object({ title: zod_1.z.string(), content: zod_1.z.string() })) }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(), results: zod_1.z.array(zod_1.z.object({ title: zod_1.z.string(), content: zod_1.z.string() })) }),
 }, async ({ companyId, query }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const snap = await db.collection(`companies/${companyId}/hrPolicies`).limit(20).get();
+    const snap = await db.collection(`companies/${companyId}/hrPolicies`).limit(20).get().catch((err) => {
+        logger_1.logger.error('[HR] searchPolicy query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture des politiques impossible.', results: [] };
     const kw = query.toLowerCase().split(/\s+/);
     const results = snap.docs.map(d => ({ title: d.data()['title'] ?? '', content: d.data()['content'] ?? '' }))
         .filter(r => kw.some(k => r.content.toLowerCase().includes(k) || r.title.toLowerCase().includes(k)));
     if (results.length === 0)
         results.push({ title: 'Politique RH generale', content: 'Contactez votre responsable RH ou consultez le handbook de l\'entreprise.' });
-    return { results };
+    return { success: true, results };
 });
 exports.onboardingChecklistTool = genkit_config_1.ai.defineTool({
     name: 'hr_getOnboardingChecklist',
     description: 'Get or create onboarding checklist for a new employee.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), userId: zod_1.z.string(), department: zod_1.z.string().optional() }),
-    outputSchema: zod_1.z.object({ steps: zod_1.z.array(zod_1.z.object({ step: zod_1.z.string(), category: zod_1.z.string(), completed: zod_1.z.boolean() })), completionPct: zod_1.z.number() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(), steps: zod_1.z.array(zod_1.z.object({ step: zod_1.z.string(), category: zod_1.z.string(), completed: zod_1.z.boolean() })), completionPct: zod_1.z.number() }),
 }, async ({ companyId, userId, department }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const doc = await db.collection(`companies/${companyId}/onboarding`).doc(userId).get();
-    if (doc.exists) {
+    const doc = await db.collection(`companies/${companyId}/onboarding`).doc(userId).get().catch(() => null);
+    if (doc?.exists) {
         const steps = doc.data()['steps'] ?? [];
-        return { steps, completionPct: steps.length > 0 ? Math.round(steps.filter(s => s.completed).length / steps.length * 100) : 0 };
+        return { success: true, steps, completionPct: steps.length > 0 ? Math.round(steps.filter(s => s.completed).length / steps.length * 100) : 0 };
     }
     const steps = [
         { step: 'Paperasse RH', category: 'Admin', completed: false },
@@ -996,13 +1167,14 @@ exports.onboardingChecklistTool = genkit_config_1.ai.defineTool({
         { step: 'Check-in J+30', category: 'Management', completed: false },
         ...(department ? [{ step: `Orientation ${department}`, category: 'Onboarding', completed: false }] : []),
     ];
-    return { steps, completionPct: 0 };
+    return { success: true, steps, completionPct: 0 };
 });
 exports.employeeDirectoryTool = genkit_config_1.ai.defineTool({
     name: 'hr_getEmployeeDirectory',
     description: 'Search the unified people directory: merges employees, team members (invited users), and Firestore users. Use this BEFORE refusing to act on a person — they may exist under a different collection.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string(), query: zod_1.z.string().optional(), department: zod_1.z.string().optional() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(),
         employees: zod_1.z.array(zod_1.z.object({
             id: zod_1.z.string(),
             name: zod_1.z.string(),
@@ -1018,15 +1190,15 @@ exports.employeeDirectoryTool = genkit_config_1.ai.defineTool({
     const db = (0, firebase_config_1.getFirestore)();
     // Run 3 queries in parallel — we merge results after
     const [employeesSnap, membersSnap, usersSnap] = await Promise.all([
-        db.collection(`companies/${companyId}/employees`).limit(100).get(),
-        db.collection(`companies/${companyId}/members`).limit(100).get(),
-        db.collection('users').where('companyId', '==', companyId).limit(100).get(),
+        db.collection(`companies/${companyId}/employees`).limit(100).get().catch(() => null),
+        db.collection(`companies/${companyId}/members`).limit(100).get().catch(() => null),
+        db.collection('users').where('companyId', '==', companyId).limit(100).get().catch(() => null),
     ]);
     // Dedupe by email (or id if no email) — employees take priority, then members, then users
     const byKey = new Map();
     const keyOf = (email, id) => (email ? email.toLowerCase() : `id:${id}`);
     // 1. Employees (priority source — they have payroll data)
-    employeesSnap.docs.forEach(d => {
+    (employeesSnap?.docs ?? []).forEach(d => {
         const x = d.data();
         const email = x['email'];
         byKey.set(keyOf(email, d.id), {
@@ -1040,7 +1212,7 @@ exports.employeeDirectoryTool = genkit_config_1.ai.defineTool({
         });
     });
     // 2. Members (if not already in employees — missing baseSalary/jobTitle but we know who they are)
-    membersSnap.docs.forEach(d => {
+    (membersSnap?.docs ?? []).forEach(d => {
         const x = d.data();
         const email = x['email'];
         const k = keyOf(email, d.id);
@@ -1057,7 +1229,7 @@ exports.employeeDirectoryTool = genkit_config_1.ai.defineTool({
         }
     });
     // 3. Users (last fallback — someone who signed in but isn't yet a formal member)
-    usersSnap.docs.forEach(d => {
+    (usersSnap?.docs ?? []).forEach(d => {
         const x = d.data();
         const email = x['email'];
         const k = keyOf(email, d.id);
@@ -1082,7 +1254,7 @@ exports.employeeDirectoryTool = genkit_config_1.ai.defineTool({
             (e.email ?? '').toLowerCase().includes(k) ||
             (e.department ?? '').toLowerCase().includes(k)));
     }
-    return { employees: all, total: all.length };
+    return { success: true, employees: all, total: all.length };
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // ALL TOOLS + FLOW
@@ -1095,12 +1267,18 @@ exports.getOrgChartTool = genkit_config_1.ai.defineTool({
     description: 'Get organizational hierarchy — departments, managers, reporting lines, headcount.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(),
         departments: zod_1.z.array(zod_1.z.object({ name: zod_1.z.string(), headcount: zod_1.z.number(), manager: zod_1.z.string(), members: zod_1.z.array(zod_1.z.object({ name: zod_1.z.string(), title: zod_1.z.string(), role: zod_1.z.string() })) })),
         totalEmployees: zod_1.z.number(), totalDepartments: zod_1.z.number(),
     }),
 }, async ({ companyId }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get();
+    const snap = await db.collection('users').where('companyId', '==', companyId).limit(200).get().catch((err) => {
+        logger_1.logger.error('[HR] getOrgChart query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture de l\'organigramme impossible.', departments: [], totalEmployees: 0, totalDepartments: 0 };
     const deptMap = new Map();
     snap.docs.forEach(d => {
         const u = d.data();
@@ -1115,6 +1293,7 @@ exports.getOrgChartTool = genkit_config_1.ai.defineTool({
             entry.manager = name;
     });
     return {
+        success: true,
         departments: Array.from(deptMap.entries()).map(([name, d]) => ({ name, headcount: d.members.length, manager: d.manager || (d.members[0]?.name ?? ''), members: d.members })),
         totalEmployees: snap.size, totalDepartments: deptMap.size,
     };
@@ -1132,27 +1311,39 @@ exports.createPerformanceReviewTool = genkit_config_1.ai.defineTool({
         rating: zod_1.z.number().optional(), feedback: zod_1.z.string().optional(), reviewerId: zod_1.z.string().optional(),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(),
         reviews: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), employeeName: zod_1.z.string(), period: zod_1.z.string(), rating: zod_1.z.number(), status: zod_1.z.string(), goalsCount: zod_1.z.number() })).optional(),
         reviewId: zod_1.z.string().optional(), message: zod_1.z.string(),
     }),
 }, async ({ companyId, action, employeeId, period, goals, rating, feedback, reviewerId }) => {
     const db = (0, firebase_config_1.getFirestore)();
     if (action === 'list') {
-        const snap = await db.collection(`companies/${companyId}/performanceReviews`).orderBy('createdAt', 'desc').limit(50).get();
-        return { reviews: snap.docs.map(d => { const data = d.data(); return { id: d.id, employeeName: data['employeeName'] ?? '', period: data['period'] ?? '', rating: data['rating'] ?? 0, status: data['status'] ?? 'draft', goalsCount: (data['goals'] ?? []).length }; }), message: `${snap.size} evaluations trouvees.` };
+        const snap = await db.collection(`companies/${companyId}/performanceReviews`).orderBy('createdAt', 'desc').limit(50).get().catch((err) => {
+            logger_1.logger.error('[HR] createPerformanceReview list failed', { error: String(err) });
+            return null;
+        });
+        if (!snap)
+            return { success: false, message: 'Lecture des évaluations impossible.' };
+        return { success: true, reviews: snap.docs.map(d => { const data = d.data(); return { id: d.id, employeeName: data['employeeName'] ?? '', period: data['period'] ?? '', rating: data['rating'] ?? 0, status: data['status'] ?? 'draft', goalsCount: (data['goals'] ?? []).length }; }), message: `${snap.size} evaluations trouvees.` };
     }
     if (action === 'create' && employeeId) {
         const id = (0, helpers_1.generateId)();
-        const empDoc = await db.collection('users').doc(employeeId).get();
-        const empName = empDoc.data()?.['displayName'] ?? '';
-        await db.collection(`companies/${companyId}/performanceReviews`).doc(id).set({
-            id, employeeId, employeeName: empName, period: period ?? `Q${Math.ceil((new Date().getMonth() + 1) / 3)} ${new Date().getFullYear()}`,
-            goals: goals ?? [], rating: rating ?? 0, feedback: feedback ?? '', reviewerId: reviewerId ?? '',
-            status: 'draft', createdAt: firestore_1.FieldValue.serverTimestamp(),
-        });
-        return { reviewId: id, message: `Evaluation creee pour ${empName}.` };
+        const empDoc = await db.collection('users').doc(employeeId).get().catch(() => null);
+        const empName = empDoc?.data()?.['displayName'] ?? '';
+        try {
+            await db.collection(`companies/${companyId}/performanceReviews`).doc(id).set({
+                id, employeeId, employeeName: empName, period: period ?? `Q${Math.ceil((new Date().getMonth() + 1) / 3)} ${new Date().getFullYear()}`,
+                goals: goals ?? [], rating: rating ?? 0, feedback: feedback ?? '', reviewerId: reviewerId ?? '',
+                status: 'draft', createdAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
+        catch (err) {
+            logger_1.logger.error('[HR] createPerformanceReview write failed', { error: String(err) });
+            return { success: false, message: 'Sauvegarde de l\'évaluation impossible.' };
+        }
+        return { success: true, reviewId: id, message: `Evaluation creee pour ${empName}.` };
     }
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // PRO: OFFBOARDING
@@ -1164,7 +1355,7 @@ exports.offboardingTool = genkit_config_1.ai.defineTool({
         companyId: zod_1.z.string(), action: zod_1.z.enum(['start', 'get', 'update_item']),
         employeeId: zod_1.z.string(), itemId: zod_1.z.string().optional(), completed: zod_1.z.boolean().optional(),
     }),
-    outputSchema: zod_1.z.object({ checklistId: zod_1.z.string().optional(), items: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), category: zod_1.z.string(), task: zod_1.z.string(), completed: zod_1.z.boolean() })).optional(), progress: zod_1.z.number().optional(), message: zod_1.z.string() }),
+    outputSchema: zod_1.z.object({ success: zod_1.z.boolean().optional(), checklistId: zod_1.z.string().optional(), items: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), category: zod_1.z.string(), task: zod_1.z.string(), completed: zod_1.z.boolean() })).optional(), progress: zod_1.z.number().optional(), message: zod_1.z.string() }),
 }, async ({ companyId, action, employeeId, itemId, completed }) => {
     const db = (0, firebase_config_1.getFirestore)();
     const docRef = db.collection(`companies/${companyId}/offboarding`).doc(employeeId);
@@ -1183,31 +1374,43 @@ exports.offboardingTool = genkit_config_1.ai.defineTool({
             { id: 'off-11', category: 'RH', task: 'Enquete de sortie envoyee', completed: false },
             { id: 'off-12', category: 'RH', task: 'Fin de contrat enregistree', completed: false },
         ];
-        await docRef.set({ employeeId, items, status: 'in_progress', startedAt: firestore_1.FieldValue.serverTimestamp() });
+        try {
+            await docRef.set({ employeeId, items, status: 'in_progress', startedAt: firestore_1.FieldValue.serverTimestamp() });
+        }
+        catch (err) {
+            logger_1.logger.error('[HR] offboarding start failed', { error: String(err) });
+            return { success: false, message: 'Démarrage de l\'offboarding impossible.' };
+        }
         // Cross-agent: notify Security to revoke access
         const { createNotification } = await Promise.resolve().then(() => __importStar(require('../services/notificationService')));
         createNotification({ companyId, type: 'security_alert', title: 'Offboarding: revocation acces requise', message: `Un employe quitte l'entreprise. Revoquer tous les acces IT et securite.`, actionUrl: '/security/access', icon: 'UserX', severity: 'warning' }).catch(() => { });
-        return { checklistId: employeeId, items, progress: 0, message: 'Offboarding demarre — 12 etapes a completer.' };
+        return { success: true, checklistId: employeeId, items, progress: 0, message: 'Offboarding demarre — 12 etapes a completer.' };
     }
     if (action === 'get') {
-        const doc = await docRef.get();
-        if (!doc.exists)
-            return { message: 'Aucun offboarding en cours pour cet employe.' };
+        const doc = await docRef.get().catch(() => null);
+        if (!doc?.exists)
+            return { success: false, message: 'Aucun offboarding en cours pour cet employe.' };
         const items = doc.data()['items'] ?? [];
         const progress = items.length > 0 ? Math.round(items.filter(i => i.completed).length / items.length * 100) : 0;
-        return { checklistId: employeeId, items, progress, message: `Offboarding ${progress}% complete.` };
+        return { success: true, checklistId: employeeId, items, progress, message: `Offboarding ${progress}% complete.` };
     }
     if (action === 'update_item' && itemId != null) {
-        const doc = await docRef.get();
-        if (!doc.exists)
-            return { message: 'Offboarding non trouve.' };
+        const doc = await docRef.get().catch(() => null);
+        if (!doc?.exists)
+            return { success: false, message: 'Offboarding non trouve.' };
         const items = doc.data()['items'] ?? [];
         const updated = items.map(i => i.id === itemId ? { ...i, completed: completed ?? true } : i);
-        await docRef.update({ items: updated });
+        try {
+            await docRef.update({ items: updated });
+        }
+        catch (err) {
+            logger_1.logger.error('[HR] offboarding update_item failed', { error: String(err) });
+            return { success: false, message: 'Mise à jour de l\'étape impossible.' };
+        }
         const progress = Math.round(updated.filter(i => i.completed).length / updated.length * 100);
-        return { items: updated, progress, message: `Etape mise a jour (${progress}%).` };
+        return { success: true, items: updated, progress, message: `Etape mise a jour (${progress}%).` };
     }
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // PRO: EMPLOYEE ANALYTICS
@@ -1217,6 +1420,7 @@ exports.employeeAnalyticsTool = genkit_config_1.ai.defineTool({
     description: 'HR analytics — headcount by department, turnover, seniority, role distribution.',
     inputSchema: zod_1.z.object({ companyId: zod_1.z.string() }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(), message: zod_1.z.string().optional(),
         totalEmployees: zod_1.z.number(),
         byDepartment: zod_1.z.array(zod_1.z.object({ department: zod_1.z.string(), count: zod_1.z.number() })),
         byRole: zod_1.z.array(zod_1.z.object({ role: zod_1.z.string(), count: zod_1.z.number() })),
@@ -1225,7 +1429,12 @@ exports.employeeAnalyticsTool = genkit_config_1.ai.defineTool({
     }),
 }, async ({ companyId }) => {
     const db = (0, firebase_config_1.getFirestore)();
-    const snap = await db.collection('users').where('companyId', '==', companyId).limit(500).get();
+    const snap = await db.collection('users').where('companyId', '==', companyId).limit(500).get().catch((err) => {
+        logger_1.logger.error('[HR] employeeAnalytics query failed', { error: String(err) });
+        return null;
+    });
+    if (!snap)
+        return { success: false, message: 'Lecture des analytics impossible.', totalEmployees: 0, byDepartment: [], byRole: [], avgSeniorityMonths: 0, recentHires: 0, recentDepartures: 0 };
     const users = snap.docs.map(d => d.data());
     const byDept = {};
     const byRole = {};
@@ -1243,6 +1452,7 @@ exports.employeeAnalyticsTool = genkit_config_1.ai.defineTool({
             recentHires++;
     });
     return {
+        success: true,
         totalEmployees: users.length,
         byDepartment: Object.entries(byDept).map(([d, c]) => ({ department: d, count: c })).sort((a, b) => b.count - a.count),
         byRole: Object.entries(byRole).map(([r, c]) => ({ role: r, count: c })).sort((a, b) => b.count - a.count),
@@ -1262,29 +1472,179 @@ exports.employeeSurveyTool = genkit_config_1.ai.defineTool({
         surveyId: zod_1.z.string().optional(), answers: zod_1.z.array(zod_1.z.object({ question: zod_1.z.string(), answer: zod_1.z.string(), score: zod_1.z.number().optional() })).optional(),
     }),
     outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean().optional(),
         surveys: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), title: zod_1.z.string(), responseCount: zod_1.z.number(), status: zod_1.z.string(), avgScore: zod_1.z.number() })).optional(),
         surveyId: zod_1.z.string().optional(), message: zod_1.z.string(),
     }),
 }, async ({ companyId, action, title, questions, surveyId, answers }) => {
     const db = (0, firebase_config_1.getFirestore)();
     if (action === 'list') {
-        const snap = await db.collection(`companies/${companyId}/hrSurveys`).orderBy('createdAt', 'desc').limit(20).get();
-        return { surveys: snap.docs.map(d => { const data = d.data(); return { id: d.id, title: data['title'] ?? '', responseCount: data['responseCount'] ?? 0, status: data['status'] ?? 'active', avgScore: data['avgScore'] ?? 0 }; }), message: `${snap.size} enquete(s).` };
+        const snap = await db.collection(`companies/${companyId}/hrSurveys`).orderBy('createdAt', 'desc').limit(20).get().catch((err) => {
+            logger_1.logger.error('[HR] manageSurvey list failed', { error: String(err) });
+            return null;
+        });
+        if (!snap)
+            return { success: false, message: 'Lecture des enquêtes impossible.' };
+        return { success: true, surveys: snap.docs.map(d => { const data = d.data(); return { id: d.id, title: data['title'] ?? '', responseCount: data['responseCount'] ?? 0, status: data['status'] ?? 'active', avgScore: data['avgScore'] ?? 0 }; }), message: `${snap.size} enquete(s).` };
     }
     if (action === 'create') {
         const id = (0, helpers_1.generateId)();
         const defaultQuestions = questions ?? ['Comment evaluez-vous votre satisfaction au travail ? (1-10)', 'Recommanderiez-vous cette entreprise ? (1-10)', 'Comment evaluez-vous votre manager ? (1-10)', 'Avez-vous les outils necessaires ? (1-10)', 'Suggestion d\'amelioration ?'];
-        await db.collection(`companies/${companyId}/hrSurveys`).doc(id).set({ id, title: title ?? 'Enquete satisfaction', questions: defaultQuestions, status: 'active', responseCount: 0, avgScore: 0, anonymous: true, createdAt: firestore_1.FieldValue.serverTimestamp() });
-        return { surveyId: id, message: `Enquete "${title ?? 'Enquete satisfaction'}" creee avec ${defaultQuestions.length} questions.` };
+        try {
+            await db.collection(`companies/${companyId}/hrSurveys`).doc(id).set({ id, title: title ?? 'Enquete satisfaction', questions: defaultQuestions, status: 'active', responseCount: 0, avgScore: 0, anonymous: true, createdAt: firestore_1.FieldValue.serverTimestamp() });
+        }
+        catch (err) {
+            logger_1.logger.error('[HR] manageSurvey create failed', { error: String(err) });
+            return { success: false, message: 'Création de l\'enquête impossible.' };
+        }
+        return { success: true, surveyId: id, message: `Enquete "${title ?? 'Enquete satisfaction'}" creee avec ${defaultQuestions.length} questions.` };
     }
     if (action === 'submit_response' && surveyId && answers) {
-        await db.collection(`companies/${companyId}/hrSurveys/${surveyId}/responses`).doc((0, helpers_1.generateId)()).set({ answers, submittedAt: firestore_1.FieldValue.serverTimestamp() });
-        const scores = answers.filter(a => a.score != null).map(a => a.score);
-        const avgResponse = scores.length > 0 ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length * 10) / 10 : 0;
-        await db.collection(`companies/${companyId}/hrSurveys`).doc(surveyId).update({ responseCount: firestore_1.FieldValue.increment(1), avgScore: avgResponse });
-        return { message: 'Reponse enregistree. Merci !' };
+        try {
+            await db.collection(`companies/${companyId}/hrSurveys/${surveyId}/responses`).doc((0, helpers_1.generateId)()).set({ answers, submittedAt: firestore_1.FieldValue.serverTimestamp() });
+            const scores = answers.filter(a => a.score != null).map(a => a.score);
+            const avgResponse = scores.length > 0 ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length * 10) / 10 : 0;
+            await db.collection(`companies/${companyId}/hrSurveys`).doc(surveyId).update({ responseCount: firestore_1.FieldValue.increment(1), avgScore: avgResponse });
+        }
+        catch (err) {
+            logger_1.logger.error('[HR] manageSurvey submit_response failed', { error: String(err) });
+            return { success: false, message: 'Enregistrement de la réponse impossible.' };
+        }
+        return { success: true, message: 'Reponse enregistree. Merci !' };
     }
-    return { message: 'Action non reconnue.' };
+    return { success: false, message: 'Action non reconnue.' };
+});
+// ──────────────────────────────────────────────────────────────────────────────
+// E-SIGNATURE via Wemas — send contract to employee for electronic signature.
+// Flow: build the contract content → push to Wemas → email signing link to employee.
+// ──────────────────────────────────────────────────────────────────────────────
+exports.sendContractForSignatureTool = genkit_config_1.ai.defineTool({
+    name: 'hr_sendContractForSignature',
+    description: 'Envoie un contrat de travail à un employé pour signature électronique via Wemas. Génère le contenu (CDI/CDD/Stage/Freelance), crée le contrat dans Wemas, envoie le lien de signature par email à l\'employé. Utilise APRÈS création de l\'employé (createEmployee). Retourne l\'URL de signature.',
+    inputSchema: zod_1.z.object({
+        companyId: zod_1.z.string(),
+        employeeId: zod_1.z.string().describe('Employee ID (UUID) — required to fetch name/email/role/salary'),
+        contractType: zod_1.z.enum(['CDI', 'CDD', 'Stage', 'Freelance']).optional().default('CDI'),
+        startDate: zod_1.z.string().optional().describe('YYYY-MM-DD — defaults to today'),
+        endDate: zod_1.z.string().optional().describe('YYYY-MM-DD — required for CDD'),
+        trialPeriodMonths: zod_1.z.number().optional().describe('Trial period in months (defaults: CDI=3, others=1)'),
+        jobTitle: zod_1.z.string().optional(),
+        baseSalary: zod_1.z.number().optional(),
+        currency: zod_1.z.string().optional().default('XOF'),
+        senderName: zod_1.z.string().optional().describe('Name of the person sending — defaults to company name'),
+    }),
+    outputSchema: zod_1.z.object({
+        success: zod_1.z.boolean(),
+        contractId: zod_1.z.string().optional(),
+        signingUrl: zod_1.z.string().optional(),
+        verificationCode: zod_1.z.string().optional(),
+        message: zod_1.z.string(),
+    }),
+}, async ({ companyId, employeeId, contractType, startDate, endDate, trialPeriodMonths, jobTitle, baseSalary, currency, senderName }) => {
+    const db = (0, firebase_config_1.getFirestore)();
+    const { isWemasConfigured, createAndSendContract } = await Promise.resolve().then(() => __importStar(require('../services/wemas/wemasBridge')));
+    if (!isWemasConfigured()) {
+        return {
+            success: false,
+            message: 'Signature électronique non disponible : Wemas n\'est pas configuré (WEMAS_BRIDGE_URL manquant). Le contrat doit être signé manuellement.',
+        };
+    }
+    // Resolve employee
+    const [empDocHR, empDocUser] = await Promise.all([
+        db.collection(`companies/${companyId}/employees`).doc(employeeId).get().catch(() => null),
+        db.collection('users').doc(employeeId).get().catch(() => null),
+    ]);
+    const emp = { ...(empDocUser?.data() ?? {}), ...(empDocHR?.data() ?? {}) };
+    if (!emp || Object.keys(emp).length === 0) {
+        return { success: false, message: `Employé ${employeeId} introuvable. Crée-le d'abord avec hr_createEmployee.` };
+    }
+    const employeeName = emp['displayName'] ?? emp['name'] ?? 'Employé';
+    const employeeEmail = emp['email'] ?? '';
+    const employeePhone = emp['phone'] ?? undefined;
+    if (!employeeEmail) {
+        return { success: false, message: `L'employé ${employeeName} n'a pas d'email. Mets-le à jour avec hr_updateEmployee avant d'envoyer le contrat.` };
+    }
+    // Resolve company branding
+    const companyDoc = await db.collection('companies').doc(companyId).get().catch(() => null);
+    const company = companyDoc?.data() ?? {};
+    const companyName = company['name'] ?? 'Notre entreprise';
+    // Build contract content (plain-text — Wemas wraps it in their signing UI)
+    const resolved = contractType ?? 'CDI';
+    const finalStart = startDate ?? new Date().toISOString().slice(0, 10);
+    const finalSalary = baseSalary ?? emp['baseSalary'] ?? 0;
+    const finalCurrency = currency ?? emp['currency'] ?? 'XOF';
+    const finalJobTitle = jobTitle ?? emp['jobTitle'] ?? 'Collaborateur';
+    const finalTrial = trialPeriodMonths ?? (resolved === 'CDI' ? 3 : 1);
+    const endLine = endDate ? `Date de fin : ${endDate}` : (resolved === 'CDD' ? 'Date de fin : à préciser' : 'Durée indéterminée');
+    const contractContent = `CONTRAT ${resolved}
+
+Entre ${companyName}, ci-après dénommé "l'Employeur"
+Et ${employeeName}, ci-après dénommé "l'Employé"
+
+ARTICLE 1 — ENGAGEMENT
+L'Employeur engage l'Employé en qualité de ${finalJobTitle}, à compter du ${finalStart}.
+${endLine}
+
+ARTICLE 2 — PÉRIODE D'ESSAI
+Une période d'essai de ${finalTrial} mois est convenue, durant laquelle chaque partie peut mettre fin au contrat sans indemnité moyennant un préavis raisonnable.
+
+ARTICLE 3 — RÉMUNÉRATION
+Salaire mensuel brut : ${finalSalary.toLocaleString()} ${finalCurrency}.
+Versé à terme échu, par virement bancaire, le dernier jour ouvré du mois.
+
+ARTICLE 4 — HORAIRES
+40 heures hebdomadaires, du lundi au vendredi, sauf disposition contraire prévue par accord.
+
+ARTICLE 5 — CONFIDENTIALITÉ
+L'Employé s'engage à respecter la confidentialité absolue des informations dont il aura connaissance dans l'exercice de ses fonctions, pendant et après l'exécution du contrat.
+
+ARTICLE 6 — CONGÉS
+L'Employé bénéficie de 30 jours ouvrables de congés payés par année de service.
+
+ARTICLE 7 — RUPTURE
+La rupture du contrat respecte les dispositions du Code du Travail applicable, avec un préavis de ${resolved === 'CDI' ? '1 mois' : '15 jours'}.
+
+Fait à ${company['city'] ?? '____________'}, le ${finalStart}.
+
+L'Employeur                         L'Employé
+${companyName}                      ${employeeName}`;
+    try {
+        const result = await createAndSendContract({
+            companyId,
+            signatoryName: employeeName,
+            signatoryEmail: employeeEmail,
+            signatoryPhone: employeePhone,
+            contractContent,
+            contractType: resolved.toLowerCase(),
+            senderName: senderName ?? companyName,
+            sendNow: true,
+        });
+        // Cross-link this contract to the employee's HR portfolio for visibility
+        await db.collection(`companies/${companyId}/hrDocuments`).add({
+            userId: employeeId,
+            type: 'contract',
+            title: `Contrat ${resolved} — ${employeeName}`,
+            wemasContractId: result.id,
+            signingUrl: result.signingUrl,
+            verificationCode: result.verificationCode,
+            status: result.status,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        }).catch(() => { });
+        return {
+            success: true,
+            contractId: result.id,
+            signingUrl: result.signingUrl,
+            verificationCode: result.verificationCode,
+            message: `Contrat ${resolved} envoyé à ${employeeName} (${employeeEmail}) pour signature électronique. Code de vérification : ${result.verificationCode}. URL de signature : ${result.signingUrl}.`,
+        };
+    }
+    catch (err) {
+        logger_1.logger.error('[HR] sendContractForSignature failed', { err: String(err), employeeId });
+        return {
+            success: false,
+            message: `Échec de l'envoi à Wemas : ${err.message ?? String(err)}. Le contrat n'a pas été envoyé.`,
+        };
+    }
 });
 const ALL_TOOLS = [
     // Conges
@@ -1296,6 +1656,8 @@ const ALL_TOOLS = [
     // Documents & employees
     exports.listEmployeeDocsTool, exports.generateCertificateTool, exports.generatePayslipTool, exports.createEmployeeTool, exports.updateEmployeeTool, exports.generateContractTool, exports.hrSendEmailTool,
     exports.uploadEmployeeDocTool, exports.listEmployeePortfolioTool, exports.generateEmployeeUploadLinkTool,
+    // E-signature (Wemas bridge)
+    exports.sendContractForSignatureTool,
     // Calendrier & presence
     exports.teamCalendarTool, exports.attendanceSummaryTool,
     // Tickets & politiques

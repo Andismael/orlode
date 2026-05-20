@@ -20,13 +20,21 @@ const upload = (0, multer_1.default)({
     },
 });
 router.use(auth_middleware_1.authMiddleware);
+// Vision settings (per-company)
+router.get('/settings', (0, asyncHandler_1.asyncHandler)(faces_controller_1.getVisionSettings));
+router.post('/settings', (0, asyncHandler_1.asyncHandler)(faces_controller_1.saveVisionSettings));
 router.get('/employees', (0, asyncHandler_1.asyncHandler)(faces_controller_1.getEmployees));
 router.post('/employees', (0, asyncHandler_1.asyncHandler)(faces_controller_1.createEmployee));
+router.post('/employees/bulk', (0, asyncHandler_1.asyncHandler)(faces_controller_1.bulkCreateEmployees));
 router.put('/employees/:id', (0, asyncHandler_1.asyncHandler)(faces_controller_1.updateEmployee));
 router.delete('/employees/:id', (0, asyncHandler_1.asyncHandler)(faces_controller_1.deleteEmployee));
 // Upload photo → store in Firebase Storage → return URL
 router.post('/employees/:id/photo', upload.single('photo'), (0, asyncHandler_1.asyncHandler)(faces_controller_1.uploadEmployeePhoto));
 // Save face descriptor (computed client-side by face-api.js)
 router.post('/employees/:id/descriptor', (0, asyncHandler_1.asyncHandler)(faces_controller_1.saveEmployeeDescriptor));
+// Unified enroll: photo (base64) + descriptor in one shot. Used by bulk enrollment.
+// Body: { photoBase64, photoMimeType, faceDescriptor }
+// Global express.json() limit is 10mb — sufficient for typical enrollment photos.
+router.post('/employees/:id/enroll', (0, asyncHandler_1.asyncHandler)(faces_controller_1.enrollEmployeeFace));
 exports.default = router;
 //# sourceMappingURL=faces.routes.js.map
