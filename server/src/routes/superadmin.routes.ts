@@ -79,6 +79,27 @@ router.get('/companies/:id', asyncHandler(async (req: AuthenticatedRequest, res:
   });
 }));
 
+// GET /api/superadmin/companies/:id/granted-bundles
+// Returns the bundle IDs currently granted to this company (via grant_bundle).
+// Used by the SuperAdmin UI to show which packs are already offered as gifts.
+router.get('/companies/:id/granted-bundles', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const db = getFirestore();
+  const snap = await db.collection('marketplacePayments')
+    .where('companyId', '==', req.params.id)
+    .where('paymentMethod', '==', 'granted')
+    .get();
+  // Dedupe — a company can have multiple grant records for the same bundle
+  // if it was granted then revoked then re-granted; we only care about the
+  // currently-active ones (status === 'completed').
+  const bundleIds = Array.from(new Set(
+    snap.docs
+      .filter(d => d.data()['status'] === 'completed')
+      .map(d => d.data()['bundleId'] as string)
+      .filter(Boolean),
+  ));
+  res.json({ success: true, data: { bundleIds } });
+}));
+
 // POST /api/superadmin/companies/:id/members/:memberId/action
 // Super admin acts on any company's members: change role, toggle voice perm, suspend, delete.
 router.post('/companies/:id/members/:memberId/action', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
@@ -196,6 +217,76 @@ router.post('/companies/:id/action', asyncHandler(async (req: AuthenticatedReque
       updates['plan'] = 'free';
       updates['subscriptionStatus'] = 'active';
       updates['paymentMethod'] = '';
+      break;
+    }
+    case 'grant_bundle': {
+      // Offer one of the marketplace bundles (Boutique, Restaurant, PME, etc.)
+      // to a company for free as a permanent gift. Creates a paid marketplace
+      // payment record + installs all agents in the bundle.
+      const { bundleId } = req.body as { bundleId?: string };
+      if (!bundleId) throw new AppError('bundleId required', 400);
+      const { BUNDLES } = await import('./marketplace.routes');
+      const bundle = BUNDLES.find((b: any) => b.id === bundleId);
+      if (!bundle) throw new AppError(`Bundle ${bundleId} introuvable`, 404);
+      const agentIds: string[] = bundle.agentIds ?? [];
+      // Record a granted payment so the merchant's /marketplace shows the bundle
+      // as active (paymentMethod=granted distinguishes gift from real payment).
+      const cid = req.params.id;
+      await db.collection('marketplacePayments').add({
+        companyId: cid, userId: req.user?.uid ?? null,
+        bundleId, bundleName: bundle.name,
+        agentIds, amountUSD: 0, currency: 'USD',
+        provider: 'granted', status: 'completed',
+        paymentMethod: 'granted', grantedBy: req.user?.uid,
+        paidAt: new Date(), completedAt: new Date(), createdAt: new Date(),
+      });
+      // Install each agent in the bundle (idempotent — skip if already installed).
+      let installed = 0;
+      for (const agentId of agentIds) {
+        const existing = await db.collection(`companies/${cid}/installedAgents`).doc(agentId).get();
+        if (existing.exists) {
+          if (existing.data()?.['status'] !== 'active') {
+            await existing.ref.update({ status: 'active', pricingModel: 'bundle', bundleId, upgradedAt: new Date() });
+          }
+          continue;
+        }
+        const agentDoc = await db.collection('marketplaceAgents').doc(agentId).get();
+        if (!agentDoc.exists) continue;
+        const agent = agentDoc.data()!;
+        await db.collection(`companies/${cid}/installedAgents`).doc(agentId).set({
+          agentId, installedAt: new Date(), status: 'active',
+          pricingModel: 'bundle', bundleId, sentFrom: 'superadmin-grant',
+          cachedConfig: {
+            name: agent['name'], systemPrompt: agent['systemPrompt'] ?? '',
+            tools: agent['tools'] ?? [], temperature: agent['temperature'] ?? 0.4,
+            model: agent['model'] ?? 'flash',
+          },
+        });
+        installed++;
+      }
+      updates['subscriptionStatus'] = 'active';
+      // Don't override `plan` — bundles coexist with the plan field.
+      break;
+    }
+    case 'revoke_bundle': {
+      // Reverse a previously granted bundle — uninstall its agents.
+      const { bundleId } = req.body as { bundleId?: string };
+      if (!bundleId) throw new AppError('bundleId required', 400);
+      const { BUNDLES } = await import('./marketplace.routes');
+      const bundle = BUNDLES.find((b: any) => b.id === bundleId);
+      if (!bundle) throw new AppError(`Bundle ${bundleId} introuvable`, 404);
+      const cid = req.params.id;
+      // Remove the granted payment record(s) for this bundle on this company.
+      const paymentsSnap = await db.collection('marketplacePayments')
+        .where('companyId', '==', cid).where('bundleId', '==', bundleId).get();
+      for (const d of paymentsSnap.docs) await d.ref.delete();
+      // Uninstall the bundle's agents that were installed via this bundle.
+      for (const agentId of (bundle.agentIds ?? [])) {
+        const inst = await db.collection(`companies/${cid}/installedAgents`).doc(agentId).get();
+        if (inst.exists && inst.data()?.['bundleId'] === bundleId) {
+          await inst.ref.delete();
+        }
+      }
       break;
     }
     case 'grant_marketplace_agents': {

@@ -109,15 +109,15 @@ export default function CompanyDetailPage() {
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg hover:bg-yellow-100 disabled:opacity-50">
             <AlertTriangle size={14} /> Suspendre
           </button>
-          {['starter', 'pro', 'premium'].map(p => (
-            <button key={p} onClick={() => doAction('upgrade', p)} disabled={!!acting}
-              className="px-4 py-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50">
-              Upgrade → {p}
-            </button>
-          ))}
+          {/* Legacy starter/pro/premium upgrade buttons removed since the
+              pricing pivot (Avril 2026 — modèle $20/pack au lieu de plans).
+              Plans visible only as filters in trial section below. To grant
+              full access use the bundle section. */}
         </div>
 
         <TrialSection acting={acting} doAction={doAction} />
+
+        <BundleGrantSection acting={acting} doAction={doAction} companyId={companyId!} />
 
         <HostedExceptionSection companyId={companyId!} company={company} onRefresh={load} />
 
@@ -218,11 +218,13 @@ function TrialSection({ acting, doAction }: {
   doAction: (action: string, plan?: string, extra?: Record<string, unknown>) => Promise<void>;
 }) {
   const [trialDays, setTrialDays] = useState(14);
-  const [trialPlan, setTrialPlan] = useState('pro');
+  // Trial is now a duration-only concept — no more starter/pro/premium plans.
+  // The legacy plan field stays in Firestore for back-compat but the UI no
+  // longer prompts for it. SuperAdmin grants packs instead via BundleGrantSection.
 
   return (
     <>
-      <h2 className="text-sm font-bold text-gray-700 pt-2">Essai gratuit & Acces offert</h2>
+      <h2 className="text-sm font-bold text-gray-700 pt-2">Essai gratuit (acces total)</h2>
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
         <p className="text-xs font-bold text-blue-700 uppercase">Essai personnalise</p>
         <div className="flex items-center gap-3 flex-wrap">
@@ -231,18 +233,9 @@ function TrialSection({ acting, doAction }: {
             <input type="number" min={1} max={365} value={trialDays} onChange={e => setTrialDays(Number(e.target.value))}
               className="w-20 px-2 py-1.5 text-sm border border-blue-200 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-blue-400" />
           </div>
-          <div>
-            <label className="block text-[10px] font-bold text-blue-600 uppercase mb-1">Plan</label>
-            <select value={trialPlan} onChange={e => setTrialPlan(e.target.value)}
-              className="px-3 py-1.5 text-sm border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400">
-              <option value="starter">Starter</option>
-              <option value="pro">Pro</option>
-              <option value="premium">Premium</option>
-            </select>
-          </div>
-          <button onClick={() => doAction('grant_trial', undefined, { trialDays, trialPlan })} disabled={!!acting}
-            className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 mt-4 sm:mt-0">
-            Accorder l'essai
+          <button onClick={() => doAction('grant_trial', undefined, { trialDays })} disabled={!!acting}
+            className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            Accorder l'essai (acces total)
           </button>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -253,15 +246,117 @@ function TrialSection({ acting, doAction }: {
             </button>
           ))}
         </div>
+        <p className="text-[11px] text-blue-700 mt-1">
+          Pour offrir un pack metier specifique (Boutique, Restaurant, Cabinet…), utilise la section <strong>Offrir un pack</strong> ci-dessous.
+        </p>
       </div>
+    </>
+  );
+}
 
-      <div className="flex flex-wrap gap-2">
-        {['starter', 'pro', 'premium'].map(p => (
-          <button key={p} onClick={() => doAction('grant_free', p)} disabled={!!acting}
-            className="px-4 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50">
-            Offrir {p} gratuit permanent
-          </button>
-        ))}
+// ── Bundle grant — offer a specific marketplace pack ──────────────────────
+
+interface BundleEntry {
+  id: string; name: string; icon: string; agents: number; price: number; popular?: boolean;
+}
+
+// Mirror of server/src/routes/marketplace.routes.ts BUNDLES (17 packs).
+// Stays in sync manually — IDs change rarely. Reference is the backend.
+const BUNDLE_CATALOG: BundleEntry[] = [
+  { id: 'b16', name: 'Pack Boutique',           icon: '🛒', agents: 4, price: 20, popular: true },
+  { id: 'b7',  name: 'Pack Restaurant',         icon: '🍽️', agents: 4, price: 20, popular: true },
+  { id: 'b15', name: 'Pack PME',                icon: '🚀', agents: 4, price: 20, popular: true },
+  { id: 'b10', name: 'Pack Entreprise',         icon: '🏢', agents: 4, price: 20, popular: true },
+  { id: 'b2',  name: 'Pack Immobilier',         icon: '🏠', agents: 4, price: 20 },
+  { id: 'b1',  name: 'Pack Santé',              icon: '🏥', agents: 2, price: 20 },
+  { id: 'b12', name: 'Pack RH',                 icon: '👩‍💼', agents: 2, price: 20 },
+  { id: 'b11', name: 'Pack Réception',          icon: '🚪', agents: 4, price: 20 },
+  { id: 'b13', name: 'Pack Cybersécurité',      icon: '🛡️', agents: 3, price: 20 },
+  { id: 'b3',  name: 'Pack Artisan',            icon: '🛠️', agents: 4, price: 20 },
+  { id: 'b4',  name: 'Pack Agriculture',        icon: '🌾', agents: 4, price: 20 },
+  { id: 'b5',  name: 'Pack Sécurité Totale',    icon: '🛡️', agents: 4, price: 20 },
+  { id: 'b6',  name: 'Pack Sécurité Site',      icon: '📹', agents: 3, price: 20 },
+  { id: 'b8',  name: 'Pack Mode & Luxe',        icon: '👗', agents: 4, price: 20 },
+  { id: 'b9',  name: 'Pack Éducation',          icon: '🎓', agents: 2, price: 20 },
+  { id: 'b14', name: 'Super Pack Entreprise',   icon: '👑', agents: 8, price: 45 },
+];
+
+function BundleGrantSection({ acting, doAction, companyId }: {
+  acting: string;
+  doAction: (action: string, plan?: string, extra?: Record<string, unknown>) => Promise<void>;
+  companyId: string;
+}) {
+  const [granted, setGranted] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get(`/superadmin/companies/${companyId}/granted-bundles`)
+      .then((r: any) => {
+        const list = (r?.data?.bundleIds ?? r?.data?.data?.bundleIds ?? []) as string[];
+        setGranted(new Set(list));
+      })
+      .catch(() => setGranted(new Set()))
+      .finally(() => setLoading(false));
+  }, [companyId]);
+
+  const handleGrant = async (bundleId: string) => {
+    await doAction('grant_bundle', undefined, { bundleId });
+    setGranted(prev => new Set([...prev, bundleId]));
+  };
+
+  const handleRevoke = async (bundleId: string) => {
+    if (!confirm(`Révoquer ce pack ? Les agents installés via ce pack seront désinstallés.`)) return;
+    await doAction('revoke_bundle', undefined, { bundleId });
+    setGranted(prev => { const n = new Set(prev); n.delete(bundleId); return n; });
+  };
+
+  return (
+    <>
+      <h2 className="text-sm font-bold text-gray-700 pt-2">Offrir un pack metier</h2>
+      <div className="bg-gradient-to-br from-violet-50 to-pink-50 border border-violet-200 rounded-xl p-4 space-y-3">
+        <p className="text-xs text-violet-700">
+          Active un pack complet (4-8 agents) pour cette entreprise — gratuit comme cadeau permanent.
+          Le pack apparaît dans /agents/{'<slug>'} avec tous ses modules pre-configures.
+        </p>
+        {loading ? (
+          <p className="text-xs text-violet-600 italic">Chargement des packs offerts…</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {BUNDLE_CATALOG.map(b => {
+              const isGranted = granted.has(b.id);
+              return (
+                <div key={b.id}
+                  className={`flex items-center gap-2 p-2.5 rounded-lg border ${
+                    isGranted
+                      ? 'bg-green-50 border-green-300'
+                      : 'bg-white border-violet-200 hover:border-violet-400'
+                  }`}>
+                  <div className="text-2xl flex-shrink-0">{b.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-bold text-gray-900 truncate flex items-center gap-1">
+                      {b.name}
+                      {b.popular && <span className="text-[9px] text-amber-600 font-bold">🔥</span>}
+                    </div>
+                    <div className="text-[10px] text-gray-500">
+                      {b.agents} agents · ${b.price}/mo
+                    </div>
+                  </div>
+                  {isGranted ? (
+                    <button onClick={() => handleRevoke(b.id)} disabled={!!acting}
+                      className="px-2 py-1 text-[10px] font-bold text-green-700 bg-green-100 hover:bg-red-100 hover:text-red-700 rounded border border-green-300 disabled:opacity-50 transition-colors">
+                      ✓ Actif
+                    </button>
+                  ) : (
+                    <button onClick={() => handleGrant(b.id)} disabled={!!acting}
+                      className="px-2 py-1 text-[10px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded disabled:opacity-50">
+                      Offrir
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </>
   );

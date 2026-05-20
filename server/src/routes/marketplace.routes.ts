@@ -502,7 +502,7 @@ function withCoreAgents(specialized: string[]): string[] {
   return out;
 }
 
-const BUNDLES = [
+export const BUNDLES = [
   {
     id: 'b1', name: 'Pack Santé', icon: '🏥', color: 'from-red-500 to-pink-500',
     description: 'Dossier patient, formation continue, validation prescriptions et base de connaissances médicale.',
