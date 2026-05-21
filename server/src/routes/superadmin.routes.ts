@@ -564,6 +564,23 @@ router.patch('/companies/:companyId/byoe-allowed', asyncHandler(async (req: Auth
   res.json({ success: true, data: { byoeAllowed: !!allowed } });
 }));
 
+// PATCH /api/superadmin/companies/:companyId/hosted-by-orlode — toggle permanent Orlode hosting
+// When true, the company can use Orlode's Firebase / AI keys WITHOUT setting up BYOE.
+// Orlode pays the AI bill. Use for NGOs, demos, special partners, internal accounts.
+// When false (default), the company MUST configure BYOE to use the AI agents.
+router.patch('/companies/:companyId/hosted-by-orlode', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { companyId } = req.params;
+  const { hosted } = req.body as { hosted: boolean };
+  const db = getFirestore();
+  await db.collection('companies').doc(companyId).set({
+    hostedByOrlode: !!hosted,
+    hostedByOrlodeBy: req.user?.uid ?? null,
+    hostedByOrlodeAt: new Date(),
+    updatedAt: new Date(),
+  }, { merge: true });
+  res.json({ success: true, data: { hostedByOrlode: !!hosted } });
+}));
+
 // PATCH /api/superadmin/companies/:companyId/allowed-providers — restrict AI providers
 // Providers: 'claude' | 'gemini' | 'openai' | 'elevenlabs' | 'all'
 // Empty or ['all'] = no restriction. Otherwise only the listed providers are permitted.

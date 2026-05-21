@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.BUNDLES = void 0;
 /**
  * Marketplace routes — Agent marketplace for Orlode
  * Browse, install, uninstall agents
@@ -492,7 +493,7 @@ function withCoreAgents(specialized) {
     }
     return out;
 }
-const BUNDLES = [
+exports.BUNDLES = [
     {
         id: 'b1', name: 'Pack Santé', icon: '🏥', color: 'from-red-500 to-pink-500',
         description: 'Dossier patient, formation continue, validation prescriptions et base de connaissances médicale.',
@@ -736,7 +737,7 @@ router.get('/bundles', (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
             reviewsByBundle[bid] = { sum: cur.sum + rating, count: cur.count + 1 };
         }
     }
-    const enriched = BUNDLES.map(b => {
+    const enriched = exports.BUNDLES.map(b => {
         const agents = b.agentIds.map(id => {
             const a = agentMap.get(id);
             return a ? { id: a['id'], name: a['name'], icon: a['icon'], priceUSD: a['priceUSD'] } : null;
@@ -868,7 +869,7 @@ router.get('/my-subscriptions', (0, asyncHandler_1.asyncHandler)(async (req, res
         const subscriptions = [];
         // Bundles (each group → 1 subscription row)
         for (const [bid, agents] of bundleGroups) {
-            const bundle = BUNDLES.find(b => b.id === bid);
+            const bundle = exports.BUNDLES.find(b => b.id === bid);
             const installedAt = agents
                 .map(a => a.installedAt?.toDate?.()?.getTime() ?? 0)
                 .reduce((a, b) => Math.max(a, b), 0);
@@ -1050,7 +1051,7 @@ router.post('/bundles/:id/checkout', (0, asyncHandler_1.asyncHandler)(async (req
     const companyId = req.user?.companyId;
     if (!companyId)
         throw new error_middleware_1.AppError('Company ID required', 400);
-    const bundle = BUNDLES.find(b => b.id === req.params.id);
+    const bundle = exports.BUNDLES.find(b => b.id === req.params.id);
     if (!bundle)
         throw new error_middleware_1.AppError('Bundle not found', 404);
     const { method, selectedAgentIds, paymentMethod: manualMethodPref } = req.body;
@@ -1272,7 +1273,7 @@ router.post('/bundles/:bundleId/start-trial', (0, asyncHandler_1.asyncHandler)(a
     if (!companyId)
         throw new error_middleware_1.AppError('Auth required', 401);
     const { bundleId } = req.params;
-    const bundle = BUNDLES.find(b => b.id === bundleId);
+    const bundle = exports.BUNDLES.find(b => b.id === bundleId);
     if (!bundle)
         throw new error_middleware_1.AppError(`Bundle ${bundleId} not found`, 404);
     const db = (0, firebase_config_1.getFirestore)();

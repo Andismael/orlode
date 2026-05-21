@@ -448,11 +448,11 @@ function PermissionsSection({ companyId, company, onRefresh }: {
   company: CompanyDetail;
   onRefresh: () => void;
 }) {
-  const c = company as unknown as { byoeAllowed?: boolean; allowedProviders?: string[] };
-  // Semantic flip (May 2026) : BYOE is the DEFAULT — every company can set it
-  // up unless explicitly blocked. The legacy `byoeAllowed: false` flag is now
-  // re-interpreted as "blocked". Unset/true → allowed. False → blocked.
-  const [byoeBlocked, setByoeBlocked] = useState(c.byoeAllowed === false);
+  const c = company as unknown as { byoeAllowed?: boolean; hostedByOrlode?: boolean; allowedProviders?: string[] };
+  // Permanent Orlode hosting — when ON, this company uses Orlode's Firebase
+  // and AI keys (no BYOE needed). When OFF (default), the merchant must set
+  // up their own infra via /admin/byoe.
+  const [hostedByOrlode, setHostedByOrlode] = useState(c.hostedByOrlode === true);
   const [providers, setProviders] = useState<Set<string>>(new Set(c.allowedProviders ?? []));
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -463,13 +463,13 @@ function PermissionsSection({ companyId, company, onRefresh }: {
     { id: 'elevenlabs', label: 'ElevenLabs',         desc: 'Text-to-Speech premium pour Voice Clone' },
   ];
 
-  // saveByoeBlock(true) → byoeAllowed=false (blocked)
-  // saveByoeBlock(false) → byoeAllowed=true (allowed, the default)
-  const saveByoeBlock = async (blocked: boolean) => {
-    setSaving('byoe');
+  // saveHosting(true) → company uses Orlode's Firebase + AI keys (free hosting)
+  // saveHosting(false) → company must set up BYOE (own Firebase). Default.
+  const saveHosting = async (hosted: boolean) => {
+    setSaving('hosting');
     try {
-      await api.patch(`/superadmin/companies/${companyId}/byoe-allowed`, { allowed: !blocked });
-      setByoeBlocked(blocked);
+      await api.patch(`/superadmin/companies/${companyId}/hosted-by-orlode`, { hosted });
+      setHostedByOrlode(hosted);
       onRefresh();
     } finally { setSaving(null); }
   };
@@ -500,24 +500,27 @@ function PermissionsSection({ companyId, company, onRefresh }: {
         <h2 className="text-sm font-bold text-gray-700">Permissions SuperAdmin</h2>
       </div>
 
-      {/* BYOE — allowed by default, can be blocked per-company */}
-      <div className={`border rounded-lg p-4 ${byoeBlocked ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-200'}`}>
+      {/* Hosting mode — BYOE (default) OR permanent Orlode hosting (free gift) */}
+      <div className={`border rounded-lg p-4 ${hostedByOrlode ? 'bg-violet-50 border-violet-300' : 'bg-gray-50 border-gray-200'}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <p className="text-sm font-semibold text-gray-900">
-              {byoeBlocked ? '🚫 BYOE bloqué' : '✅ BYOE autorisé (défaut)'}
+              {hostedByOrlode ? '🏢 Hébergement Orlode (gratuit pour ce client)' : '🔑 BYOE — Firebase du client (défaut)'}
             </p>
             <p className="text-xs text-gray-600 mt-1">
-              Par défaut, toute entreprise peut configurer son propre Firebase via <code>/admin/byoe</code>.
-              Active ce toggle uniquement pour <strong>bloquer</strong> une entreprise spécifique (abus, dette, etc.) — elle devra alors passer par l'hébergement Orlode.
+              {hostedByOrlode ? (
+                <>Cette entreprise utilise <strong>Orlode's Firebase + clés IA</strong>. <strong>Orlode paie la facture IA</strong>. Réservé aux ONG, démos, partenaires spéciaux, comptes internes. Désactive pour repasser en BYOE.</>
+              ) : (
+                <>Par défaut, l'entreprise doit configurer <strong>son propre Firebase</strong> via <code>/admin/byoe</code> (le client paie sa facture IA). Active ce toggle pour <strong>héberger gratuitement</strong> sur l'infra Orlode.</>
+              )}
             </p>
           </div>
           <button
-            onClick={() => saveByoeBlock(!byoeBlocked)}
-            disabled={saving === 'byoe'}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${byoeBlocked ? 'bg-red-600' : 'bg-gray-300'} disabled:opacity-50 flex-shrink-0`}
-            aria-label="Bloquer BYOE">
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${byoeBlocked ? 'translate-x-6' : 'translate-x-1'}`} />
+            onClick={() => saveHosting(!hostedByOrlode)}
+            disabled={saving === 'hosting'}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${hostedByOrlode ? 'bg-violet-600' : 'bg-gray-300'} disabled:opacity-50 flex-shrink-0`}
+            aria-label="Toggle hébergement Orlode">
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${hostedByOrlode ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
         </div>
       </div>

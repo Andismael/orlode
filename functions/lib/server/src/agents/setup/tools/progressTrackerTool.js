@@ -34,14 +34,16 @@ exports.progressTrackerTool = genkit_config_1.ai.defineTool({
             updatedAt: new Date(),
         };
         if (completed === true) {
-            // Check SuperAdmin authorization before enabling BYOE
+            // BYOE is the DEFAULT (May 2026 pricing model = $20/pack + BYOE).
+            // Only block if SuperAdmin has explicitly set byoeAllowed: false on
+            // this specific company (abuse, debt, demo-locked, etc.).
             const existing = await db.collection('companies').doc(companyId).get();
-            const byoeAllowed = existing.data()?.['byoeAllowed'] === true;
-            if (!byoeAllowed) {
+            const byoeExplicitlyBlocked = existing.data()?.['byoeAllowed'] === false;
+            if (byoeExplicitlyBlocked) {
                 return {
                     success: false,
                     step,
-                    message: 'BYOE n\'est pas autorisé pour cette entreprise. Le SuperAdmin doit l\'activer d\'abord via /superadmin/companies/{id}.',
+                    message: 'BYOE est bloqué pour cette entreprise par le SuperAdmin. Contacte le support pour débloquer.',
                 };
             }
             update['setupCompleted'] = true;

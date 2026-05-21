@@ -2,6 +2,8 @@
  * BYOE Gate Middleware
  * Blocks agent API calls unless one of these is true:
  *   - Company has BYOE configured (`byoeEnabled === true` + has `geminiApiKeyEncrypted`)
+ *   - Company is permanently hosted by Orlode (`hostedByOrlode === true`) —
+ *     granted by SuperAdmin for free-tier customers, NGOs, demos
  *   - Company has an active hosted exception (`hostedException.expiresAt` in future)
  *   - The caller is a super admin
  *
@@ -41,7 +43,11 @@ export async function byoeGate(
     // byoeEnabled but no key stored — fall through to exception check
   }
 
-  // Path 2: active hosted exception (super admin granted)
+  // Path 2: permanently hosted by Orlode (no expiration). Granted by
+  // SuperAdmin via the "Hébergement Orlode" toggle. Orlode pays the AI bill.
+  if (data['hostedByOrlode'] === true) { next(); return; }
+
+  // Path 3: active hosted exception (super admin granted, time-limited)
   const ex = data['hostedException'] as { expiresAt?: string; grantedBy?: string; reason?: string } | undefined;
   if (ex?.expiresAt) {
     const exp = new Date(ex.expiresAt).getTime();
