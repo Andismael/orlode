@@ -97,9 +97,14 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
   return (
     <header
-      className="h-16 flex items-center px-4 gap-4 flex-shrink-0 z-10"
+      className="h-16 flex items-center px-4 gap-4 flex-shrink-0 z-20 sticky top-0"
       style={{
-        background: 'linear-gradient(135deg, #063D2E 0%, #0A4F3C 100%)',
+        // Solid African green for now; once a scroll-progress hook is in place
+        // this should switch to a translucent backdrop-blur on scroll for the
+        // Liquid Glass look. Sticky keeps it pinned during page scroll (PWA-native).
+        background: 'linear-gradient(135deg, rgba(6,61,46,0.96) 0%, rgba(10,79,60,0.96) 100%)',
+        backdropFilter: 'saturate(180%) blur(20px)',
+        WebkitBackdropFilter: 'saturate(180%) blur(20px)',
         borderBottom: '1px solid rgba(255,255,255,0.12)',
         boxShadow: '0 2px 16px rgba(10,79,60,0.35)',
       }}

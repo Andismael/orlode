@@ -26,6 +26,39 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
+      {/* Native PWA feel: respect iOS notch (top) and home-indicator (left/right) at the
+          layout boundary. Bottom safe-area is owned by MobileBottomNav (so the gradient
+          backdrop extends behind the home indicator). Touch-pan-y prevents the rubber-band
+          horizontal scroll on iOS Safari that breaks fixed positioning. */}
+      <style>{`
+        :root { --safe-top: env(safe-area-inset-top, 0px); --safe-left: env(safe-area-inset-left, 0px); --safe-right: env(safe-area-inset-right, 0px); }
+        html, body { overscroll-behavior-y: contain; }
+        @supports (padding: max(0px)) {
+          @media (max-width: 1024px) {
+            .main-shell { padding-top: max(env(safe-area-inset-top), 0px); padding-left: max(env(safe-area-inset-left), 0px); padding-right: max(env(safe-area-inset-right), 0px); }
+          }
+        }
+        /* iOS momentum scroll + disable rubber-band horizontal */
+        main { -webkit-overflow-scrolling: touch; }
+        /* Native touch feedback on tappable cards (iOS-style 100ms shrink). Opt-in via .tap-card */
+        .tap-card { transition: transform 0.1s ease-out, box-shadow 0.15s ease; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+        .tap-card:active { transform: scale(0.97); }
+        /* Hide horizontal scrollbar but keep scroll on mobile chip rows */
+        .ios-chip-row { -ms-overflow-style: none; scrollbar-width: none; scroll-snap-type: x mandatory; }
+        .ios-chip-row::-webkit-scrollbar { display: none; }
+        .ios-chip-row > * { scroll-snap-align: start; }
+        /* Native chrome polish — no callout, no tap highlight, no selection on UI controls.
+           Keeps text selectable in <p>/<span>/<input> but kills it on buttons/nav/headers. */
+        button, [role="button"], nav, header, footer, [class*="pill"] {
+          -webkit-touch-callout: none;
+          -webkit-user-select: none;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+        }
+        /* Page fade-in on route change (lightweight — full transitions need a router-aware wrapper) */
+        main > * { animation: m-page-in 0.22s ease-out; }
+        @keyframes m-page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
       {showOnboarding && <OnboardingWizard onComplete={handleOnboardingComplete} />}
       {/* Sidebar — desktop (relative) */}
       <motion.div
@@ -61,13 +94,13 @@ export default function MainLayout() {
       )}
 
       {/* Main content */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="main-shell flex flex-col flex-1 min-w-0 overflow-hidden">
         <Header
           onMenuClick={() => setMobileOpen(true)}
           sidebarCollapsed={sidebarCollapsed}
         />
         <ByoeGateBanner />
-        <main className="flex-1 overflow-auto bg-gray-50">
+        <main className="flex-1 overflow-auto bg-gray-50" style={{ touchAction: 'pan-y' }}>
           <div className="h-full">
             <Outlet />
           </div>
