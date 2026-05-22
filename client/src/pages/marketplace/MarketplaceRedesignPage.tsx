@@ -996,11 +996,12 @@ function FiltersBar({ filter, setFilter, sort, setSort, viewMode, setViewMode })
 // ============ BUNDLE CARD ============
 function BundleCard({ bundle, onAddToCart, onOpenDetails, inCart, favorite, onToggleFavorite, onStartTrial, trialState }: any) {
   return (
-    <div className="card-lift" onClick={() => onOpenDetails(bundle)} style={{
+    <div id={bundle.id} className="card-lift" onClick={() => onOpenDetails(bundle)} style={{
       background: C.cream, borderRadius: 20,
       border: '1px solid rgba(10,42,32,0.06)',
       cursor: 'pointer', overflow: 'hidden',
       position: 'relative',
+      scrollMarginTop: 100,
     }}>
       {bundle.coverImage ? (
         <div style={{ position: 'relative', aspectRatio: '16 / 7', overflow: 'hidden' }}>
@@ -3578,6 +3579,28 @@ export default function MarketplaceRedesignPage() {
   useEffect(() => {
     _setPriceFormatter((usd: number) => formatMoney(usd));
   }, [formatMoney, currency]);
+
+  // Deep-link to a specific bundle via /marketplace#bX (e.g. coming from
+  // the /whatsapp or /telegram hubs). Wait one tick for the bundles to
+  // render before scrolling so the target element exists.
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '');
+    if (!hash || !/^b\d+$/.test(hash)) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = document.getElementById(hash);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.transition = 'box-shadow 0.6s ease, transform 0.4s ease';
+        el.style.boxShadow = '0 0 0 4px rgba(217,160,23,0.35), 0 18px 48px -16px rgba(217,160,23,0.5)';
+        setTimeout(() => { el.style.boxShadow = ''; }, 2400);
+        clearInterval(timer);
+      } else if (++tries > 40) {
+        clearInterval(timer); // give up after ~6s
+      }
+    }, 150);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <MarketplacePageInner />
