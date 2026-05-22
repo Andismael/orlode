@@ -7,6 +7,7 @@ import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { Home, Sparkles, MessageCircle, Package, User } from 'lucide-react';
 import { M, MOBILE_CSS } from '@/components/mobile/mobileDesign';
+import { haptic } from '@/utils/haptic';
 
 const TABS = [
   { to: '/dashboard',   label: 'Accueil',   icon: Home,           match: (p: string) => p === '/dashboard' },
@@ -54,6 +55,7 @@ export default function MobileBottomNav() {
               <NavLink
                 key={tab.to}
                 to={tab.to}
+                onClick={() => { if (!isActive) haptic.light(); }}
                 style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
                   padding: '6px 4px 4px',
