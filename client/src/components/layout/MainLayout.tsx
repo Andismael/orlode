@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import CloneWidget from '@/components/clone/CloneWidget';
+import MobileBottomNav from './MobileBottomNav';
 import OnboardingWizard from '@/components/onboarding/OnboardingWizard';
 import ByoeGateBanner from './ByoeGateBanner';
 import { ToastContainer } from '@/components/common/Toast';
@@ -77,6 +78,8 @@ export default function MainLayout() {
       <CloneWidget />
       {/* Global toast notifications */}
       <ToastContainer />
+      {/* Mobile bottom nav (iOS-style tab bar) */}
+      <MobileBottomNav />
     </div>
   );
 }
