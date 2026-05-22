@@ -1,11 +1,12 @@
 {
   "name": "Orlode AI",
   "short_name": "Orlode",
-  "description": "The Spirit of Enterprise — Plateforme AI multi-agents pour entreprises",
-  "start_url": "/",
+  "description": "Gérez toute votre entreprise depuis WhatsApp. 17 packs IA, $20/mois, BYOE.",
+  "start_url": "/dashboard",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#080C1A",
-  "theme_color": "#0019FF",
+  "background_color": "#063D2E",
+  "theme_color": "#0A4F3C",
   "orientation": "any",
   "icons": [
     {
@@ -15,5 +16,6 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["business", "productivity"]
+  "categories": ["business", "productivity"],
+  "lang": "fr"
 }
