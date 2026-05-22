@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Server, Shield, Zap, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { Server, Shield, Zap, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import BYOESetupWizard from '@/components/setup/BYOESetupWizard';
 import { useAuthStore } from '@/store/authStore';
 
@@ -26,12 +26,12 @@ export default function ByoeSetupPage() {
       </button>
 
       <div className="mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-violet-100 text-violet-700 rounded-full text-xs font-bold uppercase tracking-wide mb-4">
-          <Server size={12} /> Mode avancé
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-wide mb-4">
+          <Server size={12} /> Mode standard Orlode
         </div>
-        <h1 className="text-3xl font-bold text-gray-900">Héberger Orlode sur votre propre infrastructure</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Connecte ton infrastructure Firebase + Gemini</h1>
         <p className="text-gray-600 mt-2 text-sm max-w-2xl">
-          Passez de l'hébergement partagé Orlode à votre propre projet Firebase. Vos données restent chez vous, vous payez vos propres frais GCP, et vous contrôlez tout.
+          BYOE (Bring Your Own Everything) est le mode standard depuis avril 2026 : tes données restent sur <strong>ton propre Firebase</strong>, tu paies <strong>ta consommation IA directement à Google</strong> (clé Gemini gratuite), et Orlode te facture juste <strong>$20/mois par pack métier</strong>. Aucune majoration sur ton usage.
         </p>
       </div>
 
@@ -62,16 +62,16 @@ export default function ByoeSetupPage() {
         </div>
       </div>
 
-      <div className="p-5 bg-amber-50 border border-amber-200 rounded-2xl mb-8">
+      <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl mb-8">
         <div className="flex items-start gap-3">
-          <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+          <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-semibold text-amber-900">Prérequis avant de commencer</p>
-            <ul className="text-xs text-amber-800 mt-2 space-y-1 list-disc pl-4">
-              <li>Un projet Firebase existant (créez-en un sur <a href="https://console.firebase.google.com" target="_blank" rel="noopener" className="underline">console.firebase.google.com</a>)</li>
-              <li>La clé de service (service account JSON) téléchargée depuis Firebase Console</li>
-              <li>Une clé API Gemini (gratuite sur <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" className="underline">Google AI Studio</a>)</li>
-              <li>Plan Pro ou supérieur requis pour BYOE</li>
+            <p className="text-sm font-semibold text-emerald-900">Prérequis (5 min de prep)</p>
+            <ul className="text-xs text-emerald-800 mt-2 space-y-1 list-disc pl-4">
+              <li>Un projet Firebase (gratuit) — créé sur <a href="https://console.firebase.google.com" target="_blank" rel="noopener" className="underline font-semibold">console.firebase.google.com</a></li>
+              <li>La clé de service Firebase (service account JSON) téléchargée depuis Firebase Console → Paramètres → Comptes de service</li>
+              <li>Une clé API Gemini <strong>gratuite</strong> sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" className="underline font-semibold">aistudio.google.com/apikey</a></li>
+              <li className="text-emerald-700 font-medium">✓ Aucun plan requis — disponible pour tous les comptes</li>
             </ul>
           </div>
         </div>
