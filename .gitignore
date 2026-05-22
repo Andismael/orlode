@@ -58,3 +58,6 @@ server/temp/
 *serviceAccount*.json
 *service-account*.json
 firebase-admin-key.json
+
+# Genkit runtime files (temporary, regenerated on each emulator run)
+functions/.genkit/runtimes/
