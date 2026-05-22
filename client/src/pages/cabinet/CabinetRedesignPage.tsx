@@ -45,6 +45,7 @@ type CabinetProfileId = 'medecin' | 'dentiste' | 'avocat' | 'notaire' | 'comptab
 interface CabinetProfile {
   id: CabinetProfileId;
   label: string;
+  shortLabel: string;
   icon: any;
   color: string;
   colorDeep: string;
@@ -58,12 +59,12 @@ interface CabinetProfile {
 }
 
 const PROFILES: CabinetProfile[] = [
-  { id: 'medecin',   label: 'Médecin généraliste', icon: HeartPulse, color: '#10B981', colorDeep: '#065F46', colorSoft: '#D1FAE5', emoji: '🩺', tagline: 'Soin & confidentialité',  clientLabel: 'patients',  clientLabelSingular: 'patient',  visitLabel: 'consultations', docLabel: 'ordonnances' },
-  { id: 'dentiste',  label: 'Cabinet dentaire',    icon: Smile,      color: '#06B6D4', colorDeep: '#0E7490', colorSoft: '#CFFAFE', emoji: '🦷', tagline: 'Sourire & précision',     clientLabel: 'patients',  clientLabelSingular: 'patient',  visitLabel: 'soins',         docLabel: 'devis' },
-  { id: 'avocat',    label: 'Cabinet d\'avocats',  icon: Scale,      color: '#9F1239', colorDeep: '#881337', colorSoft: '#FFE4E6', emoji: '⚖️', tagline: 'Justice & rigueur',       clientLabel: 'clients',   clientLabelSingular: 'client',   visitLabel: 'audiences',     docLabel: 'dossiers' },
-  { id: 'notaire',   label: 'Étude notariale',     icon: Stamp,      color: '#D97706', colorDeep: '#92400E', colorSoft: '#FEF3C7', emoji: '📜', tagline: 'Authentique & solennel',  clientLabel: 'clients',   clientLabelSingular: 'client',   visitLabel: 'actes',         docLabel: 'actes' },
-  { id: 'comptable', label: 'Expert-comptable',    icon: Calculator, color: '#1E40AF', colorDeep: '#1E3A8A', colorSoft: '#DBEAFE', emoji: '💼', tagline: 'Chiffre & conformité',    clientLabel: 'clients',   clientLabelSingular: 'client',   visitLabel: 'missions',      docLabel: 'liasses' },
-  { id: 'veto',      label: 'Cabinet vétérinaire', icon: PawPrint,   color: '#16A34A', colorDeep: '#15803D', colorSoft: '#DCFCE7', emoji: '🐾', tagline: 'Compagnons & soin',       clientLabel: 'animaux',   clientLabelSingular: 'animal',   visitLabel: 'consultations', docLabel: 'vaccins' },
+  { id: 'medecin',   label: 'Médecin généraliste', shortLabel: 'Médecin',     icon: HeartPulse, color: '#10B981', colorDeep: '#065F46', colorSoft: '#D1FAE5', emoji: '🩺', tagline: 'Soin & confidentialité',  clientLabel: 'patients',  clientLabelSingular: 'patient',  visitLabel: 'consultations', docLabel: 'ordonnances' },
+  { id: 'dentiste',  label: 'Cabinet dentaire',    shortLabel: 'Dentiste',    icon: Smile,      color: '#06B6D4', colorDeep: '#0E7490', colorSoft: '#CFFAFE', emoji: '🦷', tagline: 'Sourire & précision',     clientLabel: 'patients',  clientLabelSingular: 'patient',  visitLabel: 'soins',         docLabel: 'devis' },
+  { id: 'avocat',    label: 'Cabinet d\'avocats',  shortLabel: 'Avocat',      icon: Scale,      color: '#9F1239', colorDeep: '#881337', colorSoft: '#FFE4E6', emoji: '⚖️', tagline: 'Justice & rigueur',       clientLabel: 'clients',   clientLabelSingular: 'client',   visitLabel: 'audiences',     docLabel: 'dossiers' },
+  { id: 'notaire',   label: 'Étude notariale',     shortLabel: 'Notaire',     icon: Stamp,      color: '#D97706', colorDeep: '#92400E', colorSoft: '#FEF3C7', emoji: '📜', tagline: 'Authentique & solennel',  clientLabel: 'clients',   clientLabelSingular: 'client',   visitLabel: 'actes',         docLabel: 'actes' },
+  { id: 'comptable', label: 'Expert-comptable',    shortLabel: 'Comptable',   icon: Calculator, color: '#1E40AF', colorDeep: '#1E3A8A', colorSoft: '#DBEAFE', emoji: '💼', tagline: 'Chiffre & conformité',    clientLabel: 'clients',   clientLabelSingular: 'client',   visitLabel: 'missions',      docLabel: 'liasses' },
+  { id: 'veto',      label: 'Cabinet vétérinaire', shortLabel: 'Vétérinaire', icon: PawPrint,   color: '#16A34A', colorDeep: '#15803D', colorSoft: '#DCFCE7', emoji: '🐾', tagline: 'Compagnons & soin',       clientLabel: 'animaux',   clientLabelSingular: 'animal',   visitLabel: 'consultations', docLabel: 'vaccins' },
 ];
 
 const C = {
@@ -1328,7 +1329,7 @@ function CabinetActivationScreen({ onCreated }: { onCreated: () => void }) {
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                   }}>
                     <Icon size={20} />
-                    <span style={{ fontSize: 10, fontWeight: 700 }}>{p.emoji} {p.label.split(' ')[0]}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700 }}>{p.emoji} {p.shortLabel}</span>
                   </button>
                 );
               })}
