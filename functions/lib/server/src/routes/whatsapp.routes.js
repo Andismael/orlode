@@ -1293,7 +1293,7 @@ router.post('/webhook', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
             // If a 6-digit code is sent and an owner OTP is pending, verify it.
             if (incoming.type === 'text' && /^\s*\d{6}\s*$/.test(finalMessage)) {
                 try {
-                    const { verifyOwnerOtp } = await Promise.resolve().then(() => __importStar(require('../agents/commerce.agent')));
+                    const { verifyOwnerOtp, resumePendingProductPhoto } = await Promise.resolve().then(() => __importStar(require('../agents/commerce.agent')));
                     const ownerStore = await getOwnerStore();
                     if (ownerStore) {
                         const code = finalMessage.trim();
@@ -1301,7 +1301,27 @@ router.post('/webhook', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
                         if (r.ok) {
                             const cfg = await whatsappService_1.whatsappService.getConfig(ownerStore.companyId).catch(() => null);
                             if (cfg) {
-                                await whatsappService_1.whatsappService.sendMessage(cfg, incoming.from, '✅ Validé. Tu peux maintenant ajouter des produits, voir les commandes, marquer comme payé. Session valable 24h.', companyId);
+                                await whatsappService_1.whatsappService.sendMessage(cfg, incoming.from, '✅ Validé. Session valable 24h.', companyId);
+                            }
+                            // Resume any photo that triggered the OTP gate (real bug observed
+                            // with Robe Kevin Klein 2026-05-21: photo was lost after PIN).
+                            try {
+                                const resume = await resumePendingProductPhoto({
+                                    companyId: ownerStore.companyId,
+                                    storeId: ownerStore.storeId,
+                                    ownerPhone: incoming.from,
+                                    accessToken,
+                                });
+                                if (resume?.reply && cfg) {
+                                    await whatsappService_1.whatsappService.sendMessage(cfg, incoming.from, resume.reply, companyId);
+                                    logger_1.logger.info('[Commerce] Resumed pending product photo after OTP', {
+                                        companyId: ownerStore.companyId, storeId: ownerStore.storeId,
+                                        productId: resume.productId,
+                                    });
+                                }
+                            }
+                            catch (err) {
+                                logger_1.logger.warn('[Commerce] Resume pending photo failed (non-blocking)', { error: err instanceof Error ? err.message : err });
                             }
                             logger_1.logger.info('[Commerce] Owner OTP verified', { companyId: ownerStore.companyId, storeId: ownerStore.storeId });
                             return;

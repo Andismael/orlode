@@ -1285,7 +1285,7 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
       // If a 6-digit code is sent and an owner OTP is pending, verify it.
       if (incoming.type === 'text' && /^\s*\d{6}\s*$/.test(finalMessage)) {
         try {
-          const { verifyOwnerOtp } = await import('../agents/commerce.agent');
+          const { verifyOwnerOtp, resumePendingProductPhoto } = await import('../agents/commerce.agent');
           const ownerStore = await getOwnerStore();
           if (ownerStore) {
             const code = finalMessage.trim();
@@ -1294,7 +1294,26 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
               const cfg = await whatsappService.getConfig(ownerStore.companyId).catch(() => null);
               if (cfg) {
                 await whatsappService.sendMessage(cfg, incoming.from,
-                  '✅ Validé. Tu peux maintenant ajouter des produits, voir les commandes, marquer comme payé. Session valable 24h.', companyId);
+                  '✅ Validé. Session valable 24h.', companyId);
+              }
+              // Resume any photo that triggered the OTP gate (real bug observed
+              // with Robe Kevin Klein 2026-05-21: photo was lost after PIN).
+              try {
+                const resume = await resumePendingProductPhoto({
+                  companyId: ownerStore.companyId,
+                  storeId: ownerStore.storeId,
+                  ownerPhone: incoming.from,
+                  accessToken,
+                });
+                if (resume?.reply && cfg) {
+                  await whatsappService.sendMessage(cfg, incoming.from, resume.reply, companyId);
+                  logger.info('[Commerce] Resumed pending product photo after OTP', {
+                    companyId: ownerStore.companyId, storeId: ownerStore.storeId,
+                    productId: resume.productId,
+                  });
+                }
+              } catch (err) {
+                logger.warn('[Commerce] Resume pending photo failed (non-blocking)', { error: err instanceof Error ? err.message : err });
               }
               logger.info('[Commerce] Owner OTP verified', { companyId: ownerStore.companyId, storeId: ownerStore.storeId });
               return;

@@ -626,6 +626,50 @@ export async function isOwnerSessionValid(
   return !!exp && exp.getTime() > Date.now();
 }
 
+/**
+ * After a successful OTP verification, check whether the user had sent a photo
+ * before the OTP gate triggered. If so, resume product creation transparently
+ * (the user shouldn't have to re-send the photo). Returns the resume result so
+ * the caller can chain the reply with the OTP success message.
+ *
+ * Called from the WhatsApp inbound handler right after verifyOwnerOtp() succeeds.
+ */
+export async function resumePendingProductPhoto(args: {
+  companyId: string;
+  storeId: string;
+  ownerPhone: string;
+  accessToken: string;
+}): Promise<PhotoUploadResult | null> {
+  const { companyId, storeId, ownerPhone, accessToken } = args;
+  const db = getFirestore();
+  const ref = db.collection(`companies/${companyId}/stores/${storeId}/sessions`)
+    .doc(normalizePhone(ownerPhone));
+  const snap = await ref.get().catch(() => null);
+  const pending = snap?.data()?.['pendingProductPhoto'] as
+    | { imageId?: string; caption?: string | null; receivedAt?: { toDate?: () => Date } | Date }
+    | undefined;
+  if (!pending?.imageId) return null;
+  // Clear first — a failed re-upload shouldn't loop. The user can always resend
+  // the photo manually if anything below explodes.
+  await ref.set({ pendingProductPhoto: null }, { merge: true });
+  // Stale guard: don't resume photos older than 10 minutes — the user likely
+  // moved on and the access token may have rotated.
+  const receivedAt = pending.receivedAt instanceof Date
+    ? pending.receivedAt
+    : pending.receivedAt?.toDate?.();
+  if (receivedAt && Date.now() - receivedAt.getTime() > 10 * 60 * 1000) {
+    return null;
+  }
+  return handleOwnerPhotoUpload({
+    companyId,
+    storeId,
+    ownerPhone,
+    imageId: pending.imageId,
+    caption: pending.caption ?? undefined,
+    accessToken,
+  });
+}
+
 // ── Image download from Meta ─────────────────────────────────────────────────
 async function downloadMediaFromMeta(
   imageId: string, accessToken: string,
@@ -1033,13 +1077,25 @@ export async function handleOwnerPhotoUpload(args: {
   const { companyId, storeId, ownerPhone, imageId, caption, accessToken } = args;
   const db = getFirestore();
 
-  // 1. Owner session valid? If not, return OTP challenge instead.
+  // 1. Owner session valid? If not, save the photo context and return OTP challenge.
+  // The pendingProductPhoto field lets resumePendingProductPhoto() pick up where we
+  // left off after the user validates — otherwise the photo is silently lost and
+  // the user has to re-send (real bug observed 2026-05-21 with Robe Kevin Klein).
   const sessionOk = await isOwnerSessionValid(companyId, storeId, ownerPhone);
   if (!sessionOk) {
     const code = await startOwnerOtp(companyId, storeId, ownerPhone);
+    await db.collection(`companies/${companyId}/stores/${storeId}/sessions`)
+      .doc(normalizePhone(ownerPhone))
+      .set({
+        pendingProductPhoto: {
+          imageId,
+          caption: caption ?? null,
+          receivedAt: new Date(),
+        },
+      }, { merge: true });
     return {
       productId: '',
-      reply: `🔒 Pour ajouter un produit, envoie-moi ce code de validation : *${code}*\n\n(Valide 5 minutes — ce code prouve que c'est bien toi le propriétaire de la boutique.)`,
+      reply: `🔒 Pour ajouter un produit, envoie-moi ce code de validation : *${code}*\n\n(Valide 5 minutes — ce code prouve que c'est bien toi le propriétaire de la boutique. Dès que tu valides, je crée le produit automatiquement.)`,
     };
   }
 
