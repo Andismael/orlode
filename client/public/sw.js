@@ -3,7 +3,7 @@
  * - Network-first for hashed Vite chunks (so new deploys always load fresh JS)
  * - Cache fallback only if network fails (offline mode)
  */
-const CACHE_NAME = 'orlode-v3';
+const CACHE_NAME = 'orlode-v4';
 // Don't pre-cache '/' — otherwise an old index.html gets stuck and navigation is broken.
 const STATIC_ASSETS = [
   '/logo.png',

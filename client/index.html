@@ -79,8 +79,27 @@
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        // Auto-reload when a new SW takes over. The SW itself uses skipWaiting()
+        // and clients.claim() — combined with this listener, every new deploy
+        // propagates to the user's phone without manual cache clearing.
+        var __swRefreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (__swRefreshing) return;
+          __swRefreshing = true;
+          window.location.reload();
+        });
+
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').then(function (reg) {
+            // Re-check for SW updates each time the tab/app regains focus.
+            // Critical for PWAs added to home screen on iOS/Android — the SW
+            // gets refreshed when the user re-opens the app, not just on full reload.
+            document.addEventListener('visibilitychange', function () {
+              if (document.visibilityState === 'visible') {
+                try { reg.update(); } catch (_e) {}
+              }
+            });
+          }).catch(function () {});
         });
       }
 
