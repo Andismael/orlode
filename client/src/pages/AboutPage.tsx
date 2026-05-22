@@ -373,6 +373,40 @@ export default function AboutPage() {
             </p>
           </div>
           <DemoReel />
+
+          {/* Channel demo links — point visitors to the standalone landing pages */}
+          <div className="mt-14 grid sm:grid-cols-2 gap-4 max-w-3xl mx-auto">
+            <Link to="/whatsapp" className="group no-underline">
+              <div className="rounded-3xl bg-gradient-to-br from-emerald-500/15 via-emerald-500/8 to-transparent border border-emerald-400/30 backdrop-blur-xl p-6 hover:scale-[1.02] hover:border-emerald-400/60 transition-all">
+                <div className="flex items-center gap-4">
+                  <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-2xl shadow-xl shadow-emerald-500/30">
+                    💬
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-black text-emerald-300 tracking-wider">{lp('DÉMO INTERACTIVE', 'INTERACTIVE DEMO')}</p>
+                    <h3 className="text-xl font-black text-white mt-0.5">Pack WhatsApp</h3>
+                    <p className="text-sm text-white/55 mt-1">{lp('Boutique 24/7, commandes, RDV', '24/7 shop, orders, bookings')}</p>
+                  </div>
+                  <span className="text-emerald-300 text-2xl group-hover:translate-x-1 transition-transform">→</span>
+                </div>
+              </div>
+            </Link>
+            <Link to="/telegram" className="group no-underline">
+              <div className="rounded-3xl bg-gradient-to-br from-cyan-500/15 via-cyan-500/8 to-transparent border border-cyan-400/30 backdrop-blur-xl p-6 hover:scale-[1.02] hover:border-cyan-400/60 transition-all">
+                <div className="flex items-center gap-4">
+                  <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center text-2xl shadow-xl shadow-cyan-500/30">
+                    ✈️
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-black text-cyan-300 tracking-wider">{lp('DÉMO INTERACTIVE', 'INTERACTIVE DEMO')}</p>
+                    <h3 className="text-xl font-black text-white mt-0.5">Pack Telegram</h3>
+                    <p className="text-sm text-white/55 mt-1">{lp('Bots, channels, communautés', 'Bots, channels, communities')}</p>
+                  </div>
+                  <span className="text-cyan-300 text-2xl group-hover:translate-x-1 transition-transform">→</span>
+                </div>
+              </div>
+            </Link>
+          </div>
         </section>
 
         <section id="packs" className="max-w-7xl mx-auto px-6 py-24">
