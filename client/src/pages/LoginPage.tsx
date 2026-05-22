@@ -27,7 +27,7 @@ const ERRORS: Record<string, string> = {
 export default function LoginPage() {
   useSEO({
     title: 'Connexion | Orlode AI',
-    description: 'Connectez-vous a votre espace Orlode AI pour acceder a vos 48 agents IA.',
+    description: 'Connectez-vous a Orlode AI — gerez votre entreprise depuis WhatsApp avec 17 packs IA.',
     path: '/login',
     noindex: true,
   });
@@ -147,7 +147,7 @@ export default function LoginPage() {
         <p className="text-sm text-gray-500 mt-1">
           {mode === 'login'
             ? 'Connectez-vous à votre espace Orlode'
-            : 'Démarrez votre essai gratuit dès maintenant'}
+            : 'Créez votre compte en 30 secondes — vos packs s\'activent ensuite'}
         </p>
       </div>
 

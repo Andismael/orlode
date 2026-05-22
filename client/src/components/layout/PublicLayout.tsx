@@ -1,14 +1,14 @@
 import React, { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Bot, Shield, Globe, Zap, Smartphone } from 'lucide-react';
+import { Bot, MessageCircle, Package, Shield, UserCheck, Globe } from 'lucide-react';
 import { LoginScene } from '@/components/3d/SceneBackgrounds';
 
 const FEATURES = [
-  { icon: Bot,        text: '19 agents IA spécialisés' },
-  { icon: Shield,     text: 'BYOE — vos données restent chez vous' },
-  { icon: Globe,      text: '20+ langues, dont les langues africaines' },
-  { icon: Zap,        text: 'Déploiement en 10 minutes' },
-  { icon: Smartphone, text: 'WhatsApp, Vidéo AI, Réseaux Sociaux' },
+  { icon: MessageCircle, text: 'WhatsApp + Telegram natifs' },
+  { icon: Package,       text: '17 packs métier — boutique, RDV, services, immobilier…' },
+  { icon: UserCheck,     text: 'Clone IA à votre style — vend, répond, prend les RDV' },
+  { icon: Shield,        text: 'BYOE — votre Firebase, vos clés, vos données' },
+  { icon: Globe,         text: 'Africa-first — Wave, Orange Money, MTN inclus' },
 ];
 
 export default function PublicLayout() {
@@ -32,10 +32,10 @@ export default function PublicLayout() {
           </div>
 
           <h2 className="text-[2.1rem] font-bold text-white leading-tight mb-4">
-            L'intelligence artificielle<br />au service de votre<br />entreprise
+            Gérez toute votre<br />entreprise depuis<br />WhatsApp.
           </h2>
           <p className="text-white/65 text-[0.95rem] leading-relaxed mb-10">
-            Déployez 19 agents IA spécialisés dans votre propre infrastructure. Zéro vendor lock-in, données sous votre contrôle.
+            17 packs IA pour vendre, répondre et prendre les RDV — directement dans la messagerie de vos clients. <strong className="text-white/85">$20/mois par pack, BYOE.</strong>
           </p>
 
           <div className="space-y-3.5">
@@ -54,7 +54,7 @@ export default function PublicLayout() {
         <div className="relative z-10">
           <div className="inline-flex items-center gap-2.5 bg-white/[0.14] backdrop-blur-sm rounded-full px-4 py-2.5">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-white text-sm font-medium">+500 entreprises nous font confiance</span>
+            <span className="text-white text-sm font-medium">🌍 Africa-first · Activé en 5 minutes</span>
           </div>
         </div>
       </div>
