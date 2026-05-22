@@ -33,7 +33,13 @@ async function byoeGate(req, res, next) {
         }
         // byoeEnabled but no key stored — fall through to exception check
     }
-    // Path 2: active hosted exception (super admin granted)
+    // Path 2: permanently hosted by Orlode (no expiration). Granted by
+    // SuperAdmin via the "Hébergement Orlode" toggle. Orlode pays the AI bill.
+    if (data['hostedByOrlode'] === true) {
+        next();
+        return;
+    }
+    // Path 3: active hosted exception (super admin granted, time-limited)
     const ex = data['hostedException'];
     if (ex?.expiresAt) {
         const exp = new Date(ex.expiresAt).getTime();

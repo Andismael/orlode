@@ -34,18 +34,11 @@ exports.progressTrackerTool = genkit_config_1.ai.defineTool({
             updatedAt: new Date(),
         };
         if (completed === true) {
-            // BYOE is the DEFAULT (May 2026 pricing model = $20/pack + BYOE).
-            // Only block if SuperAdmin has explicitly set byoeAllowed: false on
-            // this specific company (abuse, debt, demo-locked, etc.).
-            const existing = await db.collection('companies').doc(companyId).get();
-            const byoeExplicitlyBlocked = existing.data()?.['byoeAllowed'] === false;
-            if (byoeExplicitlyBlocked) {
-                return {
-                    success: false,
-                    step,
-                    message: 'BYOE est bloqué pour cette entreprise par le SuperAdmin. Contacte le support pour débloquer.',
-                };
-            }
+            // BYOE is the DEFAULT for every customer (pricing model = $20/pack + BYOE).
+            // The only short-circuit: companies that are permanently hosted by Orlode
+            // (NGOs, demos, partners) don't need to complete BYOE setup at all —
+            // they run on Orlode's Firebase. SuperAdmin grants that via the
+            // "Hébergement Orlode" toggle (sets `hostedByOrlode: true`).
             update['setupCompleted'] = true;
             update['setupCompletedAt'] = new Date();
             update['byoeEnabled'] = true;
