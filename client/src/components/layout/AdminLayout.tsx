@@ -9,6 +9,7 @@ import {
   Inbox, FileText, Sparkles, Users2, FileSignature,
 } from 'lucide-react';
 import { ToastContainer } from '@/components/common/Toast';
+import { M, MOBILE_CSS } from '@/components/mobile/mobileDesign';
 
 interface NavItem { path: string; label: string; icon: any }
 interface NavSection { label: string; items: NavItem[]; defaultOpen?: boolean }
@@ -159,7 +160,17 @@ export default function AdminLayout() {
   const SidebarNav = ({ onClose, collapsed: collapsedProp }: { onClose?: () => void; collapsed: boolean }) => (
     <>
       <div className="flex items-center h-14 px-3 border-b border-white/10 flex-shrink-0">
-        {!collapsedProp && <span className="text-white font-semibold text-sm ml-1 flex items-center gap-2"><Settings size={16} /> Admin</span>}
+        {!collapsedProp && (
+          <span className="m-display text-white font-bold text-base ml-1 flex items-center gap-2" style={{ letterSpacing: '-0.02em' }}>
+            <div style={{
+              width: 26, height: 26, borderRadius: 8,
+              background: `linear-gradient(135deg, ${M.emerald}, ${M.gold})`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 13, fontWeight: 800, color: M.greenDark,
+            }}>O</div>
+            <span>Admin</span>
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1">
           {onClose && (
             <button onClick={onClose} className="text-white/60 hover:text-white p-1 md:hidden">
@@ -230,9 +241,13 @@ export default function AdminLayout() {
                         onClick={() => onClose?.()}
                         className={({ isActive }) =>
                           `flex items-center gap-2.5 px-2.5 py-2.5 md:py-1.5 rounded-lg transition-colors ${
-                            isActive ? 'bg-blue-600 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'
+                            isActive ? 'text-white' : 'text-white/70 hover:text-white hover:bg-white/10'
                           }`
                         }
+                        style={({ isActive }: { isActive: boolean }) => ({
+                          background: isActive ? `linear-gradient(135deg, ${M.emerald}, ${M.greenDeep})` : undefined,
+                          boxShadow: isActive ? `0 6px 14px -4px ${M.emerald}80` : undefined,
+                        })}
                         title={collapsedProp ? item.label : undefined}
                       >
                         <Icon size={16} className="flex-shrink-0 md:!w-[15px] md:!h-[15px]" />
@@ -269,7 +284,7 @@ export default function AdminLayout() {
       {/* ── Sidebar desktop ─────────────────────────────────────────── */}
       <div
         className="hidden md:flex flex-col flex-shrink-0 h-full transition-all duration-200"
-        style={{ width: collapsed ? 56 : 220, background: '#1e293b' }}
+        style={{ width: collapsed ? 56 : 220, background: `linear-gradient(180deg, ${M.greenDark} 0%, ${M.greenDeep} 100%)` }}
       >
         <SidebarNav collapsed={collapsed} />
       </div>
@@ -283,7 +298,7 @@ export default function AdminLayout() {
             exit={{ x: '-100%' }}
             transition={{ type: 'tween', duration: 0.22 }}
             className="fixed left-0 top-0 h-full w-72 z-30 flex flex-col md:hidden"
-            style={{ background: '#1e293b' }}
+            style={{ background: `linear-gradient(180deg, ${M.greenDark} 0%, ${M.greenDeep} 100%)` }}
           >
             <SidebarNav collapsed={false} onClose={() => setMobileOpen(false)} />
           </motion.div>
@@ -291,19 +306,45 @@ export default function AdminLayout() {
       </AnimatePresence>
 
       {/* ── Contenu ─────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        {/* Barre mobile admin */}
-        <div className="md:hidden flex items-center h-12 px-4 border-b border-gray-200 bg-white flex-shrink-0">
-          <button onClick={() => setMobileOpen(true)} className="text-gray-600 hover:text-gray-900 p-1 -ml-1">
-            <Menu size={20} />
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0" style={{ background: M.cream }}>
+        {/* Barre mobile admin — Zaffran style */}
+        <div
+          className="md:hidden flex items-center h-14 px-4 flex-shrink-0"
+          style={{
+            background: `linear-gradient(135deg, ${M.greenDark}, ${M.greenDeep})`,
+            color: M.cream,
+            boxShadow: '0 6px 16px -8px rgba(10,79,60,0.4)',
+          }}
+        >
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="p-1.5 -ml-1.5 rounded-lg"
+            style={{ background: 'rgba(255,250,240,0.12)', border: `1px solid ${M.cream}25` }}
+          >
+            <Menu size={18} />
           </button>
-          <span className="ml-3 text-sm font-semibold text-gray-800">Administration</span>
+          <div className="ml-3 flex items-center gap-2">
+            <div style={{
+              width: 26, height: 26, borderRadius: 8,
+              background: `linear-gradient(135deg, ${M.emerald}, ${M.gold})`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 13, fontWeight: 800, color: M.greenDark,
+            }}>O</div>
+            <span className="m-display" style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em' }}>Admin</span>
+          </div>
+          <div className="ml-auto m-pill" style={{
+            background: 'rgba(252,211,77,0.18)',
+            color: M.goldLight,
+            border: `1px solid ${M.gold}40`,
+            fontSize: 9,
+          }}>BYOE</div>
         </div>
-        <div className="flex-1 overflow-y-auto" style={{ fontSize: '15px' }}>
+        <div className="flex-1 overflow-y-auto" style={{ fontSize: '15px', background: M.cream }}>
           <Outlet />
         </div>
       </div>
       <ToastContainer />
+      <style>{MOBILE_CSS}</style>
     </div>
   );
 }

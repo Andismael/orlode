@@ -99,9 +99,9 @@ export default function Header({ onMenuClick }: HeaderProps) {
     <header
       className="h-16 flex items-center px-4 gap-4 flex-shrink-0 z-10"
       style={{
-        background: '#0055FF',
+        background: 'linear-gradient(135deg, #063D2E 0%, #0A4F3C 100%)',
         borderBottom: '1px solid rgba(255,255,255,0.12)',
-        boxShadow: '0 2px 16px rgba(0,85,255,0.3)',
+        boxShadow: '0 2px 16px rgba(10,79,60,0.35)',
       }}
     >
       <button
@@ -112,8 +112,18 @@ export default function Header({ onMenuClick }: HeaderProps) {
       </button>
 
       <div className="hidden lg:flex items-center gap-2">
-        <img src="/logo.png" alt="Orlode" className="w-7 h-7 rounded-lg" />
-        <h1 className="text-lg font-semibold text-white">{pageTitle}</h1>
+        <div
+          className="flex-shrink-0 flex items-center justify-center rounded-lg"
+          style={{
+            width: 28, height: 28,
+            background: 'linear-gradient(135deg, #10B981, #D97706)',
+            color: '#063D2E',
+            fontWeight: 800, fontSize: 15,
+            fontFamily: "'Fraunces', serif",
+            letterSpacing: '-0.02em',
+          }}
+        >O</div>
+        <h1 className="text-lg font-semibold text-white" style={{ fontFamily: "'Fraunces', serif", letterSpacing: '-0.02em' }}>{pageTitle}</h1>
       </div>
       <h1 className="text-lg font-semibold text-white lg:hidden sm:block">{pageTitle}</h1>
 
@@ -168,7 +178,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
             onClick={() => setUserMenuOpen((p) => !p)}
             className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-blue-700 shadow-sm bg-white">
+            <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold shadow-sm bg-white" style={{ color: '#0A4F3C' }}>
               {user?.displayName?.[0]?.toUpperCase() ?? user?.email?.[0]?.toUpperCase() ?? 'U'}
             </div>
             <span className="text-sm text-white hidden md:block max-w-[120px] truncate font-medium">

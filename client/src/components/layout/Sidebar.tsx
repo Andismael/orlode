@@ -269,7 +269,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
         to={item.path}
         onClick={onCloseMobile}
         className={`flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-lg transition-all duration-150 ${active ? '' : 'hover:bg-white/10'}`}
-        style={active ? { background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' } : {}}
+        style={active ? { background: 'linear-gradient(135deg, #10B981, #0A4F3C)' } : {}}
       >
         <Icon size={indent ? 15 : 18} className="flex-shrink-0 text-white" />
         <AnimatePresence>
@@ -297,17 +297,30 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
         transition-transform duration-200 ease-in-out`}
       style={{
         width: '100%',
-        background: 'linear-gradient(180deg, #0F0F1A 0%, #1A1A2E 50%, #16213E 100%)',
+        background: 'linear-gradient(180deg, #063D2E 0%, #0A4F3C 50%, #065F46 100%)',
       }}
     >
       {/* Logo */}
       <div className="flex items-center h-16 px-4 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.15)' }}>
         <div className="flex items-center gap-3 min-w-0">
-          <img src="/logo.png" alt="Orlode" className="w-8 h-8 rounded-lg flex-shrink-0 shadow-sm" />
+          <div
+            className="flex-shrink-0 flex items-center justify-center rounded-lg shadow-sm"
+            style={{
+              width: 32, height: 32,
+              background: 'linear-gradient(135deg, #10B981, #D97706)',
+              color: '#063D2E',
+              fontWeight: 800, fontSize: 17,
+              fontFamily: "'Fraunces', serif",
+              letterSpacing: '-0.02em',
+            }}
+          >O</div>
           <AnimatePresence>
             {!collapsed && (
               <motion.div initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: 'auto' }} exit={{ opacity: 0, width: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
-                <span className="font-bold text-white text-sm whitespace-nowrap">Orlode AI</span>
+                <span
+                  className="font-bold text-white text-sm whitespace-nowrap"
+                  style={{ fontFamily: "'Fraunces', serif", letterSpacing: '-0.02em', fontSize: 15 }}
+                >Orlode AI</span>
                 {company?.name && <p className="text-xs whitespace-nowrap truncate max-w-[140px]" style={{ color: 'rgba(255,255,255,0.65)' }}>{company.name}</p>}
               </motion.div>
             )}
@@ -321,7 +334,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
         {(user?.role === 'admin' || user?.role === 'manager') && (
           <NavLink to="/admin" onClick={onCloseMobile}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 ${isActive('/admin') ? '' : 'hover:bg-white/10'}`}
-            style={isActive('/admin') ? { background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' } : {}}>
+            style={isActive('/admin') ? { background: 'linear-gradient(135deg, #10B981, #0A4F3C)' } : {}}>
             <Shield size={18} className="flex-shrink-0 text-white" />
             {!collapsed && <span className="text-sm whitespace-nowrap font-semibold text-white">{t('administration')}</span>}
           </NavLink>
@@ -346,7 +359,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
                   else toggleSection(section.key);
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150 ${sectionActive ? '' : 'hover:bg-white/10'}`}
-                style={sectionActive && !isOpen ? { background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' } : {}}
+                style={sectionActive && !isOpen ? { background: 'linear-gradient(135deg, #10B981, #0A4F3C)' } : {}}
               >
                 <Icon size={18} className="flex-shrink-0 text-white" />
                 {!collapsed && (
@@ -370,7 +383,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
                     {/* Main page link */}
                     <NavLink to={section.path} onClick={onCloseMobile}
                       className={`flex items-center gap-3 pl-9 pr-3 py-1.5 rounded-lg transition-all ${location.pathname === section.path ? '' : 'hover:bg-white/10'}`}
-                      style={location.pathname === section.path ? { background: 'rgba(99,102,241,0.3)' } : {}}>
+                      style={location.pathname === section.path ? { background: 'rgba(16,185,129,0.3)' } : {}}>
                       <span className="text-xs text-white/60">{t('overview')}</span>
                     </NavLink>
                     {section.children.map(child => renderItem(child, true))}
