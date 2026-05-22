@@ -2373,12 +2373,18 @@ router.get('/templates', asyncHandler(async (req: AuthenticatedRequest, res: Res
     const data = cached.data();
     const fetchedAt = data?.['fetchedAt']?.toDate?.();
     if (fetchedAt && Date.now() - fetchedAt.getTime() < 5 * 60 * 1000) {
-      return res.json({ success: true, data: data?.['templates'] ?? [], cached: true });
+      // Templates are stored as a JSON string because Meta returns nested arrays
+      // (e.g. example.body_text = [["John","Mary"]]) which Firestore rejects.
+      const raw = data?.['templatesJson'];
+      let list: unknown = data?.['templates'] ?? [];
+      if (typeof raw === 'string') { try { list = JSON.parse(raw); } catch { /* fall back to legacy field */ } }
+      return res.json({ success: true, data: list, cached: true });
     }
   }
 
   const templates = await whatsappService.fetchTemplates(companyId);
-  await cacheRef.set({ templates, fetchedAt: new Date() }, { merge: true });
+  // Store as JSON string — Firestore can't serialize nested arrays inside the template components.
+  await cacheRef.set({ templatesJson: JSON.stringify(templates), fetchedAt: new Date() }, { merge: true });
   res.json({ success: true, data: templates, cached: false });
 }));
 
