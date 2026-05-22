@@ -79,6 +79,8 @@ const PublicResidencePage = lazy(() => import('@/pages/public/PublicResidencePag
 const CloneChatPage = lazy(() => import('@/pages/public/CloneChatPage'));
 const CloneVoicePage = lazy(() => import('@/pages/public/CloneVoicePage'));
 const MyStatusPage = lazy(() => import('@/pages/public/MyStatusPage'));
+const WhatsAppLandingPage = lazy(() => import('@/pages/public/WhatsAppLandingPage'));
+const TelegramLandingPage = lazy(() => import('@/pages/public/TelegramLandingPage'));
 const ApiKeysPage = lazy(() => import('@/pages/settings/ApiKeysPage'));
 const CloneSetupPage = lazy(() => import('@/pages/admin/CloneSetupPage'));
 const CloneInboxPage = lazy(() => import('@/pages/admin/CloneInboxPage'));
@@ -379,6 +381,10 @@ export default function App() {
         <Route path="/residence/:slug" element={<PublicResidencePage />} />
         <Route path="/residences/:slug" element={<PublicResidencePage />} />
         <Route path="/shop/:companyId/:storeId" element={<PublicShopPage />} />
+
+        {/* ── Channel landing pages (marketing) ──────────────────────── */}
+        <Route path="/whatsapp" element={<WhatsAppLandingPage />} />
+        <Route path="/telegram" element={<TelegramLandingPage />} />
 
         {/* ── Public / Auth ─────────────────────────────────────────── */}
         <Route element={<PublicLayout />}>
