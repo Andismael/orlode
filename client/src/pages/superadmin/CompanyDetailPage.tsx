@@ -455,6 +455,7 @@ function PermissionsSection({ companyId, company, onRefresh }: {
   const [hostedByOrlode, setHostedByOrlode] = useState(c.hostedByOrlode === true);
   const [providers, setProviders] = useState<Set<string>>(new Set(c.allowedProviders ?? []));
   const [saving, setSaving] = useState<string | null>(null);
+  const [hostingError, setHostingError] = useState<string | null>(null);
 
   const PROVIDERS = [
     { id: 'claude',     label: 'Claude (Anthropic)', desc: 'Modèles Claude 4.x pour chat + agents' },
@@ -465,12 +466,21 @@ function PermissionsSection({ companyId, company, onRefresh }: {
 
   // saveHosting(true) → company uses Orlode's Firebase + AI keys (free hosting)
   // saveHosting(false) → company must set up BYOE (own Firebase). Default.
+  // Optimistic: flip UI immediately, revert on error so the toggle never feels frozen.
   const saveHosting = async (hosted: boolean) => {
     setSaving('hosting');
+    setHostingError(null);
+    const previous = hostedByOrlode;
+    setHostedByOrlode(hosted);
     try {
       await api.patch(`/superadmin/companies/${companyId}/hosted-by-orlode`, { hosted });
-      setHostedByOrlode(hosted);
       onRefresh();
+    } catch (err) {
+      const e = err as { status?: number; message?: string; response?: { data?: { message?: string; error?: string } } };
+      const serverMsg = e.response?.data?.message ?? e.response?.data?.error ?? e.message ?? 'Erreur inconnue';
+      console.error('[Hébergement Orlode] PATCH failed', err);
+      setHostingError(`${e.status ? `HTTP ${e.status} — ` : ''}${serverMsg}`);
+      setHostedByOrlode(previous);
     } finally { setSaving(null); }
   };
 
@@ -523,6 +533,11 @@ function PermissionsSection({ companyId, company, onRefresh }: {
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${hostedByOrlode ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
         </div>
+        {hostingError && (
+          <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
+            ⚠️ {hostingError}
+          </p>
+        )}
       </div>
 
       {/* Allowed AI providers */}
