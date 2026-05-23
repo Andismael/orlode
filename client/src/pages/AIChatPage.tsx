@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { useNavigate } from 'react-router-dom';
 import api from '@/services/api';
 import { auth } from '@/services/firebase';
 import {
@@ -353,7 +355,9 @@ function MessageBubble({ msg, agent }: any) {
               : `0 14px 32px -8px ${agent.color}40, 0 6px 16px -4px rgba(10,42,32,0.10), inset 0 1px 0 rgba(255,255,255,0.9)`;
           }}
         >
-          <div style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div>
+          <div style={{ whiteSpace: 'pre-wrap' }} className="aichat-md">
+            <ReactMarkdown components={mdComponents}>{msg.text}</ReactMarkdown>
+          </div>
         </div>
 
         {(time || !isUser) && (
@@ -1240,6 +1244,47 @@ function ChatArea({ agent, onToggleAgents, conversationId, onConversationCreated
     </main>
   );
 }
+
+// ============ MARKDOWN RENDERER FOR CHAT BUBBLES ============
+// Internal /paths use react-router (same SPA), external http(s) URLs open new tab.
+// Resolves the "[Ouvrir Knowledge](/agents/knowledge) ce n'est pas cliquable" bug
+// where the orchestrator's markdown links rendered as raw text.
+function SmartChatLink({ href, children }: { href?: string; children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const isInternal = !!href && href.startsWith('/') && !href.startsWith('//');
+  if (isInternal) {
+    return (
+      <a href={href} onClick={(e) => { e.preventDefault(); navigate(href!); }}
+        style={{ color: '#0A4F3C', textDecoration: 'underline', fontWeight: 600, cursor: 'pointer' }}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      style={{ color: '#0A4F3C', textDecoration: 'underline', fontWeight: 600 }}>
+      {children}
+    </a>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mdComponents: any = {
+  p:      ({ children }: { children: React.ReactNode }) => <p style={{ margin: '0 0 6px', lineHeight: 1.55 }}>{children}</p>,
+  ul:     ({ children }: { children: React.ReactNode }) => <ul style={{ paddingLeft: 18, margin: '4px 0 6px', listStyle: 'disc' }}>{children}</ul>,
+  ol:     ({ children }: { children: React.ReactNode }) => <ol style={{ paddingLeft: 18, margin: '4px 0 6px', listStyle: 'decimal' }}>{children}</ol>,
+  li:     ({ children }: { children: React.ReactNode }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+  strong: ({ children }: { children: React.ReactNode }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+  em:     ({ children }: { children: React.ReactNode }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+  code:   ({ children }: { children: React.ReactNode }) => (
+    <code style={{ background: 'rgba(10,42,32,0.08)', padding: '1px 5px', borderRadius: 4, fontSize: '0.9em', fontFamily: "'JetBrains Mono', monospace" }}>{children}</code>
+  ),
+  h1: ({ children }: { children: React.ReactNode }) => <h1 style={{ fontSize: 16, fontWeight: 700, margin: '6px 0 4px' }}>{children}</h1>,
+  h2: ({ children }: { children: React.ReactNode }) => <h2 style={{ fontSize: 14, fontWeight: 700, margin: '6px 0 4px' }}>{children}</h2>,
+  h3: ({ children }: { children: React.ReactNode }) => <h3 style={{ fontSize: 13, fontWeight: 700, margin: '4px 0 3px' }}>{children}</h3>,
+  a:  ({ href, children }: { href?: string; children: React.ReactNode }) => <SmartChatLink href={href}>{children}</SmartChatLink>,
+  hr: () => <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid rgba(10,42,32,0.1)' }} />,
+};
 
 // ============ MAIN ============
 export default function AIChatPage() {
