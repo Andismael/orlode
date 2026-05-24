@@ -374,8 +374,30 @@ export default function AboutPage() {
           </div>
           <DemoReel />
 
+          {/* Orlode Talents teaser — separate product, same Firebase backend */}
+          <Link to="/talents" className="block mt-12 max-w-3xl mx-auto no-underline">
+            <div className="rounded-3xl bg-gradient-to-br from-amber-500/15 via-orange-500/8 to-emerald-500/10 border border-amber-400/30 backdrop-blur-xl p-6 hover:scale-[1.02] hover:border-amber-400/60 transition-all group">
+              <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-2xl shadow-xl shadow-amber-500/30 flex-shrink-0">
+                  🎬
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-amber-300 tracking-wider">{lp('NOUVEAU PRODUIT · MÊME INFRA', 'NEW PRODUCT · SAME BACKEND')}</p>
+                  <h3 className="text-xl sm:text-2xl font-black text-white mt-0.5">
+                    Orlode <em className="italic text-amber-300">Talents</em>
+                  </h3>
+                  <p className="text-sm text-white/65 mt-1">{lp(
+                    'Marketplace vidéo de recrutement. 1 minute, pas de CV, contact WhatsApp direct.',
+                    'Video-first recruiting marketplace. 1 minute, no resume, direct WhatsApp contact.',
+                  )}</p>
+                </div>
+                <span className="text-amber-300 text-2xl group-hover:translate-x-1 transition-transform">→</span>
+              </div>
+            </div>
+          </Link>
+
           {/* Channel demo links — point visitors to the standalone landing pages */}
-          <div className="mt-14 grid sm:grid-cols-2 gap-4 max-w-3xl mx-auto">
+          <div className="mt-6 grid sm:grid-cols-2 gap-4 max-w-3xl mx-auto">
             <Link to="/whatsapp" className="group no-underline">
               <div className="rounded-3xl bg-gradient-to-br from-emerald-500/15 via-emerald-500/8 to-transparent border border-emerald-400/30 backdrop-blur-xl p-6 hover:scale-[1.02] hover:border-emerald-400/60 transition-all">
                 <div className="flex items-center gap-4">
