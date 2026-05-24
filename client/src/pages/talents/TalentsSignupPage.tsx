@@ -13,15 +13,16 @@
  * On submit writes talents_profiles/{auto-id} with status='pending_analysis'
  * (SuperAdmin reviews via /superadmin/talents and flips to 'active').
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import { doc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '@/services/firebase';
-import { ArrowLeft, Sparkles, Loader2, Check, Mail, PlayCircle } from 'lucide-react';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { auth, db, storage } from '@/services/firebase';
+import { ArrowLeft, Sparkles, Loader2, Check, Mail, PlayCircle, Upload, Link2, Film, X } from 'lucide-react';
 import { useSEO } from '@/hooks/useSEO';
 import { useAuthStore } from '@/store/authStore';
 import { M, MOBILE_CSS } from '@/components/mobile/mobileDesign';
@@ -63,7 +64,13 @@ export default function TalentsSignupPage() {
   const [sector, setSector] = useState<string>('');
   const [skills, setSkills] = useState<string>('');
   const [tagline, setTagline] = useState('');
+  const [videoMode, setVideoMode] = useState<'link' | 'upload'>('link');
   const [videoUrl, setVideoUrl] = useState('');
+  const [videoDurationSec, setVideoDurationSec] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [whatsapp, setWhatsapp] = useState('');
   const [language, setLanguage] = useState<string>('Français');
   const [availability, setAvailability] = useState<string>('open');
@@ -98,6 +105,66 @@ export default function TalentsSignupPage() {
   const skillsArr = skills.split(',').map(s => s.trim()).filter(Boolean).slice(0, 3);
   const isUrl = /^https?:\/\/.+/i.test(videoUrl.trim());
 
+  const probeDuration = (file: File): Promise<number> => new Promise(resolve => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(Number.isFinite(v.duration) ? Math.round(v.duration) : 0);
+    };
+    v.onerror = () => { URL.revokeObjectURL(url); resolve(0); };
+    v.src = url;
+  });
+
+  const handleFile = async (file: File) => {
+    if (!user) return;
+    setUploadError(null);
+
+    if (!file.type.startsWith('video/')) {
+      setUploadError('Le fichier doit être une vidéo (MP4, MOV, WebM…).');
+      return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      setUploadError(`Vidéo trop lourde (${(file.size / 1024 / 1024).toFixed(1)} Mo). Limite : 100 Mo.`);
+      return;
+    }
+
+    setUploadBusy(true);
+    setUploadProgress(0);
+    try {
+      const duration = await probeDuration(file);
+      setVideoDurationSec(duration);
+
+      const ext = (file.name.split('.').pop() || 'mp4').toLowerCase().slice(0, 5);
+      const path = `talents/${user.uid}/${Date.now()}.${ext}`;
+      const ref = storageRef(storage, path);
+      const task = uploadBytesResumable(ref, file, { contentType: file.type });
+
+      task.on('state_changed',
+        snap => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+        err => { setUploadError(err.message); setUploadBusy(false); },
+        async () => {
+          const url = await getDownloadURL(task.snapshot.ref);
+          setVideoUrl(url);
+          setUploadBusy(false);
+          setUploadProgress(100);
+        },
+      );
+    } catch (err) {
+      setUploadError((err as Error).message);
+      setUploadBusy(false);
+    }
+  };
+
+  const clearVideo = () => {
+    setVideoUrl('');
+    setVideoDurationSec(0);
+    setUploadProgress(0);
+    setUploadError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const canSubmit = !!user
     && displayName.trim().length >= 2
     && city.trim().length >= 2
@@ -125,7 +192,7 @@ export default function TalentsSignupPage() {
         skills:       skillsArr,
         tagline:      tagline.trim(),
         videoUrl:     videoUrl.trim(),
-        videoDuration: 0,
+        videoDuration: videoDurationSec || 0,
         thumbnailUrl: '',
         availability,
         language,
@@ -237,24 +304,147 @@ export default function TalentsSignupPage() {
                   placeholder="Ce que tu fais en 1 phrase. Ex : Développeuse fullstack avec 5 ans d'XP, focus produit." />
               </Section>
 
-              <Section title="4. Ta vidéo (1 min)" subtitle="Colle le lien d'une vidéo YouTube / Vimeo / Drive — montre qui tu es et ce que tu sais faire.">
-                <Input label="Lien vidéo *" value={videoUrl} onChange={setVideoUrl}
-                  placeholder="https://youtu.be/… ou https://drive.google.com/…" />
-                {videoUrl && !isUrl && (
-                  <p style={{ fontSize: 11, color: '#991B1B', marginTop: -6 }}>
-                    Le lien doit commencer par http(s)://
-                  </p>
-                )}
-                {videoUrl && isUrl && (
-                  <a href={videoUrl} target="_blank" rel="noopener noreferrer" className="tap-card" style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    background: M.emeraldSoft, color: M.emeraldDark,
-                    padding: '8px 12px', borderRadius: 100,
-                    fontSize: 12, fontWeight: 700,
-                    textDecoration: 'none', marginTop: -4,
-                  }}>
-                    <PlayCircle size={14} /> Tester le lien
-                  </a>
+              <Section title="4. Ta vidéo (1 min)" subtitle="Téléverse ton MP4 / MOV / WebM directement, ou colle un lien YouTube / Vimeo / Drive.">
+                <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                  <button
+                    onClick={() => { setVideoMode('upload'); if (videoUrl && isUrl) clearVideo(); }}
+                    className="tap-card"
+                    style={chipStyle(videoMode === 'upload')}
+                  >
+                    <Upload size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
+                    Téléverser
+                  </button>
+                  <button
+                    onClick={() => { setVideoMode('link'); if (videoUrl && !isUrl) clearVideo(); }}
+                    className="tap-card"
+                    style={chipStyle(videoMode === 'link')}
+                  >
+                    <Link2 size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
+                    Lien externe
+                  </button>
+                </div>
+
+                {videoMode === 'upload' ? (
+                  <>
+                    {!videoUrl && !uploadBusy && (
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="tap-card"
+                        style={{
+                          background: '#F9FAFB',
+                          border: `2px dashed ${M.emerald}50`,
+                          borderRadius: 14,
+                          padding: '24px 16px',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Film size={28} color={M.emerald} style={{ marginBottom: 8 }} />
+                        <div style={{ fontSize: 13, fontWeight: 700, color: M.ink, marginBottom: 4 }}>
+                          Choisir une vidéo
+                        </div>
+                        <div style={{ fontSize: 11, color: M.inkSoft }}>
+                          MP4, MOV, WebM · max 100 Mo · idéalement 1 min
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="video/*"
+                          style={{ display: 'none' }}
+                          onChange={e => {
+                            const f = e.target.files?.[0];
+                            if (f) handleFile(f);
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {uploadBusy && (
+                      <div style={{
+                        background: '#F9FAFB',
+                        border: '1px solid rgba(31,41,55,0.1)',
+                        borderRadius: 12,
+                        padding: 14,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                          <Loader2 size={16} className="animate-spin" color={M.emerald} />
+                          <div style={{ fontSize: 13, fontWeight: 600, color: M.ink }}>
+                            Téléversement… {uploadProgress}%
+                          </div>
+                        </div>
+                        <div style={{
+                          height: 6, background: '#E5E7EB',
+                          borderRadius: 100, overflow: 'hidden',
+                        }}>
+                          <div style={{
+                            height: '100%',
+                            width: `${uploadProgress}%`,
+                            background: `linear-gradient(90deg, ${M.emerald}, ${M.greenDeep})`,
+                            transition: 'width 0.2s ease',
+                          }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {videoUrl && !uploadBusy && (
+                      <div style={{
+                        background: M.emeraldSoft,
+                        border: `1px solid ${M.emerald}40`,
+                        borderRadius: 12,
+                        padding: 12,
+                        display: 'flex', alignItems: 'center', gap: 10,
+                      }}>
+                        <Check size={16} color={M.emeraldDark} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: M.emeraldDark }}>
+                            Vidéo prête
+                          </div>
+                          <div style={{ fontSize: 11, color: M.inkSoft }}>
+                            {videoDurationSec > 0 ? `Durée : ${videoDurationSec}s` : 'Hébergée sur Firebase Storage'}
+                          </div>
+                        </div>
+                        <a href={videoUrl} target="_blank" rel="noopener noreferrer" style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          color: M.emeraldDark, fontSize: 12, fontWeight: 700, textDecoration: 'none',
+                        }}>
+                          <PlayCircle size={14} /> Voir
+                        </a>
+                        <button onClick={clearVideo} className="tap-card" style={{
+                          background: 'transparent', border: 'none',
+                          color: M.inkSoft, cursor: 'pointer', padding: 4,
+                        }}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )}
+
+                    {uploadError && (
+                      <p style={{ fontSize: 11, color: '#991B1B', marginTop: 8 }}>
+                        ⚠️ {uploadError}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Input label="Lien vidéo *" value={videoUrl} onChange={setVideoUrl}
+                      placeholder="https://youtu.be/… ou https://drive.google.com/…" />
+                    {videoUrl && !isUrl && (
+                      <p style={{ fontSize: 11, color: '#991B1B', marginTop: -6 }}>
+                        Le lien doit commencer par http(s)://
+                      </p>
+                    )}
+                    {videoUrl && isUrl && (
+                      <a href={videoUrl} target="_blank" rel="noopener noreferrer" className="tap-card" style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        background: M.emeraldSoft, color: M.emeraldDark,
+                        padding: '8px 12px', borderRadius: 100,
+                        fontSize: 12, fontWeight: 700,
+                        textDecoration: 'none', marginTop: -4,
+                      }}>
+                        <PlayCircle size={14} /> Tester le lien
+                      </a>
+                    )}
+                  </>
                 )}
               </Section>
 
