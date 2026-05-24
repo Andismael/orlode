@@ -153,7 +153,10 @@ export default function InfluencersSignupPage() {
         savedAt: serverTimestamp(),
       });
 
-      navigate('/influenceurs/feed?welcome=1');
+      // After signup, send the creator directly to the social-links manager
+      // so they can paste their Instagram/TikTok/etc URLs and declared
+      // followers — that's what brands will actually click to verify.
+      navigate('/influenceurs/mes-liens?welcome=1');
     } catch (err) {
       setError((err as Error).message);
     } finally {
