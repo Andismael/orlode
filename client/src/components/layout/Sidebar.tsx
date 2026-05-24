@@ -233,6 +233,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
   const BOTTOM_ITEMS_T: NavItem[] = [
     { path: '/marketplace',        label: 'Marketplace',  icon: ShoppingBag },
     { path: '/talents',            label: 'Talents',      icon: Briefcase, newTab: true, badge: 'NEW' },
+    { path: '/influenceurs',       label: 'Influenceurs', icon: Megaphone, newTab: true, badge: 'NEW' },
     { path: '/admin/billing',      label: 'Abonnement',   icon: Crown },
     { path: '/creator',            label: 'Createur',     icon: Sparkles },
     { path: '/feedback',           label: 'Feedback',     icon: MessageSquarePlus },
