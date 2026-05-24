@@ -86,6 +86,36 @@ export const MOBILE_CSS = `
 .m-float { animation:m-float 3s ease-in-out infinite; }
 .m-hide-scrollbar::-webkit-scrollbar { display:none; }
 .m-hide-scrollbar { -ms-overflow-style:none; scrollbar-width:none; }
+
+/* ── Responsive containers — width grows on larger screens.
+   !important needed because pages set max-width inline (560) and inline
+   styles otherwise win over class selectors. ─────────────────────── */
+.m-wrap        { max-width: 560px !important; margin: 0 auto; width: 100%; }
+.m-wrap-lg     { max-width: 560px !important; margin: 0 auto; width: 100%; }
+.m-wrap-xl     { max-width: 560px !important; margin: 0 auto; width: 100%; }
+@media (min-width: 768px) {
+  .m-wrap-lg   { max-width: 880px !important; }
+  .m-wrap-xl   { max-width: 960px !important; }
+  .m-grid-md-2 { grid-template-columns: repeat(2, 1fr) !important; }
+  .m-grid-md-3 { grid-template-columns: repeat(3, 1fr) !important; }
+  .m-grid-md-4 { grid-template-columns: repeat(4, 1fr) !important; }
+}
+@media (min-width: 1024px) {
+  .m-wrap-lg   { max-width: 1080px !important; }
+  .m-wrap-xl   { max-width: 1200px !important; }
+  .m-grid-lg-3 { grid-template-columns: repeat(3, 1fr) !important; }
+  .m-grid-lg-4 { grid-template-columns: repeat(4, 1fr) !important; }
+}
+/* Two-column section on desktop (hero + visual side-by-side) */
+.m-2col       { display: flex; flex-direction: column; gap: 24px; }
+@media (min-width: 1024px) {
+  .m-2col     { flex-direction: row; align-items: center; gap: 40px; }
+  .m-2col > * { flex: 1; min-width: 0; }
+}
+/* Sticky CTA hides on desktop — desktop users have always-visible CTAs in the page */
+@media (min-width: 1024px) {
+  .m-sticky-cta { display: none !important; }
+}
 `;
 
 export function MobileGlobalStyles() {

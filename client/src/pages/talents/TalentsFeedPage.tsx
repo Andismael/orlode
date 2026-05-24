@@ -83,7 +83,7 @@ export default function TalentsFeedPage() {
       </header>
 
       <main style={{ padding: '18px 14px 120px' }}>
-        <div style={{ maxWidth: 560, margin: '0 auto' }}>
+        <div className="m-wrap-xl" style={{ maxWidth: 560, margin: '0 auto' }}>
           {/* Error */}
           {error && (
             <div style={{
@@ -144,8 +144,8 @@ export default function TalentsFeedPage() {
           {talents !== null && talents.length > 0 && (
             <ul style={{
               listStyle: 'none', padding: 0, margin: 0,
-              display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10,
-            }} className="m-stagger">
+              display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12,
+            }} className="m-stagger m-grid-md-3 m-grid-lg-4">
               {talents.map(t => (
                 <li key={t.id}>
                   <a

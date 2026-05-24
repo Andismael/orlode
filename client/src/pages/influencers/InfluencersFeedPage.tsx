@@ -121,7 +121,7 @@ export default function InfluencersFeedPage() {
       </header>
 
       <main style={{ padding: '18px 14px 120px' }}>
-        <div style={{ maxWidth: 560, margin: '0 auto' }}>
+        <div className="m-wrap-xl" style={{ maxWidth: 560, margin: '0 auto' }}>
           {error && (
             <div style={{
               background: '#FEE2E2', border: '1px solid #FCA5A5',
@@ -159,8 +159,8 @@ export default function InfluencersFeedPage() {
           {filtered !== null && filtered.length > 0 && (
             <ul style={{
               listStyle: 'none', padding: 0, margin: 0,
-              display: 'grid', gridTemplateColumns: '1fr', gap: 10,
-            }} className="m-stagger">
+              display: 'grid', gridTemplateColumns: '1fr', gap: 12,
+            }} className="m-stagger m-grid-md-2 m-grid-lg-3">
               {filtered.map(i => (
                 <li key={i.id}>
                   <article className="tap-card" style={{

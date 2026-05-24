@@ -49,7 +49,7 @@ function Hero() {
       <StarsBackdrop count={50} />
       <SlowRotateRing size={300} color={M.cream} />
 
-      <div style={{ position: 'relative', zIndex: 2, maxWidth: 560, margin: '0 auto' }}>
+      <div className="m-wrap-lg" style={{ position: 'relative', zIndex: 2, maxWidth: 560, margin: '0 auto' }}>
         {/* Top bar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 36 }}>
           <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none', color: M.cream }}>
@@ -168,7 +168,7 @@ function HowItWorks() {
 
   return (
     <section style={{ padding: '40px 18px', background: M.creamWarm }}>
-      <div style={{ maxWidth: 560, margin: '0 auto' }}>
+      <div className="m-wrap-lg" style={{ maxWidth: 560, margin: '0 auto' }}>
         <div className="m-pill" style={{
           background: M.emeraldSoft, color: M.emeraldDark,
           border: `1px solid ${M.emerald}40`, marginBottom: 12,
@@ -223,7 +223,7 @@ function HowItWorks() {
 function ForRecruiters() {
   return (
     <section style={{ padding: '40px 18px', background: M.cream }}>
-      <div style={{ maxWidth: 560, margin: '0 auto' }}>
+      <div className="m-wrap-lg" style={{ maxWidth: 560, margin: '0 auto' }}>
         <div className="m-pill" style={{
           background: M.violetSoft, color: M.violetDeep,
           border: `1px solid ${M.violet}40`, marginBottom: 12,
@@ -276,7 +276,7 @@ function FeedTeaser() {
       padding: '40px 18px',
       background: `linear-gradient(180deg, ${M.cream} 0%, ${M.creamDeep} 100%)`,
     }}>
-      <div style={{ maxWidth: 560, margin: '0 auto' }}>
+      <div className="m-wrap-lg" style={{ maxWidth: 560, margin: '0 auto' }}>
         <div className="m-pill" style={{
           background: M.goldSoft, color: M.goldDeep,
           border: `1px solid ${M.gold}40`, marginBottom: 12,
@@ -317,7 +317,7 @@ function Footer() {
       position: 'relative', overflow: 'hidden',
     }}>
       <div className="m-grain" />
-      <div style={{ position: 'relative', zIndex: 2, maxWidth: 560, margin: '0 auto' }}>
+      <div className="m-wrap-lg" style={{ position: 'relative', zIndex: 2, maxWidth: 560, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
           <div style={{
             width: 36, height: 36, borderRadius: 10,
@@ -353,7 +353,7 @@ function Footer() {
 
 function StickyCTA() {
   return (
-    <div style={{
+    <div className="m-sticky-cta" style={{
       position: 'fixed', bottom: 0, left: 0, right: 0,
       background: 'linear-gradient(180deg, transparent 0%, rgba(255,250,240,0.95) 30%, rgba(255,250,240,1) 100%)',
       padding: '12px 14px 16px', zIndex: 50, pointerEvents: 'none',

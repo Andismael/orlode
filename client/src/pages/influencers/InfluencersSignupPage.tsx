@@ -169,7 +169,7 @@ export default function InfluencersSignupPage() {
         position: 'sticky', top: 0, zIndex: 30,
         backdropFilter: 'blur(20px)',
       }}>
-        <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="m-wrap-lg" style={{ maxWidth: 560, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
           <Link to="/influenceurs" style={{
             color: M.cream, textDecoration: 'none',
             background: 'rgba(255,250,240,0.12)', border: `1px solid ${M.cream}25`,
@@ -186,7 +186,7 @@ export default function InfluencersSignupPage() {
       </header>
 
       <main style={{ padding: '18px 18px 120px' }}>
-        <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div className="m-wrap" style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
 
           {/* Auth section — collapsed once logged in */}
           {!user ? (
