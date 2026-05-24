@@ -316,7 +316,7 @@ router.get('/:id/public', asyncHandler(async (req: Request, res: Response) => {
   const data = snap.data() as Record<string, unknown>;
   if (data['status'] !== 'active') throw new AppError('Talent not available', 403);
   // Strip private fields — never return whatsappNumber via this endpoint
-  const safe = { ...data, id: snap.id };
+  const safe: Record<string, unknown> = { ...data, id: snap.id };
   delete safe['whatsappNumber'];
   res.json({ success: true, data: safe });
 }));

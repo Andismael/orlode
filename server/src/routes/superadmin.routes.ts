@@ -10,12 +10,60 @@ import type { Response } from 'express';
 import { getFirestore } from '../config/firebase.config';
 import { AppError } from '../middleware/error.middleware';
 import { seedDemoData, clearDemoData } from '../services/seedDemoData';
+import { whatsappService } from '../services/whatsapp/whatsappService';
+import { logger } from '../utils/logger';
 
 const router = Router();
 router.use(authMiddleware);
 
 // Master super admin — always has access (owner)
 const MASTER_UID = 'J4vwyMVHP3ZeHdTsC1gOMjeOTRA2';
+const PLATFORM_COMPANY_ID = process.env['ORLODE_PLATFORM_COMPANY_ID'] ?? MASTER_UID;
+
+/**
+ * Fire-and-forget WhatsApp notification when SuperAdmin activates a profile.
+ * Never throws — logs failures so the moderation flip succeeds even if
+ * WhatsApp is down or the candidate has no number.
+ */
+async function notifyActivation(opts: {
+  kind: 'talents' | 'influencers';
+  docId: string;
+  displayName: string;
+  publicPath: string;
+}): Promise<void> {
+  try {
+    const db = getFirestore();
+    const profileCol = opts.kind === 'talents' ? 'talents_profiles' : 'influencers_profiles';
+    const privateSnap = await db.collection(profileCol).doc(opts.docId).collection('private').doc('contact').get();
+    const phone = (privateSnap.data() as { whatsappNumber?: string } | undefined)?.whatsappNumber;
+    if (!phone) {
+      logger.info('[ActivationNotify] No WhatsApp number on file — skipping', { kind: opts.kind, docId: opts.docId });
+      return;
+    }
+    const config = await whatsappService.getConfig(PLATFORM_COMPANY_ID).catch(() => null);
+    if (!config) {
+      logger.warn('[ActivationNotify] Platform WhatsApp not configured — skipping', { kind: opts.kind });
+      return;
+    }
+    const first = opts.displayName.split(' ')[0] || 'toi';
+    const product = opts.kind === 'talents' ? 'Orlode Talents' : 'Orlode Influenceurs';
+    const audience = opts.kind === 'talents' ? 'Les recruteurs' : 'Les marques';
+    const text =
+      `🎉 Bravo ${first}!\n\n` +
+      `Ton profil *${product}* vient d'être validé. Tu es maintenant visible publiquement.\n\n` +
+      `👉 https://orlode.com${opts.publicPath}\n\n` +
+      `${audience} peuvent te contacter directement par WhatsApp via notre numéro plateforme. ` +
+      `Tu recevras chaque demande ici, dans cette conversation.\n\n` +
+      `— Orlode`;
+    await whatsappService.sendMessage(config, phone, text, PLATFORM_COMPANY_ID, `${opts.kind}-activation`);
+    logger.info('[ActivationNotify] Sent', { kind: opts.kind, docId: opts.docId });
+  } catch (err) {
+    logger.warn('[ActivationNotify] Failed (non-blocking)', {
+      kind: opts.kind, docId: opts.docId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 router.use(asyncHandler(async (req: AuthenticatedRequest, _res: Response, next: () => void) => {
   const uid = req.user?.uid;
@@ -924,6 +972,12 @@ router.patch('/talents/:id/status', asyncHandler(async (req: AuthenticatedReques
     throw new AppError(`Invalid status: ${status}`, 400);
   }
   const db = getFirestore();
+  // Read the previous status so we can detect the pending→active transition
+  // and fire a one-time activation WhatsApp.
+  const beforeSnap = await db.collection('talents_profiles').doc(req.params.id).get();
+  const beforeStatus = (beforeSnap.data() as { status?: string } | undefined)?.status ?? 'pending_analysis';
+  const beforeDisplayName = (beforeSnap.data() as { displayName?: string } | undefined)?.displayName ?? '';
+
   const update: Record<string, unknown> = {
     status,
     moderatedBy: req.user?.uid ?? null,
@@ -934,6 +988,18 @@ router.patch('/talents/:id/status', asyncHandler(async (req: AuthenticatedReques
   // feed (ordered by publishedAt desc) sorts it correctly.
   if (status === 'active') update['publishedAt'] = new Date();
   await db.collection('talents_profiles').doc(req.params.id).set(update, { merge: true });
+
+  // Fire WhatsApp notification on the pending→active transition only
+  // (non-blocking — failure is logged, response still succeeds).
+  if (status === 'active' && beforeStatus !== 'active') {
+    notifyActivation({
+      kind: 'talents',
+      docId: req.params.id,
+      displayName: beforeDisplayName,
+      publicPath: `/talents/${req.params.id}`,
+    }).catch(() => {});
+  }
+
   res.json({ success: true, data: update });
 }));
 
@@ -979,6 +1045,11 @@ router.patch('/influencers/:id/status', asyncHandler(async (req: AuthenticatedRe
     throw new AppError(`Invalid status: ${status}`, 400);
   }
   const db = getFirestore();
+  // Read the previous status to detect the pending→active transition.
+  const beforeSnap = await db.collection('influencers_profiles').doc(req.params.id).get();
+  const beforeStatus = (beforeSnap.data() as { status?: string } | undefined)?.status ?? 'pending';
+  const beforeDisplayName = (beforeSnap.data() as { displayName?: string } | undefined)?.displayName ?? '';
+
   const update: Record<string, unknown> = {
     moderatedBy: req.user?.uid ?? null,
     moderatedAt: new Date(),
@@ -986,7 +1057,18 @@ router.patch('/influencers/:id/status', asyncHandler(async (req: AuthenticatedRe
   };
   if (status !== undefined) update['status'] = status;
   if (typeof verified === 'boolean') update['verified'] = verified;
+  if (status === 'active' && beforeStatus !== 'active') update['publishedAt'] = new Date();
   await db.collection('influencers_profiles').doc(req.params.id).set(update, { merge: true });
+
+  if (status === 'active' && beforeStatus !== 'active') {
+    notifyActivation({
+      kind: 'influencers',
+      docId: req.params.id,
+      displayName: beforeDisplayName,
+      publicPath: `/influenceurs/${req.params.id}`,
+    }).catch(() => {});
+  }
+
   res.json({ success: true, data: update });
 }));
 
