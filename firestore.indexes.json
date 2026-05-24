@@ -61,6 +61,30 @@
       ]
     },
     {
+      "collectionGroup": "talent_conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recruiterUid", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "talent_conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "candidatePhone", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "influencers_profiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "lastActiveAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "meetings",
       "queryScope": "COLLECTION",
       "fields": [

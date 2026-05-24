@@ -297,6 +297,52 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
         ...(incoming.referral ? { referral: incoming.referral } : {}),
       });
 
+      // ── Talents inbox routing ─────────────────────────────────────────────
+      // When the platform's WhatsApp number receives a message AND the sender
+      // is a candidate who has an open talent_conversation, route the message
+      // to the inbox thread + increment unreadByRecruiter. Skip the regular
+      // orchestrator/clone path — this is a recruiter-mediated conversation,
+      // not a generic clone interaction.
+      const PLATFORM_COMPANY = process.env['ORLODE_PLATFORM_COMPANY_ID'] ?? 'J4vwyMVHP3ZeHdTsC1gOMjeOTRA2';
+      if (companyId === PLATFORM_COMPANY && finalMessage) {
+        try {
+          const fromDigits = incoming.from.replace(/\D/g, '');
+          const talentsConvSnap = await db.collection('talent_conversations')
+            .where('candidatePhone', '==', fromDigits)
+            .orderBy('lastMessageAt', 'desc')
+            .limit(1)
+            .get()
+            .catch(() => null);
+          if (talentsConvSnap && !talentsConvSnap.empty) {
+            const convDoc = talentsConvSnap.docs[0];
+            const convRef = convDoc.ref;
+            const now = new Date();
+            const FieldValue = (await import('firebase-admin/firestore')).FieldValue;
+            await convRef.update({
+              lastMessageAt:     now,
+              lastMessageText:   finalMessage,
+              lastMessageFrom:   'candidate',
+              messageCount:      (convDoc.data()['messageCount'] ?? 0) + 1,
+              unreadByRecruiter: FieldValue.increment(1),
+            });
+            await convRef.collection('messages').add({
+              from:    'candidate',
+              text:    finalMessage,
+              sentAt:  now,
+              receivedViaPhoneNumberId: phoneNumberId,
+            });
+            logger.info('[TalentsInbox] Candidate reply routed to conversation', {
+              conversationId: convDoc.id, candidatePhone: fromDigits,
+            });
+            return; // skip orchestrator — this is a Talents-only inbound
+          }
+        } catch (err) {
+          logger.warn('[TalentsInbox] Routing failed (non-blocking, falling through to orchestrator)', {
+            error: err instanceof Error ? err.message : err,
+          });
+        }
+      }
+
       // ── Capture Click-to-WhatsApp ad attribution ────────────────────────
       // If this conversation started from a Meta ad, attach the referral to
       // the customer's conversation doc + bump per-campaign stats.

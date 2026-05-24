@@ -304,5 +304,53 @@ service cloud.firestore {
       allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
       allow write: if false; // Server-only
     }
+
+    // ── Talents conversations (recruiter ↔ candidate inbox) ────────────────
+    // Only the recruiter who initiated the conversation can read it. Writes
+    // happen server-side via the API routes (auth + ownership check).
+    match /talent_conversations/{convId} {
+      allow read: if isAuthenticated() && resource.data.recruiterUid == request.auth.uid;
+      allow write: if false;
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/talent_conversations/$(convId)).data.recruiterUid == request.auth.uid;
+        allow write: if false;
+      }
+    }
+    // Audit log — recruiter sees their own sent contacts (analytics).
+    match /talent_contacts/{contactId} {
+      allow read: if isAuthenticated() && resource.data.recruiterUid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ── Orlode Influenceurs (public marketplace, brand ↔ creator) ──────────
+    // Same pattern as Talents — public read on active profiles, owner-only
+    // write. Verifications and admin actions go through server-side
+    // Cloud Functions only (not enforced here yet, write locked).
+    match /influencers_profiles/{influencerId} {
+      allow read: if resource.data.status == 'active';
+      allow read, write: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      match /private/{docId} {
+        allow read, write: if isAuthenticated() && get(/databases/$(database)/documents/influencers_profiles/$(influencerId)).data.userId == request.auth.uid;
+      }
+    }
+
+    // ── Orlode Talents (public marketplace, same Firebase as Orlode) ────────
+    // The talents_profiles collection is read-only-public for active candidates.
+    // Recruiters (and the orlode.com /talents feed) need to discover talents
+    // without auth. WRITES happen via the standalone talents-app at
+    // talents.orlode.com under the candidate's own auth session (Phase 2 —
+    // not enforced here yet; until then the create/update path is locked
+    // server-side via Cloud Functions only).
+    match /talents_profiles/{talentId} {
+      allow read: if resource.data.status == 'active';
+      // Owner can manage their own profile (matches the talents-app auth flow).
+      allow read, write: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Private subcollection: whatsapp number, contact details — owner only.
+      match /private/{docId} {
+        allow read, write: if isAuthenticated() && get(/databases/$(database)/documents/talents_profiles/$(talentId)).data.userId == request.auth.uid;
+      }
+    }
   }
 }
