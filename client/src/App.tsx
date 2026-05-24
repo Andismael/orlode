@@ -87,8 +87,10 @@ const TalentsInboxPage = lazy(() => import('@/pages/talents/TalentsInboxPage'));
 const TalentsSignupPage = lazy(() => import('@/pages/talents/TalentsSignupPage'));
 const InfluencersLandingPage = lazy(() => import('@/pages/influencers/InfluencersLandingPage'));
 const InfluencersFeedPage = lazy(() => import('@/pages/influencers/InfluencersFeedPage'));
+const InfluencersProfilePage = lazy(() => import('@/pages/influencers/InfluencersProfilePage'));
 const InfluencersSignupPage = lazy(() => import('@/pages/influencers/InfluencersSignupPage'));
 const InfluencersLinksPage = lazy(() => import('@/pages/influencers/InfluencersLinksPage'));
+const InfluencersInboxPage = lazy(() => import('@/pages/influencers/InfluencersInboxPage'));
 const ApiKeysPage = lazy(() => import('@/pages/settings/ApiKeysPage'));
 const CloneSetupPage = lazy(() => import('@/pages/admin/CloneSetupPage'));
 const CloneInboxPage = lazy(() => import('@/pages/admin/CloneInboxPage'));
@@ -407,6 +409,8 @@ export default function App() {
         <Route path="/influenceurs/feed" element={<InfluencersFeedPage />} />
         <Route path="/influenceurs/inscription" element={<InfluencersSignupPage />} />
         <Route path="/influenceurs/mes-liens" element={<InfluencersLinksPage />} />
+        <Route path="/influenceurs/inbox" element={<InfluencersInboxPage />} />
+        <Route path="/influenceurs/:id" element={<InfluencersProfilePage />} />
 
         {/* ── Public / Auth ─────────────────────────────────────────── */}
         <Route element={<PublicLayout />}>

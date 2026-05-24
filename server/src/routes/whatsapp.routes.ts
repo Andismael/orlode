@@ -336,8 +336,39 @@ router.post('/webhook', asyncHandler(async (req: Request & { rawBody?: Buffer },
             });
             return; // skip orchestrator — this is a Talents-only inbound
           }
+
+          // Same logic for Influenceurs — creator reply → influencer_conversations inbox
+          const inflConvSnap = await db.collection('influencer_conversations')
+            .where('creatorPhone', '==', fromDigits)
+            .orderBy('lastMessageAt', 'desc')
+            .limit(1)
+            .get()
+            .catch(() => null);
+          if (inflConvSnap && !inflConvSnap.empty) {
+            const convDoc = inflConvSnap.docs[0];
+            const convRef = convDoc.ref;
+            const now = new Date();
+            const FieldValue = (await import('firebase-admin/firestore')).FieldValue;
+            await convRef.update({
+              lastMessageAt:   now,
+              lastMessageText: finalMessage,
+              lastMessageFrom: 'creator',
+              messageCount:    (convDoc.data()['messageCount'] ?? 0) + 1,
+              unreadByBrand:   FieldValue.increment(1),
+            });
+            await convRef.collection('messages').add({
+              from:    'creator',
+              text:    finalMessage,
+              sentAt:  now,
+              receivedViaPhoneNumberId: phoneNumberId,
+            });
+            logger.info('[InfluencersInbox] Creator reply routed to conversation', {
+              conversationId: convDoc.id, creatorPhone: fromDigits,
+            });
+            return; // skip orchestrator
+          }
         } catch (err) {
-          logger.warn('[TalentsInbox] Routing failed (non-blocking, falling through to orchestrator)', {
+          logger.warn('[TalentsInbox/InfluencersInbox] Routing failed (non-blocking, falling through to orchestrator)', {
             error: err instanceof Error ? err.message : err,
           });
         }

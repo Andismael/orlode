@@ -1,368 +1,471 @@
 /**
- * Orlode Influenceurs — public directory at /influenceurs/feed.
- * Loads active influencers from Firestore `influencers_profiles`,
- * filterable by category via the ?cat= query param.
+ * Orlode Influenceurs — premium editorial directory at /influenceurs/feed.
+ * Cards = portrait + name + tagline italic + categories + followers count
+ * with ArrowUpRight CTA. Sticky filter bar over cream background.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import {
-  Loader2, ArrowLeft, RefreshCw, BadgeCheck, MapPin, Instagram, Youtube,
-  Music as TiktokIcon, TrendingUp, MessageCircle, Hash,
-  Facebook, Twitter, Linkedin, ExternalLink,
+  ArrowUpRight, BadgeCheck, Users, Loader2, X, Send,
 } from 'lucide-react';
-import { listActiveInfluencers, formatAudience, type Influencer } from '@/services/influencers';
+import { listActiveInfluencers, type Influencer } from '@/services/influencers';
 import { useSEO } from '@/hooks/useSEO';
-import { M, MOBILE_CSS } from '@/components/mobile/mobileDesign';
+import InfluencerPortrait, { type PortraitInfluencer } from './InfluencerPortrait';
+import api from '@/services/api';
 
-const CATS = ['Mode', 'Tech', 'Food', 'Lifestyle', 'Fitness', 'Beauté'];
+const C = {
+  brand: '#6366F1', brandDeep: '#4F46E5', brandSoft: '#EEF2FF',
+  gold: '#D4A574', goldLight: '#E8C9A0',
+  cream: '#FAF7F2', creamDeep: '#F0EBE3',
+  ink: '#0A0814', ink3: '#3F3856', inkSoft: '#6B6480',
+  inkLight: '#9A93AD', inkSilent: '#C9C3D6',
+  success: '#059669', successSoft: '#D1FAE5', successDark: '#065F46',
+  verified: '#1D9BF0', white: '#FFFFFF',
+};
+
+const CATEGORIES = ['Tous', 'Mode', 'Tech', 'Food', 'Fitness', 'Beauté', 'Business', 'Lifestyle'];
+
+const formatK = (n?: number) => {
+  if (!n) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+};
+
+const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+.infld-root, .infld-root * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+.infld-root { font-family: 'Inter', system-ui, sans-serif; color: ${C.ink}; }
+.infld-serif { font-family: 'Fraunces', serif; letter-spacing: -0.025em; }
+.infld-mono { font-family: 'JetBrains Mono', monospace; }
+.infld-display-l { font-family: 'Fraunces', serif; font-size: clamp(36px, 6vw, 86px); font-weight: 800; line-height: 0.95; letter-spacing: -0.035em; }
+.infld-grain::before {
+  content:''; position:absolute; inset:0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  opacity:0.08; pointer-events:none; mix-blend-mode:overlay;
+}
+@keyframes infld-shimmer { 0%{background-position:-200% center;} 100%{background-position:200% center;} }
+.infld-shimmer {
+  background: linear-gradient(90deg, #A5B4FC 0%, ${C.goldLight} 50%, #A5B4FC 100%);
+  background-size: 200% auto;
+  background-clip: text; -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: infld-shimmer 5s linear infinite;
+}
+@keyframes infld-rotate { from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+.infld-rotate { animation: infld-rotate 90s linear infinite; }
+.infld-card { transition: all 0.4s cubic-bezier(0.16,1,0.3,1); will-change: transform; }
+.infld-card:hover { transform: translateY(-6px); }
+.infld-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 14px; border-radius: 100px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.infld-hide-scroll::-webkit-scrollbar { display: none; }
+.infld-hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+@keyframes infld-fadeUp { from{opacity:0; transform:translateY(24px);} to{opacity:1; transform:translateY(0);} }
+.infld-fade { animation: infld-fadeUp 0.5s cubic-bezier(0.16,1,0.3,1) backwards; }
+`;
 
 export default function InfluencersFeedPage() {
   useSEO({
     title: 'Annuaire — Orlode Influenceurs',
-    description: 'Créateurs vérifiés du monde entier. Filtre par catégorie, audience, engagement, ville.',
+    description: 'Annuaire premium de créateurs vérifiés du monde entier. Filtre par catégorie, audience, ville.',
     path: '/influenceurs/feed',
   });
 
   const [params, setParams] = useSearchParams();
-  const [influencers, setInfluencers] = useState<Influencer[] | null>(null);
+  const [all, setAll] = useState<Influencer[] | null>(null);
+  const [onlyAvailable, setOnlyAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const activeCat = params.get('cat');
+  const [contacting, setContacting] = useState<Influencer | null>(null);
+  const activeCat = params.get('cat') ?? 'Tous';
 
-  const load = () => {
-    setInfluencers(null);
-    setError(null);
+  useEffect(() => {
     listActiveInfluencers(80)
-      .then(setInfluencers)
-      .catch((e: unknown) => {
-        setError((e as Error).message || 'Erreur de chargement');
-        setInfluencers([]);
-      });
-  };
-
-  useEffect(load, []);
+      .then(setAll)
+      .catch(err => { setError((err as Error).message); setAll([]); });
+  }, []);
 
   const filtered = useMemo(() => {
-    if (!influencers) return null;
-    if (!activeCat) return influencers;
-    return influencers.filter(i => (i.categories ?? []).includes(activeCat));
-  }, [influencers, activeCat]);
+    if (!all) return null;
+    let list = all;
+    if (activeCat !== 'Tous') list = list.filter(i => (i.categories ?? []).includes(activeCat));
+    if (onlyAvailable) list = list.filter(i => i.status === 'active');
+    return list;
+  }, [all, activeCat, onlyAvailable]);
 
   return (
-    <div className="m-root" style={{ minHeight: '100vh', background: M.cream }}>
-      <style>{MOBILE_CSS}</style>
+    <div className="infld-root" style={{ background: C.cream, minHeight: '100vh' }}>
+      <style>{STYLES}</style>
 
-      <header style={{
-        background: `linear-gradient(135deg, #2E1065, ${M.violetDeep})`,
-        color: M.cream,
-        padding: '14px 18px',
+      {/* Hero dark */}
+      <section style={{
+        background: C.ink, color: C.cream,
+        padding: '80px 32px 100px',
+        position: 'relative', overflow: 'hidden',
+      }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: `radial-gradient(ellipse at 70% 30%, ${C.brand}40, transparent 60%)`,
+        }} />
+        <div className="infld-grain" />
+        <div className="infld-rotate" style={{
+          position: 'absolute', top: '-20%', right: '-10%',
+          width: 500, height: 500, borderRadius: '50%',
+          border: `1px dashed ${C.goldLight}25`, pointerEvents: 'none',
+        }} />
+
+        <div style={{ maxWidth: 1280, margin: '0 auto', position: 'relative', zIndex: 2 }}>
+          <Link to="/influenceurs" style={{
+            color: C.inkSilent, fontSize: 13, textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 24,
+          }}>← Retour à l'accueil</Link>
+
+          <div className="infld-pill infld-fade" style={{
+            background: 'rgba(212,165,116,0.12)', color: C.goldLight,
+            border: `1px solid ${C.gold}40`, marginBottom: 20,
+          }}>
+            <Users size={11} /> {all?.length ?? '—'} créateurs vérifiés
+          </div>
+          <h1 className="infld-display-l infld-fade" style={{ color: C.cream, margin: '0 0 16px', animationDelay: '0.1s' }}>
+            Trouve le créateur<br />
+            <em className="infld-shimmer" style={{ fontStyle: 'italic', fontWeight: 600 }}>
+              qui te ressemble.
+            </em>
+          </h1>
+          <p className="infld-fade" style={{
+            fontSize: 17, color: C.inkSilent,
+            margin: 0, maxWidth: 580, lineHeight: 1.55,
+            animationDelay: '0.2s',
+          }}>
+            Sélectionnés à la main. Vérifiés un par un. Prêts pour ta prochaine campagne — partout dans le monde.
+          </p>
+        </div>
+      </section>
+
+      {/* Filter bar sticky */}
+      <section style={{
+        background: C.cream, borderBottom: `1px solid ${C.creamDeep}`,
+        padding: '20px 32px',
         position: 'sticky', top: 0, zIndex: 30,
         backdropFilter: 'blur(20px)',
       }}>
-        <div style={{
-          maxWidth: 560, margin: '0 auto',
-          display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <Link to="/influenceurs" style={{
-            color: M.cream, textDecoration: 'none',
-            background: 'rgba(255,250,240,0.12)',
-            border: `1px solid ${M.cream}25`,
-            width: 32, height: 32, borderRadius: 10,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+        <div style={{ maxWidth: 1280, margin: '0 auto' }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between',
+            alignItems: 'center', gap: 16, flexWrap: 'wrap',
           }}>
-            <ArrowLeft size={15} />
-          </Link>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="m-display" style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.1 }}>
-              Annuaire Influenceurs
+            <div className="infld-hide-scroll" style={{ display: 'flex', gap: 6, overflowX: 'auto', flex: 1 }}>
+              {CATEGORIES.map(cat => {
+                const active = activeCat === cat;
+                return (
+                  <button key={cat} onClick={() => {
+                    if (cat === 'Tous') params.delete('cat'); else params.set('cat', cat);
+                    setParams(params);
+                  }} style={{
+                    background: active ? C.ink : C.white,
+                    color: active ? C.cream : C.ink3,
+                    border: `1px solid ${active ? C.ink : C.creamDeep}`,
+                    padding: '10px 18px', borderRadius: 100,
+                    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'inherit', whiteSpace: 'nowrap',
+                    transition: 'all 0.2s ease',
+                  }}>
+                    {cat}
+                  </button>
+                );
+              })}
             </div>
-            <div style={{ fontSize: 11, opacity: 0.75 }}>
-              {filtered === null ? 'Chargement…' : `${filtered.length} créateur${filtered.length > 1 ? 's' : ''}${activeCat ? ` · ${activeCat}` : ''}`}
-            </div>
-          </div>
-          <button onClick={load} className="tap-card" style={{
-            background: 'rgba(255,250,240,0.12)',
-            border: `1px solid ${M.cream}25`,
-            color: M.cream,
-            width: 32, height: 32, borderRadius: 10,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-          }}>
-            <RefreshCw size={14} />
-          </button>
-        </div>
 
-        {/* Filter chips */}
-        <div className="ios-chip-row" style={{
-          maxWidth: 560, margin: '12px auto 0',
-          display: 'flex', gap: 6, overflowX: 'auto',
-        }}>
-          <button onClick={() => { params.delete('cat'); setParams(params); }} className="tap-card" style={{
-            background: !activeCat ? M.cream : 'rgba(255,250,240,0.12)',
-            color: !activeCat ? M.violetDeep : M.cream,
-            border: !activeCat ? 'none' : `1px solid ${M.cream}25`,
-            padding: '6px 12px', borderRadius: 100,
-            fontSize: 11, fontWeight: 700,
-            whiteSpace: 'nowrap', flexShrink: 0, cursor: 'pointer',
-          }}>
-            Tous
-          </button>
-          {CATS.map(c => (
-            <button key={c} onClick={() => { params.set('cat', c); setParams(params); }} className="tap-card" style={{
-              background: activeCat === c ? M.cream : 'rgba(255,250,240,0.12)',
-              color: activeCat === c ? M.violetDeep : M.cream,
-              border: activeCat === c ? 'none' : `1px solid ${M.cream}25`,
-              padding: '6px 12px', borderRadius: 100,
-              fontSize: 11, fontWeight: 700,
-              whiteSpace: 'nowrap', flexShrink: 0, cursor: 'pointer',
+            <button onClick={() => setOnlyAvailable(!onlyAvailable)} style={{
+              background: onlyAvailable ? C.successSoft : C.white,
+              border: `1.5px solid ${onlyAvailable ? C.success : C.creamDeep}`,
+              padding: '8px 14px', borderRadius: 100,
+              display: 'inline-flex', alignItems: 'center', gap: 10,
+              cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
             }}>
-              {c}
+              <div style={{
+                width: 30, height: 18, borderRadius: 100,
+                background: onlyAvailable ? C.success : '#D1D5DB',
+                position: 'relative', transition: 'background 0.2s',
+              }}>
+                <div style={{
+                  position: 'absolute', top: 2,
+                  left: onlyAvailable ? 14 : 2,
+                  width: 14, height: 14, borderRadius: '50%',
+                  background: C.white, transition: 'left 0.2s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: onlyAvailable ? C.successDark : C.ink3 }}>
+                Dispo maintenant
+              </span>
             </button>
-          ))}
+          </div>
         </div>
-      </header>
+      </section>
 
-      <main style={{ padding: '18px 14px 120px' }}>
-        <div className="m-wrap-xl" style={{ maxWidth: 560, margin: '0 auto' }}>
+      {/* Grid */}
+      <section style={{ padding: '48px 32px 80px' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto' }}>
           {error && (
             <div style={{
               background: '#FEE2E2', border: '1px solid #FCA5A5',
-              borderRadius: 12, padding: 14, marginBottom: 14,
+              borderRadius: 12, padding: 14, marginBottom: 20,
               fontSize: 13, color: '#991B1B',
             }}>⚠️ {error}</div>
           )}
 
-          {filtered === null && (
-            <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              gap: 12, padding: '40px 0', color: M.inkSoft,
-            }}>
-              <Loader2 className="animate-spin" size={20} />
-              <span style={{ fontSize: 12 }}>Chargement de l'annuaire…</span>
+          {filtered === null ? (
+            <div style={{ textAlign: 'center', padding: 60, color: C.inkSoft }}>
+              <Loader2 size={20} className="animate-spin" style={{ display: 'inline-block' }} />
             </div>
-          )}
-
-          {filtered !== null && filtered.length === 0 && !error && (
+          ) : filtered.length === 0 ? (
             <div style={{
-              background: `linear-gradient(135deg, ${M.violetSoft}, ${M.cream})`,
-              border: `1px dashed ${M.violet}40`,
-              borderRadius: 16, padding: 24, textAlign: 'center',
+              background: C.white, border: `1px dashed ${C.brand}40`,
+              borderRadius: 24, padding: 48, textAlign: 'center',
             }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🎬</div>
-              <div className="m-display" style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>
-                {activeCat ? `Pas encore de créateur en ${activeCat}` : 'Annuaire en construction'}
+              <div style={{ fontSize: 40, marginBottom: 8 }}>🎬</div>
+              <div className="infld-serif" style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
+                {activeCat === 'Tous' ? 'Annuaire en construction' : `Pas encore de créateur en ${activeCat}`}
               </div>
-              <p style={{ fontSize: 13, color: M.inkSoft, margin: '0 0 14px', lineHeight: 1.5 }}>
-                Les créateurs vérifiés arrivent. En attendant, inscris-toi pour être notifié.
+              <p style={{ fontSize: 14, color: C.inkSoft, margin: '0 0 16px' }}>
+                Les premiers créateurs arrivent. En attendant, inscris-toi pour être notifié·e.
               </p>
+              <Link to="/influenceurs/inscription" style={{
+                background: C.ink, color: C.cream,
+                padding: '10px 22px', borderRadius: 100,
+                fontSize: 13, fontWeight: 700, textDecoration: 'none',
+              }}>S'inscrire →</Link>
             </div>
-          )}
+          ) : (
+            <>
+              <div style={{
+                marginBottom: 32,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap',
+              }}>
+                <h2 className="infld-serif" style={{ fontSize: 22, fontWeight: 700, color: C.ink, margin: 0 }}>
+                  <strong className="infld-mono" style={{ fontWeight: 700 }}>{filtered.length}</strong>
+                  <span style={{ color: C.inkSoft, fontWeight: 500, fontFamily: 'Inter' }}>
+                    {' '}créateur{filtered.length > 1 ? 's' : ''} trouvé{filtered.length > 1 ? 's' : ''}
+                  </span>
+                </h2>
+                <span className="infld-mono" style={{ fontSize: 11, color: C.inkLight, letterSpacing: '0.05em' }}>
+                  CURATED · 2026
+                </span>
+              </div>
 
-          {filtered !== null && filtered.length > 0 && (
-            <ul style={{
-              listStyle: 'none', padding: 0, margin: 0,
-              display: 'grid', gridTemplateColumns: '1fr', gap: 12,
-            }} className="m-stagger m-grid-md-2 m-grid-lg-3">
-              {filtered.map(i => (
-                <li key={i.id}>
-                  <article className="tap-card" style={{
-                    background: M.cream,
-                    border: '1px solid rgba(31,41,55,0.06)',
-                    borderRadius: 16,
-                    padding: 14,
-                    display: 'flex', gap: 12,
-                    boxShadow: '0 6px 16px -8px rgba(0,0,0,0.1)',
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: 24,
+              }}>
+                {filtered.map((inf, i) => (
+                  <article key={inf.id} className="infld-card infld-fade" style={{
+                    background: C.white, border: `1px solid ${C.creamDeep}`,
+                    borderRadius: 24, padding: 20,
+                    cursor: 'pointer',
+                    animationDelay: `${i * 0.05}s`,
                   }}>
-                    {/* Avatar */}
-                    <div style={{
-                      width: 56, height: 56, borderRadius: '50%',
-                      background: `linear-gradient(135deg, ${M.violet}, ${M.violetDeep})`,
-                      color: M.cream, fontWeight: 800, fontSize: 18,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      flexShrink: 0,
-                      backgroundImage: i.avatarUrl ? `url(${i.avatarUrl})` : undefined,
-                      backgroundSize: 'cover', backgroundPosition: 'center',
-                    }}>
-                      {!i.avatarUrl && (i.displayName?.[0]?.toUpperCase() ?? '?')}
-                    </div>
-
-                    {/* Body */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                        <span className="m-display" style={{ fontSize: 14, fontWeight: 700, color: M.ink }}>
-                          {i.displayName}
-                        </span>
-                        {i.verified && <BadgeCheck size={13} color="#1D9BF0" fill="#1D9BF0" />}
-                      </div>
-                      {i.handle && (
-                        <div style={{ fontSize: 11, color: M.inkSoft, marginTop: 1 }}>
-                          {i.handle}
+                    <Link to={`/influenceurs/${inf.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                      <InfluencerPortrait inf={inf as PortraitInfluencer} size={240} />
+                      <div style={{ marginTop: 20 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                          <h3 className="infld-serif" style={{
+                            fontSize: 22, fontWeight: 700, color: C.ink,
+                            margin: 0, letterSpacing: '-0.02em',
+                          }}>{inf.displayName}</h3>
+                          {inf.verified && (
+                            <BadgeCheck size={15} color={C.verified} fill={C.verified} stroke={C.white} strokeWidth={2.5} />
+                          )}
                         </div>
-                      )}
-                      {i.bio && (
-                        <p style={{
-                          fontSize: 12, color: M.inkSoft, margin: '6px 0 0', lineHeight: 1.4,
-                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                        }}>{i.bio}</p>
-                      )}
-
-                      {/* Stats row */}
-                      <div style={{
-                        display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap',
-                        fontSize: 10, color: M.inkSoft,
-                      }}>
-                        {i.audience?.total && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <strong className="m-mono" style={{ color: M.violetDeep, fontSize: 11 }}>
-                              {formatAudience(i.audience.total)}
-                            </strong> total
-                          </span>
+                        {inf.bio && (
+                          <p style={{
+                            fontSize: 13, color: C.inkSoft, margin: '0 0 12px',
+                            fontStyle: 'italic', lineHeight: 1.45,
+                            display: '-webkit-box', WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                          }}>« {inf.bio} »</p>
                         )}
-                        {typeof i.engagement === 'number' && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <TrendingUp size={9} color={M.emerald} />
-                            <strong className="m-mono" style={{ color: M.emeraldDeep, fontSize: 11 }}>
-                              {i.engagement.toFixed(1)}%
-                            </strong>
-                          </span>
+                        {(inf.categories ?? []).length > 0 && (
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+                            {inf.categories!.slice(0, 3).map(c => (
+                              <span key={c} style={{
+                                background: C.creamDeep, color: C.ink3,
+                                padding: '4px 10px', borderRadius: 100,
+                                fontSize: 11, fontWeight: 600,
+                              }}>{c}</span>
+                            ))}
+                          </div>
                         )}
-                        {i.city && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <MapPin size={9} /> {i.city}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Categories */}
-                      {(i.categories ?? []).length > 0 && (
-                        <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
-                          {i.categories!.slice(0, 3).map(c => (
-                            <span key={c} className="m-pill" style={{
-                              background: M.violetSoft, color: M.violetDeep,
-                              fontSize: 9, padding: '2px 7px',
-                            }}>{c}</span>
-                          ))}
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          paddingTop: 12, borderTop: `1px solid ${C.creamDeep}`,
+                        }}>
+                          <div className="infld-mono" style={{
+                            fontSize: 16, fontWeight: 700, color: C.ink, letterSpacing: '-0.02em',
+                          }}>
+                            {formatK(inf.audience?.total)}
+                            <span style={{ fontSize: 10, fontWeight: 600, color: C.inkLight, marginLeft: 4, letterSpacing: '0.05em' }}>
+                              FOLLOWERS
+                            </span>
+                          </div>
+                          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setContacting(inf); }} style={{
+                            background: 'transparent', border: 'none', color: C.brand, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                          }}>
+                            Contacter <ArrowUpRight size={14} />
+                          </button>
                         </div>
-                      )}
-
-                      {/* Socials — clickable links so brands verify followers
-                          themselves on the actual platform. Falls back to
-                          non-clickable audience numbers for legacy profiles
-                          that haven't filled the links page yet. */}
-                      <SocialBadges links={i.socialLinks} audience={i.audience} />
-
-                    </div>
-
-                    {/* Contact CTA */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', flexShrink: 0 }}>
-                      {i.status === 'busy' && (
-                        <span className="m-pill" style={{
-                          background: M.goldSoft, color: M.goldDeep,
-                          fontSize: 9, padding: '2px 6px',
-                        }}>Occupé</span>
-                      )}
-                      {i.status === 'active' && (
-                        <span className="m-pill" style={{
-                          background: M.emeraldSoft, color: M.emeraldDark,
-                          fontSize: 9, padding: '2px 6px',
-                        }}>Dispo</span>
-                      )}
-                      <button className="tap-card" style={{
-                        background: `linear-gradient(135deg, ${M.violet}, ${M.violetDeep})`,
-                        color: M.cream, border: 'none',
-                        width: 38, height: 38, borderRadius: 11,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer',
-                        boxShadow: `0 6px 14px -4px ${M.violet}`,
-                      }}>
-                        <MessageCircle size={16} />
-                      </button>
-                    </div>
+                      </div>
+                    </Link>
                   </article>
-                </li>
-              ))}
-            </ul>
+                ))}
+              </div>
+            </>
           )}
         </div>
-      </main>
+      </section>
+
+      {contacting && (
+        <ContactModal
+          influencer={contacting}
+          onClose={() => setContacting(null)}
+          onSent={() => setContacting(null)}
+        />
+      )}
     </div>
   );
 }
 
-// ── Social badges — clickable platform icons that open the actual
-//    creator profile in a new tab. The whole product premise: brands
-//    verify followers themselves, no algorithm. ────────────────────────
-const PLATFORM_META: Record<string, { Icon: React.ComponentType<{ size?: number; color?: string }>; color: string; gradient: string }> = {
-  instagram: { Icon: Instagram,  color: '#E1306C', gradient: 'linear-gradient(135deg,#F58529,#DD2A7B,#8134AF)' },
-  tiktok:    { Icon: TiktokIcon, color: '#000',    gradient: 'linear-gradient(135deg,#25F4EE,#FE2C55)' },
-  youtube:   { Icon: Youtube,    color: '#FF0000', gradient: 'linear-gradient(135deg,#FF0000,#CC0000)' },
-  facebook:  { Icon: Facebook,   color: '#1877F2', gradient: 'linear-gradient(135deg,#1877F2,#0866FF)' },
-  twitter:   { Icon: Twitter,    color: '#000',    gradient: 'linear-gradient(135deg,#000,#333)' },
-  linkedin:  { Icon: Linkedin,   color: '#0A66C2', gradient: 'linear-gradient(135deg,#0A66C2,#004182)' },
-};
-
-function SocialBadges({ links, audience }: {
-  links?: Record<string, { url: string; followers: number }>;
-  audience?: { instagram?: number; tiktok?: number; youtube?: number; facebook?: number; twitter?: number };
+// ── Contact modal (kept from earlier — adapts to premium palette) ─────────
+function ContactModal({ influencer, onClose, onSent }: {
+  influencer: Influencer; onClose: () => void; onSent: () => void;
 }) {
-  const entries = Object.entries(links ?? {}).filter(([, v]) => v?.url && v.followers > 0);
+  const navigate = useNavigate();
+  const firstName = (influencer.displayName ?? '').split(' ')[0] || 'créateur';
+  const [message, setMessage] = useState(
+    `Bonjour ${firstName}, on a vu ton profil sur Orlode Influenceurs et ton contenu nous intéresse pour une collaboration. Tu es disponible pour en discuter cette semaine ?`,
+  );
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
 
-  if (entries.length > 0) {
-    // Rich mode — clickable badges
-    return (
-      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-        {entries.slice(0, 5).map(([platformId, v]) => {
-          const meta = PLATFORM_META[platformId];
-          if (!meta) return null;
-          const Icon = meta.Icon;
-          return (
-            <a
-              key={platformId}
-              href={v.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={e => e.stopPropagation()}
-              className="tap-card"
-              title={`Vérifier sur ${platformId}`}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-                background: meta.gradient,
-                color: '#fff',
-                padding: '4px 8px 4px 6px',
-                borderRadius: 100,
-                fontSize: 10, fontWeight: 700,
-                textDecoration: 'none',
-                boxShadow: `0 4px 10px -3px ${meta.color}80`,
-              }}
-            >
-              <Icon size={11} color="#fff" />
-              <span className="m-mono">{formatAudience(v.followers)}</span>
-              <ExternalLink size={9} color="#ffffff99" />
-            </a>
-          );
-        })}
-      </div>
-    );
-  }
+  const send = async () => {
+    if (sending || message.trim().length < 10) return;
+    setSending(true); setError(null);
+    try {
+      await api.post('/influencers/contact', { influencerId: influencer.id, message: message.trim() });
+      setSent(true);
+      setTimeout(() => { onSent(); navigate('/influenceurs/inbox'); }, 1200);
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string; status?: number };
+      if (e.status === 401) setError('Connecte-toi pour contacter un créateur.');
+      else setError(e.response?.data?.message ?? e.message ?? 'Erreur');
+    } finally {
+      setSending(false);
+    }
+  };
 
-  // Legacy fallback — non-clickable audience numbers (no URL stored yet)
-  if (!audience) return null;
-  const legacy: { key: string; icon: React.ComponentType<{ size?: number }>; n?: number }[] = [
-    { key: 'instagram', icon: Instagram,  n: audience.instagram },
-    { key: 'tiktok',    icon: TiktokIcon, n: audience.tiktok },
-    { key: 'youtube',   icon: Youtube,    n: audience.youtube },
-  ];
-  const filled = legacy.filter(x => !!x.n);
-  if (filled.length === 0) return null;
   return (
-    <div style={{ display: 'flex', gap: 8, marginTop: 8, color: M.inkLight }}>
-      {filled.map(x => {
-        const Ic = x.icon;
-        return (
-          <span key={x.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10 }}>
-            <Ic size={11} /> {formatAudience(x.n!)}
-          </span>
-        );
-      })}
+    <div onClick={onClose} role="dialog" aria-modal="true" style={{
+      position: 'fixed', inset: 0, background: 'rgba(10,8,20,0.7)',
+      backdropFilter: 'blur(8px)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: C.cream, borderRadius: 24,
+        width: '100%', maxWidth: 500, overflow: 'hidden',
+        boxShadow: '0 40px 100px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{
+          background: `linear-gradient(135deg, ${C.brand}, ${C.brandDeep})`,
+          padding: '22px 26px', color: C.cream,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div>
+            <div style={{ fontFamily: 'Fraunces, serif', fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em' }}>
+              Contacter {firstName}
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.85, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.05em' }}>
+              VIA WHATSAPP · ORLODE INFLUENCEURS
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'rgba(255,255,255,0.2)', border: 'none', color: C.cream,
+            width: 32, height: 32, borderRadius: '50%', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}><X size={15} /></button>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          {sent ? (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              <div style={{ fontSize: 44, marginBottom: 10 }}>✅</div>
+              <div style={{ fontFamily: 'Fraunces, serif', fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+                Message envoyé
+              </div>
+              <p style={{ fontSize: 14, color: C.inkSoft, margin: 0 }}>
+                Tu vas être redirigé·e vers ton inbox…
+              </p>
+            </div>
+          ) : (
+            <>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 8, letterSpacing: '0.03em', textTransform: 'uppercase' }}>
+                Ton message
+              </label>
+              <textarea
+                value={message} onChange={e => setMessage(e.target.value)}
+                rows={6} disabled={sending}
+                style={{
+                  width: '100%', background: C.white,
+                  border: `1.5px solid ${C.creamDeep}`, borderRadius: 12,
+                  padding: '14px 16px', fontSize: 14, fontFamily: 'inherit',
+                  resize: 'vertical', outline: 'none', lineHeight: 1.55,
+                }}
+              />
+              <p style={{ fontSize: 12, color: C.inkSoft, marginTop: 8, lineHeight: 1.5 }}>
+                Envoyé sur WhatsApp via Orlode. Le créateur répond direct — tu reçois sa réponse dans ton <strong>inbox Orlode</strong>.
+              </p>
+              {error && (
+                <div style={{
+                  background: '#FEE2E2', border: '1px solid #FCA5A5',
+                  borderRadius: 10, padding: 12, marginTop: 12,
+                  fontSize: 12, color: '#991B1B',
+                }}>⚠️ {error}</div>
+              )}
+            </>
+          )}
+        </div>
+
+        {!sent && (
+          <div style={{
+            padding: '14px 24px', borderTop: `1px solid ${C.creamDeep}`,
+            background: C.creamDeep,
+            display: 'flex', justifyContent: 'flex-end', gap: 10,
+          }}>
+            <button onClick={onClose} disabled={sending} style={{
+              background: C.white, color: C.ink, border: `1px solid ${C.creamDeep}`,
+              padding: '11px 18px', borderRadius: 100,
+              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}>Annuler</button>
+            <button onClick={send} disabled={sending || message.trim().length < 10} style={{
+              background: `linear-gradient(135deg, ${C.brand}, ${C.brandDeep})`,
+              color: C.cream, border: 'none',
+              padding: '11px 20px', borderRadius: 100,
+              fontSize: 13, fontWeight: 600,
+              cursor: sending ? 'wait' : 'pointer',
+              opacity: message.trim().length < 10 ? 0.4 : 1, fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              boxShadow: `0 10px 30px -8px ${C.brand}80`,
+            }}>
+              {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Envoyer
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

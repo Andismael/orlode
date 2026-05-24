@@ -305,6 +305,20 @@ service cloud.firestore {
       allow write: if false; // Server-only
     }
 
+    // ── Influencer conversations (brand ↔ creator inbox) ──────────────────
+    match /influencer_conversations/{convId} {
+      allow read: if isAuthenticated() && resource.data.brandUid == request.auth.uid;
+      allow write: if false;
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/influencer_conversations/$(convId)).data.brandUid == request.auth.uid;
+        allow write: if false;
+      }
+    }
+    match /influencer_contacts/{contactId} {
+      allow read: if isAuthenticated() && resource.data.brandUid == request.auth.uid;
+      allow write: if false;
+    }
+
     // ── Talents conversations (recruiter ↔ candidate inbox) ────────────────
     // Only the recruiter who initiated the conversation can read it. Writes
     // happen server-side via the API routes (auth + ownership check).

@@ -85,6 +85,22 @@
       ]
     },
     {
+      "collectionGroup": "influencer_conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "brandUid", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "influencer_conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "creatorPhone", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "meetings",
       "queryScope": "COLLECTION",
       "fields": [
