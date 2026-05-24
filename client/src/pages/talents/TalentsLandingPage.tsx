@@ -118,6 +118,14 @@ const DEMO_TALENTS: CardTalent[] = [
   { id: 'demo-6', displayName: 'Aminata Touré', firstName: 'Aminata', sector: 'Créatif',   city: 'Yopougon', videoDuration: 48, viewsCount: 3287, contactsCount: 41, status: 'active', portraitGradient: ['#5BB088', '#0F5C3F', '#D4A574'] },
 ];
 
+/** Wraps a card in <Link> only when the talent is real (not seeded demo). */
+function MaybeLink({ id, children }: { id: string; children: React.ReactNode }) {
+  if (id.startsWith('demo-')) {
+    return <div>{children}</div>;
+  }
+  return <Link to={`/talents/${id}`} style={{ textDecoration: 'none' }}>{children}</Link>;
+}
+
 function toCardTalent(t: Talent): CardTalent {
   return {
     id: t.id,
@@ -313,23 +321,23 @@ export default function TalentsLandingPage() {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <div style={{ position: 'relative', zIndex: 3 }}>
-                <Link to={`/talents/${cards[0]!.id}`} style={{ textDecoration: 'none' }}>
+                <MaybeLink id={cards[0]!.id}>
                   <TalentVideoCard talent={cards[0]!} size="hero" />
-                </Link>
+                </MaybeLink>
               </div>
               <div className="tlnd-float" style={{
                 position: 'absolute', top: 40, right: -10, zIndex: 2,
               }}>
-                <Link to={`/talents/${cards[3]!.id}`} style={{ textDecoration: 'none' }}>
+                <MaybeLink id={cards[3]!.id}>
                   <TalentVideoCard talent={cards[3]!} size="small" />
-                </Link>
+                </MaybeLink>
               </div>
               <div className="tlnd-float-alt" style={{
                 position: 'absolute', bottom: 30, left: -30, zIndex: 2,
               }}>
-                <Link to={`/talents/${cards[2]!.id}`} style={{ textDecoration: 'none' }}>
+                <MaybeLink id={cards[2]!.id}>
                   <TalentVideoCard talent={cards[2]!} size="small" />
-                </Link>
+                </MaybeLink>
               </div>
               <div style={{
                 position: 'absolute', top: '50%', left: '50%',
@@ -444,9 +452,9 @@ export default function TalentsLandingPage() {
             justifyItems: 'center',
           }} className="tlnd-grid-1">
             {cards.slice(0, 3).map(t => (
-              <Link key={t.id} to={`/talents/${t.id}`} style={{ textDecoration: 'none' }}>
+              <MaybeLink key={t.id} id={t.id}>
                 <TalentVideoCard talent={t} size="large" />
-              </Link>
+              </MaybeLink>
             ))}
           </div>
         </div>
@@ -509,23 +517,23 @@ export default function TalentsLandingPage() {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <div style={{ position: 'relative', zIndex: 3 }}>
-                <Link to={`/talents/${cards[3]!.id}`} style={{ textDecoration: 'none' }}>
+                <MaybeLink id={cards[3]!.id}>
                   <TalentVideoCard talent={cards[3]!} size="large" />
-                </Link>
+                </MaybeLink>
               </div>
               <div className="tlnd-float" style={{
                 position: 'absolute', top: 60, right: 10, zIndex: 2,
               }}>
-                <Link to={`/talents/${cards[4]!.id}`} style={{ textDecoration: 'none' }}>
+                <MaybeLink id={cards[4]!.id}>
                   <TalentVideoCard talent={cards[4]!} size="small" />
-                </Link>
+                </MaybeLink>
               </div>
               <div className="tlnd-float-alt" style={{
                 position: 'absolute', bottom: 40, left: 0, zIndex: 2,
               }}>
-                <Link to={`/talents/${cards[5]!.id}`} style={{ textDecoration: 'none' }}>
+                <MaybeLink id={cards[5]!.id}>
                   <TalentVideoCard talent={cards[5]!} size="small" />
-                </Link>
+                </MaybeLink>
               </div>
             </div>
           </div>
