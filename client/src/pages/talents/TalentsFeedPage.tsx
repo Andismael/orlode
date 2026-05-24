@@ -127,7 +127,7 @@ export default function TalentsFeedPage() {
               <p style={{ fontSize: 13, color: M.inkSoft, margin: '0 0 14px', lineHeight: 1.5 }}>
                 Sois le premier à poster ta vidéo. Une minute, ton talent, et tu apparais ici.
               </p>
-              <a href={`${TALENTS_APP_URL}/signup`} className="tap-card" style={{
+              <Link to="/talents/inscription" className="tap-card" style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 background: `linear-gradient(135deg, ${M.emerald}, ${M.greenDeep})`,
                 color: M.cream,
@@ -136,7 +136,7 @@ export default function TalentsFeedPage() {
                 textDecoration: 'none',
               }}>
                 Poster ma vidéo →
-              </a>
+              </Link>
             </div>
           )}
 

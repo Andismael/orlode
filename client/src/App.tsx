@@ -84,6 +84,7 @@ const TelegramLandingPage = lazy(() => import('@/pages/public/TelegramLandingPag
 const TalentsLandingPage = lazy(() => import('@/pages/talents/TalentsLandingPage'));
 const TalentsFeedPage = lazy(() => import('@/pages/talents/TalentsFeedPage'));
 const TalentsInboxPage = lazy(() => import('@/pages/talents/TalentsInboxPage'));
+const TalentsSignupPage = lazy(() => import('@/pages/talents/TalentsSignupPage'));
 const InfluencersLandingPage = lazy(() => import('@/pages/influencers/InfluencersLandingPage'));
 const InfluencersFeedPage = lazy(() => import('@/pages/influencers/InfluencersFeedPage'));
 const InfluencersSignupPage = lazy(() => import('@/pages/influencers/InfluencersSignupPage'));
@@ -398,6 +399,7 @@ export default function App() {
         <Route path="/talents" element={<TalentsLandingPage />} />
         <Route path="/talents/feed" element={<TalentsFeedPage />} />
         <Route path="/talents/inbox" element={<TalentsInboxPage />} />
+        <Route path="/talents/inscription" element={<TalentsSignupPage />} />
 
         {/* ── Orlode Influenceurs (same Firebase, brand-creator marketplace) ─ */}
         <Route path="/influenceurs" element={<InfluencersLandingPage />} />

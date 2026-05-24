@@ -108,7 +108,7 @@ function Hero() {
         </p>
 
         <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
-          <a href={`${TALENTS_APP_URL}/signup`} style={{
+          <Link to="/talents/inscription" style={{
             background: M.cream, color: M.greenDark,
             border: 'none', padding: '14px 22px', borderRadius: 14,
             fontSize: 14, fontWeight: 800,
@@ -117,7 +117,7 @@ function Hero() {
             boxShadow: '0 10px 28px -8px rgba(0,0,0,0.4)',
           }}>
             <Video size={15} /> Poste ta vidéo
-          </a>
+          </Link>
           <Link to="/talents/feed" style={{
             background: 'rgba(255,250,240,0.10)',
             color: M.cream,
@@ -239,7 +239,7 @@ function ForRecruiters() {
         <p style={{ fontSize: 14, color: M.inkSoft, margin: '0 0 18px', lineHeight: 1.55 }}>
           Tape ce que tu veux : "développeur React dispo immédiat", "vendeuse mode énergique", "comptable senior 5 ans". L'IA matche par énergie, compétences, disponibilité, langues, ville.
         </p>
-        <a href={`${TALENTS_APP_URL}/recruiter`} className="tap-card" style={{
+        <Link to="/talents/inbox" className="tap-card" style={{
           display: 'flex', alignItems: 'center', gap: 12,
           background: `linear-gradient(135deg, ${M.violetSoft}, ${M.cream})`,
           border: `1px solid ${M.violet}40`,
@@ -264,7 +264,7 @@ function ForRecruiters() {
             </div>
           </div>
           <ChevronRight size={16} color={M.inkLight} />
-        </a>
+        </Link>
       </div>
     </section>
   );
@@ -339,12 +339,12 @@ function Footer() {
           <Link to="/talents/feed" style={{ color: 'rgba(255,250,240,0.75)', textDecoration: 'none', fontWeight: 600 }}>
             Feed
           </Link>
-          <a href={`${TALENTS_APP_URL}/signup`} style={{ color: 'rgba(255,250,240,0.75)', textDecoration: 'none', fontWeight: 600 }}>
+          <Link to="/talents/inscription" style={{ color: 'rgba(255,250,240,0.75)', textDecoration: 'none', fontWeight: 600 }}>
             S'inscrire
-          </a>
-          <a href={`${TALENTS_APP_URL}/recruiter`} style={{ color: 'rgba(255,250,240,0.75)', textDecoration: 'none', fontWeight: 600 }}>
+          </Link>
+          <Link to="/talents/inbox" style={{ color: 'rgba(255,250,240,0.75)', textDecoration: 'none', fontWeight: 600 }}>
             Recruteur
-          </a>
+          </Link>
         </div>
       </div>
     </footer>
@@ -359,7 +359,7 @@ function StickyCTA() {
       padding: '12px 14px 16px', zIndex: 50, pointerEvents: 'none',
     }}>
       <div style={{ maxWidth: 560, margin: '0 auto', pointerEvents: 'auto' }}>
-        <a href={`${TALENTS_APP_URL}/signup`} className="tap-card" style={{
+        <Link to="/talents/inscription" className="tap-card" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           background: `linear-gradient(135deg, ${M.emerald}, ${M.greenDeep})`,
           color: M.cream,
@@ -375,7 +375,7 @@ function StickyCTA() {
             <span className="m-mono">1 min</span>
             <ArrowRight size={15} />
           </span>
-        </a>
+        </Link>
       </div>
     </div>
   );
