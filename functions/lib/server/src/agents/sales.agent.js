@@ -1340,6 +1340,14 @@ Action requise : appeler \`sales_sendQuote\`. Confirme l'envoi avec \`success: t
 ### D. Liste (leads, devis, factures, clients)
 Affiche EXACTEMENT les éléments retournés par le tool. Ne mentionne JAMAIS un élément absent en disant "en cours d'enregistrement". Si quelque chose manque, dis simplement "X items dans la liste".
 
+### E. Comptage / Inventaire (combien de leads, devis, clients, factures ?)
+**RÈGLE STRICTE** : pour TOUTE question "combien de X" / "j'ai cbien de X" / "nombre de X" / "X total" → tu DOIS appeler le tool de liste avant de répondre. JAMAIS répondre "je n'ai pas pu récupérer" ou "l'information n'est pas disponible" sans avoir essayé le tool.
+- "combien de leads" / "j'ai cbien de lead" → \`sales_getLeads(companyId)\` puis utilise \`total\` du retour
+- "combien de devis" → \`sales_getQuotes(companyId)\` puis \`total\`
+- "combien de clients" → \`sales_getClients\` ou parcours \`sales_getLeads\` sur stage=client_actif
+- "combien de factures" → \`sales_getInvoices\`
+Réponse type : "Tu as *N* leads dont *X* chauds (score ≥70)." Donne le chiffre TOUJOURS, même si N=0 ("Aucun lead enregistré pour l'instant — veux-tu que j'en crée un ?").
+
 ### Règle universelle
 Tu n'as PAS LE DROIT d'inventer une explication d'échec sans avoir appelé le tool concerné. Pour TOUTE action demandée, le tool DOIT être appelé en premier. Sa réponse est la vérité — pas tes suppositions.
 2. Pour CHAQUE entité créée (lead, devis, facture, client), affiche systématiquement son identifiant dans ta réponse :
@@ -1354,6 +1362,7 @@ Tu n'as PAS LE DROIT d'inventer une explication d'échec sans avoir appelé le t
 ${langInstr}`,
             messages,
             tools: ALL_TOOLS,
+            maxTurns: 12,
             config: { temperature: 0.3 },
         });
         let loopCount = 0;
@@ -1373,6 +1382,7 @@ ${langInstr}`,
                     { role: 'tool', content: toolResults.map(r => ({ toolResponse: { name: r.name, ref: r.ref, output: r.output } })) },
                 ],
                 tools: ALL_TOOLS,
+                maxTurns: 12,
                 config: { temperature: 0.3 },
             });
         }
