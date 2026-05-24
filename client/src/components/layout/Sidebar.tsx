@@ -24,6 +24,11 @@ interface NavItem {
   path: string;
   label: string;
   icon: IconComponent;
+  /** Open in a new tab. Use for cross-product links (e.g. /talents) whose
+   *  layout is incompatible with MainLayout's sidebar/header. */
+  newTab?: boolean;
+  /** Optional pill badge (e.g. "NEW"). */
+  badge?: string;
 }
 
 interface NavSection {
@@ -227,6 +232,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
 
   const BOTTOM_ITEMS_T: NavItem[] = [
     { path: '/marketplace',        label: 'Marketplace',  icon: ShoppingBag },
+    { path: '/talents',            label: 'Talents',      icon: Briefcase, newTab: true, badge: 'NEW' },
     { path: '/admin/billing',      label: 'Abonnement',   icon: Crown },
     { path: '/creator',            label: 'Createur',     icon: Sparkles },
     { path: '/feedback',           label: 'Feedback',     icon: MessageSquarePlus },
@@ -261,16 +267,12 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
   }
 
   const renderItem = (item: NavItem, indent = false) => {
-    const active = isActive(item.path);
+    const active = !item.newTab && isActive(item.path);
     const Icon = item.icon;
-    return (
-      <NavLink
-        key={item.path}
-        to={item.path}
-        onClick={onCloseMobile}
-        className={`flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-lg transition-all duration-150 ${active ? '' : 'hover:bg-white/10'}`}
-        style={active ? { background: 'linear-gradient(135deg, #10B981, #0A4F3C)' } : {}}
-      >
+    const commonClass = `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-lg transition-all duration-150 ${active ? '' : 'hover:bg-white/10'}`;
+    const commonStyle = active ? { background: 'linear-gradient(135deg, #10B981, #0A4F3C)' } : {};
+    const inner = (
+      <>
         <Icon size={indent ? 15 : 18} className="flex-shrink-0 text-white" />
         <AnimatePresence>
           {!collapsed && (
@@ -285,7 +287,32 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
             </motion.span>
           )}
         </AnimatePresence>
-        {active && !collapsed && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white" />}
+        {item.badge && !collapsed && (
+          <span className="ml-auto px-1.5 py-0.5 rounded-full text-[9px] font-black tracking-wider"
+            style={{ background: '#D4A017', color: '#063D2E' }}>
+            {item.badge}
+          </span>
+        )}
+        {active && !collapsed && !item.badge && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white" />}
+      </>
+    );
+
+    // External / cross-product link — opens in new tab so the connected app
+    // shell (sidebar/header) stays alive in the original tab.
+    if (item.newTab) {
+      return (
+        <a key={item.path} href={item.path} target="_blank" rel="noopener noreferrer"
+          onClick={onCloseMobile}
+          className={commonClass} style={commonStyle}>
+          {inner}
+        </a>
+      );
+    }
+
+    return (
+      <NavLink key={item.path} to={item.path} onClick={onCloseMobile}
+        className={commonClass} style={commonStyle}>
+        {inner}
       </NavLink>
     );
   };
