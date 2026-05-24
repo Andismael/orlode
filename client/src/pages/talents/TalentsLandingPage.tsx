@@ -20,7 +20,7 @@ const TALENTS_APP_URL = 'https://talents.orlode.com';
 export default function TalentsLandingPage() {
   useSEO({
     title: 'Orlode Talents — Recruter en 5 minutes',
-    description: 'Marketplace vidéo authentique. Les candidats africains postent 1 minute de vidéo brute. Les recruteurs trouvent les bons talents en langage naturel.',
+    description: 'Marketplace vidéo authentique. Les candidats postent 1 minute de vidéo brute. Les recruteurs trouvent les bons talents en langage naturel — partout dans le monde.',
     path: '/talents',
   });
 
@@ -81,7 +81,7 @@ function Hero() {
           marginBottom: 14,
         }}>
           <span className="m-live-dot" style={{ background: M.goldLight }} />
-          🌍 BÊTA · ABIDJAN
+          🌍 GLOBAL · 20+ PAYS
         </div>
 
         <h1 className="m-display" style={{
@@ -237,7 +237,7 @@ function ForRecruiters() {
           Cherche en <em style={{ fontStyle: 'italic', color: M.violetDeep }}>langage naturel</em>.
         </h2>
         <p style={{ fontSize: 14, color: M.inkSoft, margin: '0 0 18px', lineHeight: 1.55 }}>
-          Tape ce que tu veux : "développeur React Abidjan dispo immédiat", "vendeuse mode énergique", "comptable SYSCOHADA 5 ans". L'IA matche par énergie, compétences, disponibilité.
+          Tape ce que tu veux : "développeur React dispo immédiat", "vendeuse mode énergique", "comptable senior 5 ans". L'IA matche par énergie, compétences, disponibilité, langues, ville.
         </p>
         <a href={`${TALENTS_APP_URL}/recruiter`} className="tap-card" style={{
           display: 'flex', alignItems: 'center', gap: 12,
@@ -290,7 +290,7 @@ function FeedTeaser() {
           Découvre les talents <em style={{ fontStyle: 'italic', color: M.gold }}>déjà inscrits</em>.
         </h2>
         <p style={{ fontSize: 14, color: M.inkSoft, margin: '0 0 18px', lineHeight: 1.55 }}>
-          Vidéos brutes de candidats actifs en Côte d'Ivoire et au-delà. Pas de filtre, juste leur talent.
+          Vidéos brutes de candidats actifs partout dans le monde. Pas de filtre, juste leur talent.
         </p>
         <Link to="/talents/feed" className="tap-card" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -330,7 +330,7 @@ function Footer() {
           </span>
         </div>
         <p style={{ fontSize: 13, color: 'rgba(255,250,240,0.7)', margin: '0 0 22px', lineHeight: 1.5 }}>
-          🌍 Africa-first · Marketplace vidéo authentique · Partage la même infra que Orlode.
+          🌍 Marketplace vidéo authentique · Global · Partage la même infra que Orlode.
         </p>
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
           <Link to="/" style={{ color: 'rgba(255,250,240,0.75)', textDecoration: 'none', fontWeight: 600 }}>

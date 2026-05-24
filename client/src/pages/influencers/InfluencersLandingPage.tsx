@@ -19,7 +19,7 @@ import { M, MOBILE_CSS, StarsBackdrop, SlowRotateRing } from '@/components/mobil
 export default function InfluencersLandingPage() {
   useSEO({
     title: 'Orlode Influenceurs — Marketplace créateurs Afrique',
-    description: 'Marques + influenceurs africains, sans agence. Brief, deal, paiement, mesure dans une seule interface.',
+    description: 'Marques + influenceurs, sans agence, partout dans le monde. Brief, deal, paiement, mesure dans une seule interface.',
     path: '/influenceurs',
   });
 
@@ -80,7 +80,7 @@ function Hero() {
           marginBottom: 14,
         }}>
           <span className="m-live-dot" style={{ background: M.goldLight }} />
-          🌍 BÊTA · ABIDJAN · DAKAR · DOUALA
+          🌍 GLOBAL · TOUT PAYS · MULTI-LANGUES
         </div>
 
         <h1 className="m-display" style={{
@@ -103,7 +103,7 @@ function Hero() {
           color: 'rgba(255,250,240,0.85)',
           margin: '0 0 24px', maxWidth: 480,
         }}>
-          Trouve l'influenceur africain qui correspond à ta marque. <strong style={{ color: M.cream }}>Brief, deal, paiement, mesure</strong> dans une seule interface. Pas de commission d'agence — juste 5% transaction.
+          Trouve l'influenceur qui correspond à ta marque, partout dans le monde. <strong style={{ color: M.cream }}>Brief, deal, paiement, mesure</strong> dans une seule interface. Pas de commission d'agence — juste 5% transaction.
         </p>
 
         <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
@@ -396,7 +396,7 @@ function Footer() {
           </span>
         </div>
         <p style={{ fontSize: 13, color: 'rgba(255,250,240,0.7)', margin: '0 0 22px', lineHeight: 1.5 }}>
-          🌍 Marketplace créateurs Afrique francophone · Même infra que Orlode + Talents.
+          🌍 Marketplace créateurs global · Multi-langues · Même infra que Orlode + Talents.
         </p>
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
           <Link to="/" style={{ color: 'rgba(255,250,240,0.75)', textDecoration: 'none', fontWeight: 600 }}>← Orlode</Link>

@@ -18,7 +18,7 @@ const CATS = ['Mode', 'Tech', 'Food', 'Lifestyle', 'Fitness', 'Beauté'];
 export default function InfluencersFeedPage() {
   useSEO({
     title: 'Annuaire — Orlode Influenceurs',
-    description: 'Créateurs africains vérifiés. Filtre par catégorie, audience, engagement.',
+    description: 'Créateurs vérifiés du monde entier. Filtre par catégorie, audience, engagement, ville.',
     path: '/influenceurs/feed',
   });
 

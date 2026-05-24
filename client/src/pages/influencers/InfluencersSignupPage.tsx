@@ -27,7 +27,11 @@ import { useAuthStore } from '@/store/authStore';
 import { M, MOBILE_CSS } from '@/components/mobile/mobileDesign';
 
 const CATEGORIES = ['Mode', 'Tech', 'Food', 'Lifestyle', 'Fitness', 'Beauté'] as const;
-const LANGUAGES = ['Français', 'Anglais', 'Dioula', 'Wolof', 'Bambara', 'Lingala', 'Swahili'] as const;
+const LANGUAGES = [
+  'Français', 'Anglais', 'Espagnol', 'Portugais', 'Arabe',
+  'Mandarin', 'Hindi', 'Allemand', 'Italien', 'Russe',
+  'Swahili', 'Wolof', 'Dioula', 'Lingala', 'Bambara',
+] as const;
 const RESPONSE_TIMES = ['< 2h', '< 6h', '< 24h', '2 jours'] as const;
 
 export default function InfluencersSignupPage() {
@@ -232,9 +236,9 @@ export default function InfluencersSignupPage() {
               <Section title="2. Ton profil créateur">
                 <Input label="Nom affiché *" value={displayName} onChange={setDisplayName} placeholder="Aïssatou Diallo" />
                 <Input label="Handle principal *" value={handle} onChange={setHandle} placeholder="@aissatou.styles" />
-                <Input label="Ville *" value={city} onChange={setCity} placeholder="Abidjan, Cocody" />
+                <Input label="Ville, pays *" value={city} onChange={setCity} placeholder="Paris · Abidjan · Lagos · São Paulo…" />
                 <Textarea label="Bio (≥20 caractères) *" value={bio} onChange={setBio}
-                  placeholder="Créatrice de contenu mode africaine. Collabs : Zaffran, NSIA, Orange CI." />
+                  placeholder="Créateur·trice de contenu mode. Collabs : marques locales et internationales. Ton style en une phrase." />
               </Section>
 
               <Section title="3. Catégories" subtitle="1 minimum, max 3">
