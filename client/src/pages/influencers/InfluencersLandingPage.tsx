@@ -117,7 +117,7 @@ function Hero() {
           }}>
             <Users size={15} /> Trouver un influenceur
           </Link>
-          <a href="#creators" style={{
+          <Link to="/influenceurs/inscription" style={{
             background: 'rgba(255,250,240,0.10)',
             color: M.cream,
             border: `1px solid ${M.cream}35`,
@@ -128,7 +128,7 @@ function Hero() {
             backdropFilter: 'blur(20px)',
           }}>
             <Camera size={14} /> Je suis créateur
-          </a>
+          </Link>
         </div>
 
         <div style={{
@@ -305,12 +305,12 @@ function ForCreators() {
         <p style={{ fontSize: 14, color: M.inkSoft, margin: '0 0 18px', lineHeight: 1.55 }}>
           Tu reçois les briefs des marques directement. Tu acceptes, tu livres, tu es payé. Pas d'agent qui prend 30%.
         </p>
-        <div className="tap-card" style={{
+        <Link to="/influenceurs/inscription" className="tap-card" style={{
           display: 'flex', alignItems: 'center', gap: 12,
           background: M.cream,
           border: `1px solid ${M.violet}40`,
           borderRadius: 14, padding: '12px 14px',
-          color: M.ink,
+          color: M.ink, textDecoration: 'none',
         }}>
           <div style={{
             width: 38, height: 38, borderRadius: 11,
@@ -323,17 +323,14 @@ function ForCreators() {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="m-display" style={{ fontSize: 14, fontWeight: 700 }}>
-              Inscription créateur — bientôt
+              Créer mon profil créateur
             </div>
             <div style={{ fontSize: 11, color: M.inkSoft, marginTop: 2 }}>
-              Vérification Instagram + TikTok + YouTube · onboarding en 5 min
+              Onboarding 5 min · vérification sous 48h · gratuit
             </div>
           </div>
-          <span className="m-pill" style={{
-            background: M.gold, color: '#2E1065',
-            fontSize: 9, fontWeight: 800, letterSpacing: '0.05em',
-          }}>BIENTÔT</span>
-        </div>
+          <ChevronRight size={16} color={M.violetDeep} />
+        </Link>
       </div>
     </section>
   );

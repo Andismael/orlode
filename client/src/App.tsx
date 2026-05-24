@@ -86,6 +86,7 @@ const TalentsFeedPage = lazy(() => import('@/pages/talents/TalentsFeedPage'));
 const TalentsInboxPage = lazy(() => import('@/pages/talents/TalentsInboxPage'));
 const InfluencersLandingPage = lazy(() => import('@/pages/influencers/InfluencersLandingPage'));
 const InfluencersFeedPage = lazy(() => import('@/pages/influencers/InfluencersFeedPage'));
+const InfluencersSignupPage = lazy(() => import('@/pages/influencers/InfluencersSignupPage'));
 const ApiKeysPage = lazy(() => import('@/pages/settings/ApiKeysPage'));
 const CloneSetupPage = lazy(() => import('@/pages/admin/CloneSetupPage'));
 const CloneInboxPage = lazy(() => import('@/pages/admin/CloneInboxPage'));
@@ -399,6 +400,7 @@ export default function App() {
         {/* ── Orlode Influenceurs (same Firebase, brand-creator marketplace) ─ */}
         <Route path="/influenceurs" element={<InfluencersLandingPage />} />
         <Route path="/influenceurs/feed" element={<InfluencersFeedPage />} />
+        <Route path="/influenceurs/inscription" element={<InfluencersSignupPage />} />
 
         {/* ── Public / Auth ─────────────────────────────────────────── */}
         <Route element={<PublicLayout />}>
