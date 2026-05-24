@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Building2, BarChart2, HeadphonesIcon, ArrowLeft, Shield,
   Users, CreditCard, Bot, Activity, Globe, Settings, Cpu, Sparkles,
-  Menu, X, Boxes,
+  Menu, X, Boxes, Briefcase, Megaphone,
 } from 'lucide-react';
 
 const superAdminNav = [
@@ -16,6 +16,10 @@ const superAdminNav = [
   { path: '/superadmin/packs', label: 'Packs', icon: Boxes },
   { path: '/superadmin/marketplace', label: 'Marketplace', icon: Bot },
   { path: '/superadmin/marketplace-studio', label: 'Studio Marketplace', icon: Sparkles },
+  // Cross-product moderation — these manage the standalone Orlode Talents
+  // and Influenceurs products that share the same Firebase backend.
+  { path: '/superadmin/talents',     label: 'Talents (modération)',      icon: Briefcase },
+  { path: '/superadmin/influencers', label: 'Influenceurs (modération)', icon: Megaphone },
   { path: '/superadmin/mcp-catalog', label: 'MCP Catalog', icon: Cpu },
   { path: '/superadmin/landing', label: 'Landing Page', icon: Globe },
   { path: '/superadmin/health', label: 'Systeme', icon: Activity },

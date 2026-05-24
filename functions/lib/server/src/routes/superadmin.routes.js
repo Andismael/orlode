@@ -892,6 +892,63 @@ router.patch('/landing', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     await (0, firebase_config_1.getFirestore)().doc(LANDING_DOC).set({ ...body, updatedAt: new Date(), updatedBy: req.user?.uid }, { merge: true });
     res.json({ success: true });
 }));
+// ── TALENTS — moderation (Orlode Talents marketplace) ──────────────────────
+// Same shape as influencers, different collection + different status enum.
+// GET /api/superadmin/talents?status=pending_video|pending_analysis|active|paused|hired
+router.get('/talents', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const db = (0, firebase_config_1.getFirestore)();
+    const status = req.query['status'] ?? '';
+    let q = db.collection('talents_profiles');
+    if (['pending_video', 'pending_analysis', 'active', 'paused', 'hired'].includes(status)) {
+        q = q.where('status', '==', status);
+    }
+    const snap = await q.limit(200).get();
+    const profiles = snap.docs.map(d => {
+        const data = d.data();
+        return {
+            id: d.id,
+            displayName: data['displayName'] ?? '',
+            city: data['city'] ?? '',
+            country: data['country'] ?? '',
+            sector: data['sector'] ?? '',
+            skills: data['skills'] ?? [],
+            tagline: data['tagline'] ?? '',
+            videoUrl: data['videoUrl'] ?? null,
+            thumbnailUrl: data['thumbnailUrl'] ?? null,
+            videoDuration: data['videoDuration'] ?? 0,
+            aiAnalysis: data['aiAnalysis'] ?? null,
+            availability: data['availability'] ?? 'open',
+            language: data['language'] ?? 'fr',
+            viewsCount: data['viewsCount'] ?? 0,
+            contactsCount: data['contactsCount'] ?? 0,
+            status: data['status'] ?? 'pending_video',
+            userId: data['userId'] ?? null,
+            createdAt: data['createdAt']?.toDate?.()?.toISOString?.() ?? null,
+            publishedAt: data['publishedAt']?.toDate?.()?.toISOString?.() ?? null,
+        };
+    });
+    res.json({ success: true, data: profiles });
+}));
+// PATCH /api/superadmin/talents/:id/status — flip moderation status
+router.patch('/talents/:id/status', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const { status } = req.body;
+    if (!status || !['pending_video', 'pending_analysis', 'active', 'paused', 'hired'].includes(status)) {
+        throw new error_middleware_1.AppError(`Invalid status: ${status}`, 400);
+    }
+    const db = (0, firebase_config_1.getFirestore)();
+    const update = {
+        status,
+        moderatedBy: req.user?.uid ?? null,
+        moderatedAt: new Date(),
+        updatedAt: new Date(),
+    };
+    // When activating for the first time, stamp publishedAt so the public
+    // feed (ordered by publishedAt desc) sorts it correctly.
+    if (status === 'active')
+        update['publishedAt'] = new Date();
+    await db.collection('talents_profiles').doc(req.params.id).set(update, { merge: true });
+    res.json({ success: true, data: update });
+}));
 // ── INFLUENCERS — moderation (Orlode Influenceurs marketplace) ──────────────
 // SuperAdmin lists all creator profiles (any status) and flips status
 // pending ↔ active to approve / re-pause a creator. Bypasses Firestore
