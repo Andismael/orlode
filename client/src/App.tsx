@@ -280,6 +280,7 @@ const SAUsersPage = lazy(() => import('@/pages/superadmin/UsersPage'));
 const SAPaymentsPage = lazy(() => import('@/pages/superadmin/PaymentsPage'));
 const SAPlatformSettingsPage = lazy(() => import('@/pages/superadmin/PlatformSettingsPage'));
 const SAMarketplacePage = lazy(() => import('@/pages/superadmin/MarketplaceAdminPage'));
+const SAInfluencersPage = lazy(() => import('@/pages/superadmin/InfluencersAdminPage'));
 const SAMarketplaceStudioPage = lazy(() => import('@/pages/superadmin/MarketplaceStudioPage'));
 const SALandingEditorPage = lazy(() => import('@/pages/superadmin/LandingEditorPage'));
 const SAHealthPage = lazy(() => import('@/pages/superadmin/SystemHealthPage'));
@@ -757,6 +758,7 @@ export default function App() {
             <Route path="superadmin/platform-settings" element={<SAPlatformSettingsPage />} />
             <Route path="superadmin/packs" element={<SAPacksPage />} />
             <Route path="superadmin/marketplace" element={<SAMarketplacePage />} />
+            <Route path="superadmin/influencers" element={<SAInfluencersPage />} />
             <Route path="superadmin/marketplace-studio" element={<SAMarketplaceStudioPage />} />
             <Route path="superadmin/landing" element={<SALandingEditorPage />} />
             <Route path="superadmin/health" element={<SAHealthPage />} />

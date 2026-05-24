@@ -878,4 +878,57 @@ router.patch('/landing', asyncHandler(async (req: AuthenticatedRequest, res: Res
   res.json({ success: true });
 }));
 
+// ── INFLUENCERS — moderation (Orlode Influenceurs marketplace) ──────────────
+// SuperAdmin lists all creator profiles (any status) and flips status
+// pending ↔ active to approve / re-pause a creator. Bypasses Firestore
+// public read rules via Admin SDK.
+
+// GET /api/superadmin/influencers?status=pending|active|paused
+router.get('/influencers', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const db = getFirestore();
+  const status = (req.query['status'] as string | undefined) ?? '';
+  let q: FirebaseFirestore.Query = db.collection('influencers_profiles');
+  if (['pending', 'active', 'paused', 'hired'].includes(status)) {
+    q = q.where('status', '==', status);
+  }
+  const snap = await q.limit(200).get();
+  const profiles = snap.docs.map(d => {
+    const data = d.data();
+    return {
+      id: d.id,
+      displayName: data['displayName'] ?? '',
+      handle: data['handle'] ?? '',
+      city: data['city'] ?? '',
+      bio: data['bio'] ?? '',
+      categories: data['categories'] ?? [],
+      audience: data['audience'] ?? {},
+      languages: data['languages'] ?? [],
+      verified: !!data['verified'],
+      status: data['status'] ?? 'pending',
+      userId: data['userId'] ?? null,
+      createdAt: data['createdAt']?.toDate?.()?.toISOString?.() ?? null,
+      lastActiveAt: data['lastActiveAt']?.toDate?.()?.toISOString?.() ?? null,
+    };
+  });
+  res.json({ success: true, data: profiles });
+}));
+
+// PATCH /api/superadmin/influencers/:id/status — flip status (with audit)
+router.patch('/influencers/:id/status', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { status, verified } = req.body as { status?: string; verified?: boolean };
+  if (status && !['pending', 'active', 'paused', 'hired'].includes(status)) {
+    throw new AppError(`Invalid status: ${status}`, 400);
+  }
+  const db = getFirestore();
+  const update: Record<string, unknown> = {
+    moderatedBy: req.user?.uid ?? null,
+    moderatedAt: new Date(),
+    updatedAt: new Date(),
+  };
+  if (status !== undefined) update['status'] = status;
+  if (typeof verified === 'boolean') update['verified'] = verified;
+  await db.collection('influencers_profiles').doc(req.params.id).set(update, { merge: true });
+  res.json({ success: true, data: update });
+}));
+
 export default router;
