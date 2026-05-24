@@ -182,11 +182,18 @@ export default function AboutPage() {
             <p className="text-xs text-white/50">{lp("Apportez votre propre IA", 'Bring Your Own AI Platform')}</p>
           </div>
         </Link>
-        <nav className="hidden md:flex items-center gap-8 text-sm text-white/65">
+        <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-sm text-white/65">
           <a href="#reel" className="hover:text-white">{lp('Démo', 'Demo')}</a>
           <a href="#packs" className="hover:text-white">{lp('Packs', 'Packs')}</a>
+          <Link to="/talents" className="hover:text-white no-underline inline-flex items-center gap-1.5">
+            Talents
+            <span className="px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider bg-emerald-400 text-emerald-950">NEW</span>
+          </Link>
+          <Link to="/influenceurs" className="hover:text-white no-underline inline-flex items-center gap-1.5">
+            Influenceurs
+            <span className="px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider bg-violet-400 text-violet-950">NEW</span>
+          </Link>
           <a href="#pricing" className="hover:text-white">{lp('Tarifs', 'Pricing')}</a>
-          <Link to="/features" className="hover:text-white no-underline">{lp('Fonctionnalités', 'Features')}</Link>
         </nav>
         <div className="flex items-center gap-3">
           {/* Lang switcher */}
@@ -374,27 +381,49 @@ export default function AboutPage() {
           </div>
           <DemoReel />
 
-          {/* Orlode Talents teaser — separate product, same Firebase backend */}
-          <Link to="/talents" className="block mt-12 max-w-3xl mx-auto no-underline">
-            <div className="rounded-3xl bg-gradient-to-br from-amber-500/15 via-orange-500/8 to-emerald-500/10 border border-amber-400/30 backdrop-blur-xl p-6 hover:scale-[1.02] hover:border-amber-400/60 transition-all group">
-              <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-2xl shadow-xl shadow-amber-500/30 flex-shrink-0">
-                  🎬
+          {/* Orlode Talents + Influenceurs teasers — separate products, same Firebase backend */}
+          <div className="mt-12 grid md:grid-cols-2 gap-4 max-w-3xl mx-auto">
+            <Link to="/talents" className="block no-underline">
+              <div className="h-full rounded-3xl bg-gradient-to-br from-amber-500/15 via-orange-500/8 to-emerald-500/10 border border-amber-400/30 backdrop-blur-xl p-6 hover:scale-[1.02] hover:border-amber-400/60 transition-all group">
+                <div className="flex items-start gap-4">
+                  <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-2xl shadow-xl shadow-amber-500/30 flex-shrink-0">
+                    🎬
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black text-amber-300 tracking-wider">{lp('NOUVEAU PRODUIT', 'NEW PRODUCT')}</p>
+                    <h3 className="text-xl font-black text-white mt-0.5">
+                      Orlode <em className="italic text-amber-300">Talents</em>
+                    </h3>
+                    <p className="text-xs text-white/65 mt-2 leading-relaxed">{lp(
+                      'Recrutement vidéo. 1 minute, pas de CV, contact WhatsApp direct.',
+                      'Video recruiting. 1 minute, no resume, direct WhatsApp contact.',
+                    )}</p>
+                  </div>
+                  <span className="text-amber-300 text-xl group-hover:translate-x-1 transition-transform">→</span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-black text-amber-300 tracking-wider">{lp('NOUVEAU PRODUIT · MÊME INFRA', 'NEW PRODUCT · SAME BACKEND')}</p>
-                  <h3 className="text-xl sm:text-2xl font-black text-white mt-0.5">
-                    Orlode <em className="italic text-amber-300">Talents</em>
-                  </h3>
-                  <p className="text-sm text-white/65 mt-1">{lp(
-                    'Marketplace vidéo de recrutement. 1 minute, pas de CV, contact WhatsApp direct.',
-                    'Video-first recruiting marketplace. 1 minute, no resume, direct WhatsApp contact.',
-                  )}</p>
-                </div>
-                <span className="text-amber-300 text-2xl group-hover:translate-x-1 transition-transform">→</span>
               </div>
-            </div>
-          </Link>
+            </Link>
+            <Link to="/influenceurs" className="block no-underline">
+              <div className="h-full rounded-3xl bg-gradient-to-br from-violet-500/15 via-indigo-500/8 to-fuchsia-500/10 border border-violet-400/30 backdrop-blur-xl p-6 hover:scale-[1.02] hover:border-violet-400/60 transition-all group">
+                <div className="flex items-start gap-4">
+                  <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-400 to-indigo-500 flex items-center justify-center text-2xl shadow-xl shadow-violet-500/30 flex-shrink-0">
+                    📢
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black text-violet-300 tracking-wider">{lp('NOUVEAU PRODUIT', 'NEW PRODUCT')}</p>
+                    <h3 className="text-xl font-black text-white mt-0.5">
+                      Orlode <em className="italic text-violet-300">Influenceurs</em>
+                    </h3>
+                    <p className="text-xs text-white/65 mt-2 leading-relaxed">{lp(
+                      'Marketplace marques ↔ créateurs Afrique. Sans agence, 5% transaction.',
+                      'Brand ↔ creator marketplace Africa. No agency, 5% transaction.',
+                    )}</p>
+                  </div>
+                  <span className="text-violet-300 text-xl group-hover:translate-x-1 transition-transform">→</span>
+                </div>
+              </div>
+            </Link>
+          </div>
 
           {/* Channel demo links — point visitors to the standalone landing pages */}
           <div className="mt-6 grid sm:grid-cols-2 gap-4 max-w-3xl mx-auto">
