@@ -24,6 +24,12 @@ export interface InfluencerAudience {
   facebook?: number;
 }
 
+export interface InfluencerSocialLink {
+  url: string;
+  followers: number;
+  lastUpdatedAt?: string | null;
+}
+
 export interface Influencer {
   id: string;
   displayName: string;
@@ -34,6 +40,10 @@ export interface Influencer {
   country?: string;
   categories?: string[];      // ['Mode', 'Lifestyle']
   audience?: InfluencerAudience;
+  /** Creator-managed direct links per platform — brands click to verify
+   *  themselves on the actual platform. Source of truth lives in
+   *  InfluencersLinksPage. */
+  socialLinks?: Record<string, InfluencerSocialLink>;
   engagement?: number;        // % engagement rate
   rating?: number;
   completedDeals?: number;

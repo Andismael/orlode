@@ -8,6 +8,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   Loader2, ArrowLeft, RefreshCw, BadgeCheck, MapPin, Instagram, Youtube,
   Music as TiktokIcon, TrendingUp, MessageCircle, Hash,
+  Facebook, Twitter, Linkedin, ExternalLink,
 } from 'lucide-react';
 import { listActiveInfluencers, formatAudience, type Influencer } from '@/services/influencers';
 import { useSEO } from '@/hooks/useSEO';
@@ -243,26 +244,12 @@ export default function InfluencersFeedPage() {
                         </div>
                       )}
 
-                      {/* Socials */}
-                      {i.audience && (
-                        <div style={{ display: 'flex', gap: 8, marginTop: 8, color: M.inkLight }}>
-                          {!!i.audience.instagram && (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10 }}>
-                              <Instagram size={11} /> {formatAudience(i.audience.instagram)}
-                            </span>
-                          )}
-                          {!!i.audience.tiktok && (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10 }}>
-                              <TiktokIcon size={11} /> {formatAudience(i.audience.tiktok)}
-                            </span>
-                          )}
-                          {!!i.audience.youtube && (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10 }}>
-                              <Youtube size={11} /> {formatAudience(i.audience.youtube)}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      {/* Socials — clickable links so brands verify followers
+                          themselves on the actual platform. Falls back to
+                          non-clickable audience numbers for legacy profiles
+                          that haven't filled the links page yet. */}
+                      <SocialBadges links={i.socialLinks} audience={i.audience} />
+
                     </div>
 
                     {/* Contact CTA */}
@@ -297,6 +284,85 @@ export default function InfluencersFeedPage() {
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ── Social badges — clickable platform icons that open the actual
+//    creator profile in a new tab. The whole product premise: brands
+//    verify followers themselves, no algorithm. ────────────────────────
+const PLATFORM_META: Record<string, { Icon: React.ComponentType<{ size?: number; color?: string }>; color: string; gradient: string }> = {
+  instagram: { Icon: Instagram,  color: '#E1306C', gradient: 'linear-gradient(135deg,#F58529,#DD2A7B,#8134AF)' },
+  tiktok:    { Icon: TiktokIcon, color: '#000',    gradient: 'linear-gradient(135deg,#25F4EE,#FE2C55)' },
+  youtube:   { Icon: Youtube,    color: '#FF0000', gradient: 'linear-gradient(135deg,#FF0000,#CC0000)' },
+  facebook:  { Icon: Facebook,   color: '#1877F2', gradient: 'linear-gradient(135deg,#1877F2,#0866FF)' },
+  twitter:   { Icon: Twitter,    color: '#000',    gradient: 'linear-gradient(135deg,#000,#333)' },
+  linkedin:  { Icon: Linkedin,   color: '#0A66C2', gradient: 'linear-gradient(135deg,#0A66C2,#004182)' },
+};
+
+function SocialBadges({ links, audience }: {
+  links?: Record<string, { url: string; followers: number }>;
+  audience?: { instagram?: number; tiktok?: number; youtube?: number; facebook?: number; twitter?: number };
+}) {
+  const entries = Object.entries(links ?? {}).filter(([, v]) => v?.url && v.followers > 0);
+
+  if (entries.length > 0) {
+    // Rich mode — clickable badges
+    return (
+      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+        {entries.slice(0, 5).map(([platformId, v]) => {
+          const meta = PLATFORM_META[platformId];
+          if (!meta) return null;
+          const Icon = meta.Icon;
+          return (
+            <a
+              key={platformId}
+              href={v.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="tap-card"
+              title={`Vérifier sur ${platformId}`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                background: meta.gradient,
+                color: '#fff',
+                padding: '4px 8px 4px 6px',
+                borderRadius: 100,
+                fontSize: 10, fontWeight: 700,
+                textDecoration: 'none',
+                boxShadow: `0 4px 10px -3px ${meta.color}80`,
+              }}
+            >
+              <Icon size={11} color="#fff" />
+              <span className="m-mono">{formatAudience(v.followers)}</span>
+              <ExternalLink size={9} color="#ffffff99" />
+            </a>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Legacy fallback — non-clickable audience numbers (no URL stored yet)
+  if (!audience) return null;
+  const legacy: { key: string; icon: React.ComponentType<{ size?: number }>; n?: number }[] = [
+    { key: 'instagram', icon: Instagram,  n: audience.instagram },
+    { key: 'tiktok',    icon: TiktokIcon, n: audience.tiktok },
+    { key: 'youtube',   icon: Youtube,    n: audience.youtube },
+  ];
+  const filled = legacy.filter(x => !!x.n);
+  if (filled.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', gap: 8, marginTop: 8, color: M.inkLight }}>
+      {filled.map(x => {
+        const Ic = x.icon;
+        return (
+          <span key={x.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10 }}>
+            <Ic size={11} /> {formatAudience(x.n!)}
+          </span>
+        );
+      })}
     </div>
   );
 }
