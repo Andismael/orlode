@@ -1,5 +1,6 @@
 /**
  * Orlode Influenceurs — creator self-management of social links.
+ * Editorial purple redesign from user-provided maquette 2026-05-24.
  *
  * Authenticated page where a verified creator manages the 7 supported
  * social platforms (link + declared followers). Brands click each link
@@ -7,25 +8,34 @@
  *
  * The transparency is the product: a creator can't fake their numbers
  * because brands see the live profile in one tap.
- *
- * Pattern + UI inspired by user-provided design 2026-05-24, adapted to
- * Orlode TypeScript + Firestore + auth.
  */
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Check, CheckCircle2, X, Info,
   Sparkles, Shield, ExternalLink, Plus, Trash2, Edit3, Eye,
   Instagram, Youtube, Music, Facebook, Twitter, Linkedin, Link2,
-  Loader2,
+  Loader2, Lock, Clock,
 } from 'lucide-react';
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/services/firebase';
 import { useAuthStore } from '@/store/authStore';
 import { useSEO } from '@/hooks/useSEO';
-import { M, MOBILE_CSS } from '@/components/mobile/mobileDesign';
 
-// ── PLATFORMS CONFIG ────────────────────────────────────────────────────
+const C = {
+  brand: '#6366F1', brandDeep: '#4F46E5', brandDark: '#3730A3',
+  brandDarker: '#1E1B4B',
+  brandSoft: '#EEF2FF', brandLight: '#A5B4FC', brandMid: '#818CF8',
+  gold: '#D4A574', goldDeep: '#B8895C', goldLight: '#E8C9A0',
+  cream: '#FAF7F2', creamDeep: '#F0EBE3',
+  ink: '#0A0814', ink2: '#1F1B2E', ink3: '#3F3856',
+  inkSoft: '#6B6480', inkLight: '#9A93AD', inkSilent: '#C9C3D6',
+  success: '#059669', successSoft: '#D1FAE5', successDark: '#065F46',
+  danger: '#DC2626',
+  white: '#FFFFFF',
+  snapchatText: '#000000',
+};
+
 type IconCmp = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number; fill?: string }>;
 
 interface PlatformDef {
@@ -61,14 +71,88 @@ interface SocialLink {
 }
 type LinksMap = Record<string, SocialLink>;
 
-const EMPTY: SocialLink = { url: '', followers: 0, lastUpdatedAt: null };
-
 const formatK = (n: number) => {
   if (!n) return '0';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
   if (n >= 1000) return `${Math.round(n / 1000)}k`;
   return n.toString();
 };
+
+const STYLES = `
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+  .ilk { font-family: 'Inter', system-ui, sans-serif; color: ${C.ink}; -webkit-font-smoothing: antialiased; }
+  .ilk-serif { font-family: 'Fraunces', serif; letter-spacing: -0.025em; }
+  .ilk-mono { font-family: 'JetBrains Mono', monospace; }
+  .ilk-input {
+    width: 100%; background: ${C.white}; color: ${C.ink};
+    border: 1.5px solid ${C.creamDeep};
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 14px; font-family: inherit; outline: none;
+    transition: all 0.2s ease;
+  }
+  .ilk-input:focus { border-color: ${C.brand}; box-shadow: 0 0 0 4px ${C.brandSoft}; }
+  .ilk-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 13px; border-radius: 100px;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  @keyframes ilk-shimmer { 0%{background-position:-200% center} 100%{background-position:200% center} }
+  .ilk-shimmer {
+    background: linear-gradient(90deg, ${C.brandLight} 0%, ${C.goldLight} 50%, ${C.brandLight} 100%);
+    background-size: 200% auto;
+    background-clip: text; -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: ilk-shimmer 5s linear infinite;
+  }
+  @keyframes ilk-fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+  .ilk-fade { animation: ilk-fadeUp 0.5s cubic-bezier(0.16,1,0.3,1) backwards; }
+  .ilk-d1{animation-delay:0.1s} .ilk-d2{animation-delay:0.2s} .ilk-d3{animation-delay:0.3s}
+  @keyframes ilk-fadeIn { from{opacity:0} to{opacity:1} }
+  .ilk-fade-in { animation: ilk-fadeIn 0.4s ease; }
+  @keyframes ilk-modalIn {
+    from { opacity: 0; transform: scale(0.96) translateY(12px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .ilk-modal-in { animation: ilk-modalIn 0.3s cubic-bezier(0.16,1,0.3,1); }
+  .ilk-btn-primary {
+    background: linear-gradient(135deg, ${C.brand}, ${C.brandDeep});
+    color: ${C.white}; border: none;
+    padding: 12px 22px; border-radius: 100px;
+    font-size: 14px; font-weight: 600; font-family: inherit;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+    box-shadow: 0 8px 24px -8px ${C.brand}80;
+  }
+  .ilk-btn-primary:hover:not(:disabled) { transform: translateY(-2px); }
+  .ilk-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+  .ilk-btn-cream {
+    background: ${C.white}; color: ${C.ink};
+    border: 1px solid ${C.creamDeep};
+    padding: 12px 22px; border-radius: 100px;
+    font-size: 14px; font-weight: 600; font-family: inherit;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: all 0.2s ease;
+    text-decoration: none;
+  }
+  .ilk-btn-cream:hover { background: ${C.creamDeep}; }
+  .ilk-btn-ghost {
+    background: transparent; color: ${C.inkSoft};
+    border: none;
+    padding: 8px 14px; border-radius: 100px;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: all 0.2s ease;
+  }
+  .ilk-btn-ghost:hover { background: ${C.creamDeep}; color: ${C.ink}; }
+  @media (max-width: 768px) {
+    .ilk-grid-1 { grid-template-columns: 1fr !important; }
+  }
+`;
 
 function SnapIcon({ size = 18, color = '#000' }: { size?: number; color?: string }) {
   return (
@@ -78,25 +162,32 @@ function SnapIcon({ size = 18, color = '#000' }: { size?: number; color?: string
   );
 }
 
-// ── MAIN PAGE ───────────────────────────────────────────────────────────
 export default function InfluencersLinksPage() {
   useSEO({
     title: 'Mes liens — Orlode Influenceurs',
-    description: 'Gère tes liens sociaux. Les marques vérifient elles-mêmes en cliquant — pas d\'algorithme.',
+    description: "Gère tes liens sociaux. Les marques vérifient elles-mêmes en cliquant — pas d'algorithme.",
     path: '/influenceurs/mes-liens',
     noindex: true,
   });
 
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const [params, setParams] = useSearchParams();
+  const [welcomeOpen, setWelcomeOpen] = useState(params.get('welcome') === '1');
+  const dismissWelcome = () => {
+    setWelcomeOpen(false);
+    params.delete('welcome');
+    setParams(params, { replace: true });
+  };
+
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [creatorName, setCreatorName] = useState<string>('');
   const [links, setLinks] = useState<LinksMap>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<PlatformDef | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Load creator's profile + existing socialLinks
   useEffect(() => {
     if (!user) { setLoading(false); return; }
     void (async () => {
@@ -107,10 +198,11 @@ export default function InfluencersLinksPage() {
         );
         const snap = await getDocs(q);
         if (snap.empty) { setLoading(false); return; }
-        const docRef = snap.docs[0];
+        const docRef = snap.docs[0]!;
         setProfileId(docRef.id);
-        const data = docRef.data() as { socialLinks?: LinksMap };
+        const data = docRef.data() as { socialLinks?: LinksMap; displayName?: string };
         setLinks(data.socialLinks ?? {});
+        setCreatorName(data.displayName ?? user.displayName ?? user.email ?? 'Créateur');
       } catch (err) {
         setError((err as Error).message);
       } finally {
@@ -155,29 +247,35 @@ export default function InfluencersLinksPage() {
     }
   };
 
-  // Stats
   const filled = Object.entries(links).filter(([, s]) => s.url && s.followers);
   const totalFollowers = filled.reduce((sum, [, s]) => sum + s.followers, 0);
   const progress = Math.round((filled.length / PLATFORMS.length) * 100);
 
-  // No user
-  if (!user && !loading) {
+  // Loading skeleton
+  if (loading) {
     return (
-      <div className="m-root" style={{ minHeight: '100vh', background: M.cream, padding: 40 }}>
-        <style>{MOBILE_CSS}</style>
-        <div className="m-wrap-lg" style={{ maxWidth: 480, textAlign: 'center' }}>
-          <Shield size={40} color={M.violetDeep} style={{ marginBottom: 12 }} />
-          <h1 className="m-display" style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+      <div className="ilk" style={{ minHeight: '100vh', background: C.cream, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <style>{STYLES}</style>
+        <Loader2 className="animate-spin" size={24} color={C.brand} />
+      </div>
+    );
+  }
+
+  // No user
+  if (!user) {
+    return (
+      <div className="ilk" style={{ minHeight: '100vh', background: C.cream, padding: 40 }}>
+        <style>{STYLES}</style>
+        <div style={{ maxWidth: 480, margin: '0 auto', textAlign: 'center' }}>
+          <Shield size={40} color={C.brand} style={{ marginBottom: 12 }} />
+          <h1 className="ilk-serif" style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>
             Connecte-toi
           </h1>
-          <p style={{ color: M.inkSoft, marginBottom: 18, fontSize: 14 }}>
+          <p style={{ color: C.inkSoft, marginBottom: 18, fontSize: 14 }}>
             Tu dois être inscrit·e comme créateur·trice pour gérer tes liens.
           </p>
-          <Link to="/influenceurs/inscription" style={{
-            background: M.violetDeep, color: M.cream, padding: '12px 22px',
-            borderRadius: 100, fontSize: 14, fontWeight: 700, textDecoration: 'none',
-          }}>
-            Créer mon profil →
+          <Link to="/influenceurs/inscription" className="ilk-btn-primary" style={{ textDecoration: 'none' }}>
+            Créer mon profil <Sparkles size={14} />
           </Link>
         </div>
       </div>
@@ -185,392 +283,745 @@ export default function InfluencersLinksPage() {
   }
 
   // No profile yet
-  if (!loading && !profileId) {
+  if (!profileId) {
     return (
-      <div className="m-root" style={{ minHeight: '100vh', background: M.cream, padding: 40 }}>
-        <style>{MOBILE_CSS}</style>
-        <div className="m-wrap-lg" style={{ maxWidth: 480, textAlign: 'center' }}>
-          <Sparkles size={40} color={M.violetDeep} style={{ marginBottom: 12 }} />
-          <h1 className="m-display" style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+      <div className="ilk" style={{ minHeight: '100vh', background: C.cream, padding: 40 }}>
+        <style>{STYLES}</style>
+        <div style={{ maxWidth: 480, margin: '0 auto', textAlign: 'center' }}>
+          <Sparkles size={40} color={C.brand} style={{ marginBottom: 12 }} />
+          <h1 className="ilk-serif" style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>
             Pas encore inscrit·e
           </h1>
-          <p style={{ color: M.inkSoft, marginBottom: 18, fontSize: 14 }}>
+          <p style={{ color: C.inkSoft, marginBottom: 18, fontSize: 14 }}>
             Crée d'abord ton profil créateur — tu pourras ensuite y ajouter tes liens.
           </p>
-          <Link to="/influenceurs/inscription" style={{
-            background: M.violetDeep, color: M.cream, padding: '12px 22px',
-            borderRadius: 100, fontSize: 14, fontWeight: 700, textDecoration: 'none',
-          }}>
-            S'inscrire →
+          <Link to="/influenceurs/inscription" className="ilk-btn-primary" style={{ textDecoration: 'none' }}>
+            Créer mon profil <Sparkles size={14} />
           </Link>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="m-root" style={{ minHeight: '100vh', background: M.cream }}>
-      <style>{MOBILE_CSS}</style>
+  const initials = creatorName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
 
-      {/* Sticky header */}
+  return (
+    <div className="ilk">
+      <style>{STYLES}</style>
+
+      {/* Sticky header (cream like maquette, not dark) */}
       <header style={{
-        position: 'sticky', top: 0, zIndex: 30,
-        background: 'rgba(255, 250, 240, 0.92)',
-        backdropFilter: 'blur(20px)',
-        borderBottom: `1px solid rgba(31,41,55,0.06)`,
-        padding: '14px 18px',
+        position: 'sticky', top: 0, zIndex: 50,
+        background: 'rgba(250, 247, 242, 0.85)',
+        backdropFilter: 'blur(24px) saturate(180%)',
+        borderBottom: `1px solid ${C.creamDeep}`,
+        padding: '16px 32px',
       }}>
-        <div className="m-wrap-lg" style={{ maxWidth: 560, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{
+          maxWidth: 1080, margin: '0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
           <button onClick={() => navigate('/influenceurs')} style={{
-            background: '#F1F3F6', border: 'none',
-            width: 32, height: 32, borderRadius: 9,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', color: M.ink,
+            background: 'none', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 8,
+            color: C.ink3, fontSize: 14, fontWeight: 600,
+            fontFamily: 'inherit', padding: 0,
           }}>
-            <ArrowLeft size={14} />
+            <ArrowLeft size={16} /> Retour à mon profil
           </button>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="m-display" style={{ fontSize: 15, fontWeight: 700 }}>Mes liens sociaux</div>
-            <div style={{ fontSize: 10, color: M.inkSoft }}>
-              {filled.length}/{PLATFORMS.length} renseigné{filled.length > 1 ? 's' : ''}
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: '50%',
+              background: `linear-gradient(135deg, ${C.brand}, ${C.brandDeep})`,
+              color: C.white, fontWeight: 700, fontSize: 13,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'Fraunces, serif',
+            }}>{initials || '?'}</div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}>
+              {creatorName}
+            </span>
           </div>
         </div>
       </header>
 
-      {/* Hero stats */}
-      <section style={{
-        background: `linear-gradient(160deg, #2E1065 0%, ${M.violetDeep} 50%, ${M.violet} 100%)`,
-        color: M.cream, padding: '28px 18px 36px',
-        position: 'relative', overflow: 'hidden',
-      }}>
-        <div className="m-grain" />
-        <div className="m-wrap-lg" style={{ maxWidth: 560, margin: '0 auto', position: 'relative', zIndex: 2 }}>
-          <div className="m-pill" style={{
-            background: 'rgba(252,211,77,0.18)', color: M.goldLight,
-            border: `1px solid ${M.gold}40`, marginBottom: 14,
-          }}>
-            <Link2 size={11} /> TRANSPARENCE TOTALE
-          </div>
-          <h1 className="m-display" style={{
-            fontSize: 'clamp(28px, 6.5vw, 38px)', fontWeight: 800,
-            lineHeight: 1.1, margin: '0 0 12px',
-          }}>
-            Ajoute tes liens.<br />
-            <em className="m-shimmer" style={{
-              fontStyle: 'italic', fontWeight: 500,
-              backgroundImage: M.shimmer,
-            }}>Laisse les marques juger.</em>
-          </h1>
-          <p style={{
-            fontSize: 14, color: 'rgba(255,250,240,0.82)',
-            margin: '0 0 22px', lineHeight: 1.55,
-          }}>
-            Les marques cliquent sur tes liens pour <strong style={{ color: M.cream }}>vérifier elles-mêmes</strong> tes followers en direct. Pas d'algorithme — juste la vérité de tes comptes.
-          </p>
+      <main style={{ minHeight: '100vh', background: C.cream }}>
+        {/* Welcome banner */}
+        {welcomeOpen && (
+          <section style={{ padding: '20px 32px 0' }}>
+            <div style={{ maxWidth: 1080, margin: '0 auto' }}>
+              <div style={{
+                background: C.successSoft,
+                border: `1.5px solid ${C.success}40`,
+                borderRadius: 16,
+                padding: '14px 18px',
+                display: 'flex', alignItems: 'flex-start', gap: 12,
+              }}>
+                <CheckCircle2 size={20} color={C.successDark} style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1, fontSize: 13, color: C.successDark, lineHeight: 1.55 }}>
+                  <strong>Profil créé ✓</strong> Maintenant ajoute tes liens publics ci-dessous pour que les marques puissent vérifier ta vraie audience en un clic.
+                </div>
+                <button onClick={dismissWelcome} aria-label="Fermer" style={{
+                  background: 'transparent', border: 'none', color: C.successDark,
+                  cursor: 'pointer', padding: 4,
+                }}>
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
 
-          {/* Stats grid */}
+        {/* Hero with stats */}
+        <section style={{
+          background: C.ink, color: C.cream,
+          padding: '60px 32px 80px',
+          position: 'relative', overflow: 'hidden',
+        }}>
           <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12,
-            paddingTop: 18, borderTop: `1px dashed ${M.cream}20`,
-          }}>
-            <div>
-              <div className="m-mono" style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,250,240,0.55)', letterSpacing: '0.08em', marginBottom: 4 }}>
-                COMPLÉTÉ
-              </div>
-              <div className="m-display m-mono" style={{ fontSize: 22, fontWeight: 800, color: M.goldLight, lineHeight: 1 }}>
-                {progress}%
-              </div>
-              <div style={{ marginTop: 6, height: 3, borderRadius: 100, background: 'rgba(255,255,255,0.1)' }}>
-                <div style={{ height: '100%', width: `${progress}%`, background: `linear-gradient(90deg, ${M.violet}, ${M.goldLight})`, borderRadius: 100 }} />
-              </div>
+            position: 'absolute', inset: 0,
+            background: `radial-gradient(ellipse at 70% 30%, ${C.brand}40, transparent 60%)`,
+          }} />
+          <div style={{
+            position: 'absolute', inset: 0,
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E")`,
+            opacity: 0.07, pointerEvents: 'none', mixBlendMode: 'overlay',
+          }} />
+
+          <div style={{ maxWidth: 1080, margin: '0 auto', position: 'relative', zIndex: 2 }}>
+            <div className="ilk-pill ilk-fade" style={{
+              background: 'rgba(212, 165, 116, 0.12)',
+              color: C.goldLight,
+              border: `1px solid ${C.gold}40`,
+              backdropFilter: 'blur(20px)',
+              marginBottom: 20,
+            }}>
+              <Link2 size={11} /> Mes réseaux sociaux
             </div>
-            <div>
-              <div className="m-mono" style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,250,240,0.55)', letterSpacing: '0.08em', marginBottom: 4 }}>
-                RÉSEAUX
+            <h1 className="ilk-serif ilk-fade ilk-d1" style={{
+              fontSize: 'clamp(36px, 5vw, 56px)',
+              fontWeight: 800, color: C.cream,
+              margin: '0 0 14px',
+              letterSpacing: '-0.035em', lineHeight: 1,
+            }}>
+              Ajoute tes liens.<br />
+              <em className="ilk-shimmer" style={{ fontStyle: 'italic', fontWeight: 600 }}>
+                Laisse les marques juger.
+              </em>
+            </h1>
+            <p className="ilk-fade ilk-d2" style={{
+              fontSize: 16, color: C.inkSilent,
+              maxWidth: 620, margin: '0 0 36px', lineHeight: 1.6,
+            }}>
+              Les marques cliquent sur tes liens pour <strong style={{ color: C.cream }}>vérifier elles-mêmes</strong> tes followers en direct. Pas d'intermédiaire, pas d'algorithme — juste la vérité de tes comptes.
+            </p>
+
+            <div className="ilk-fade ilk-d3 ilk-grid-1" style={{
+              display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24,
+              padding: 24,
+              background: 'rgba(255,255,255,0.05)',
+              backdropFilter: 'blur(24px)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 18,
+            }}>
+              <div>
+                <div className="ilk-mono" style={{ fontSize: 10, fontWeight: 700, color: C.inkLight, letterSpacing: '0.08em', marginBottom: 4 }}>
+                  PROFIL COMPLÉTÉ
+                </div>
+                <div className="ilk-serif" style={{ fontSize: 32, fontWeight: 700, color: C.cream, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                  <em style={{ fontStyle: 'italic', color: C.goldLight }}>{progress}%</em>
+                </div>
+                <div style={{
+                  marginTop: 8, height: 4, borderRadius: 100,
+                  background: 'rgba(255,255,255,0.1)', overflow: 'hidden',
+                }}>
+                  <div style={{
+                    height: '100%', width: `${progress}%`,
+                    background: `linear-gradient(90deg, ${C.brand}, ${C.goldLight})`,
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
               </div>
-              <div className="m-display m-mono" style={{ fontSize: 22, fontWeight: 800, color: M.cream, lineHeight: 1 }}>
-                {filled.length}<span style={{ fontSize: 14, opacity: 0.5 }}>/{PLATFORMS.length}</span>
+              <div>
+                <div className="ilk-mono" style={{ fontSize: 10, fontWeight: 700, color: C.inkLight, letterSpacing: '0.08em', marginBottom: 4 }}>
+                  RÉSEAUX RENSEIGNÉS
+                </div>
+                <div className="ilk-serif" style={{ fontSize: 32, fontWeight: 700, color: C.cream, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                  <em style={{ fontStyle: 'italic' }}>{filled.length}</em>
+                  <span style={{ fontSize: 18, opacity: 0.5, marginLeft: 2 }}>/ {PLATFORMS.length}</span>
+                </div>
+                <div style={{ fontSize: 11, color: C.inkSilent, marginTop: 6 }}>
+                  Plus tu en as, plus tu es visible
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="m-mono" style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,250,240,0.55)', letterSpacing: '0.08em', marginBottom: 4 }}>
-                AUDIENCE
-              </div>
-              <div className="m-display m-mono" style={{ fontSize: 22, fontWeight: 800, color: M.goldLight, lineHeight: 1 }}>
-                {formatK(totalFollowers)}
+              <div>
+                <div className="ilk-mono" style={{ fontSize: 10, fontWeight: 700, color: C.inkLight, letterSpacing: '0.08em', marginBottom: 4 }}>
+                  AUDIENCE TOTALE DÉCLARÉE
+                </div>
+                <div className="ilk-serif" style={{ fontSize: 32, fontWeight: 700, color: C.cream, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                  <em style={{ fontStyle: 'italic', color: C.goldLight }}>{formatK(totalFollowers)}</em>
+                </div>
+                <div style={{ fontSize: 11, color: C.inkSilent, marginTop: 6 }}>
+                  Vérifiable par les marques
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Platforms grid */}
-      <main style={{ padding: '24px 18px 100px' }}>
-        <div className="m-wrap-xl" style={{ maxWidth: 560, margin: '0 auto' }}>
-          {error && (
-            <div style={{
-              background: '#FEE2E2', border: '1px solid #FCA5A5',
-              borderRadius: 12, padding: 12, marginBottom: 14,
-              fontSize: 13, color: '#991B1B',
-            }}>⚠️ {error}</div>
-          )}
+        {/* How it works strip */}
+        <section style={{
+          background: C.white,
+          borderBottom: `1px solid ${C.creamDeep}`,
+          padding: '32px',
+        }}>
+          <div style={{
+            maxWidth: 1080, margin: '0 auto',
+            display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24,
+          }} className="ilk-grid-1">
+            {[
+              { num: '01', Icon: Link2, title: 'Tu ajoutes tes liens', desc: "Copie-colle l'URL publique de chacun de tes réseaux et déclare tes followers." },
+              { num: '02', Icon: Eye, title: 'Les marques cliquent', desc: 'Quand une marque visite ton profil Orlode, elle clique sur tes liens et vérifie en direct sur la plateforme.' },
+              { num: '03', Icon: Sparkles, title: 'Le deal se fait', desc: "Une fois la marque convaincue, elle te contacte. Tout est transparent, sans intermédiaire." },
+            ].map((s) => (
+              <div key={s.num}>
+                <div className="ilk-mono" style={{
+                  fontSize: 11, fontWeight: 700, color: C.inkLight,
+                  letterSpacing: '0.1em', marginBottom: 12,
+                }}>
+                  {s.num} / 03
+                </div>
+                <div style={{
+                  width: 42, height: 42, borderRadius: 12,
+                  background: `linear-gradient(135deg, ${C.brand}15, ${C.brand}05)`,
+                  border: `1px solid ${C.brand}20`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: C.brand, marginBottom: 12,
+                }}>
+                  <s.Icon size={20} strokeWidth={1.75} />
+                </div>
+                <h3 className="ilk-serif" style={{
+                  fontSize: 18, fontWeight: 700, color: C.ink,
+                  margin: '0 0 6px', letterSpacing: '-0.02em',
+                }}>
+                  {s.title}
+                </h3>
+                <p style={{ fontSize: 13, color: C.inkSoft, margin: 0, lineHeight: 1.55 }}>
+                  {s.desc}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
 
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: 40, color: M.inkSoft }}>
-              <Loader2 size={20} className="animate-spin" style={{ display: 'inline-block' }} />
+        {/* Platforms grid */}
+        <section style={{ padding: '60px 32px 80px' }}>
+          <div style={{ maxWidth: 1080, margin: '0 auto' }}>
+            <div style={{ marginBottom: 28 }}>
+              <h2 className="ilk-serif" style={{
+                fontSize: 28, fontWeight: 700, color: C.ink,
+                margin: '0 0 8px', letterSpacing: '-0.025em',
+              }}>
+                Tes <em className="ilk-shimmer" style={{ fontStyle: 'italic', fontWeight: 600 }}>réseaux</em>
+              </h2>
+              <p style={{ fontSize: 14, color: C.inkSoft, margin: 0 }}>
+                Ajoute uniquement ceux où tu es vraiment actif · Mieux vaut <strong>3 actifs</strong> que <strong>7 inactifs</strong>
+              </p>
             </div>
-          ) : (
-            <div className="m-grid-md-2 m-grid-lg-3" style={{
-              display: 'grid', gridTemplateColumns: '1fr', gap: 12,
+
+            {error && (
+              <div style={{
+                background: '#FEE2E2', border: '1px solid #FCA5A5',
+                borderRadius: 12, padding: 12, fontSize: 13, color: '#991B1B',
+                marginBottom: 16,
+              }}>⚠️ {error}</div>
+            )}
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+              gap: 14,
             }}>
-              {PLATFORMS.map(p => (
-                <PlatformCard
-                  key={p.id}
-                  platform={p}
-                  data={links[p.id] ?? EMPTY}
-                  onEdit={() => setEditing(p)}
-                  busy={savingId === p.id}
-                />
+              {PLATFORMS.map((p, i) => (
+                <div key={p.id} className="ilk-fade" style={{ animationDelay: `${i * 0.05}s` }}>
+                  <PlatformCard
+                    platform={p}
+                    data={links[p.id] ?? { url: '', followers: 0, lastUpdatedAt: null }}
+                    isSaving={savingId === p.id}
+                    onEdit={() => setEditing(p)}
+                  />
+                </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        </section>
+
+        {/* Honest disclaimer */}
+        <section style={{
+          background: C.ink,
+          color: C.cream,
+          padding: '60px 32px',
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: `radial-gradient(ellipse at 20% 80%, ${C.brandDeep}40, transparent 60%)`,
+          }} />
+          <div style={{ maxWidth: 800, margin: '0 auto', position: 'relative', zIndex: 2, textAlign: 'center' }}>
+            <Shield size={32} color={C.goldLight} style={{ marginBottom: 16 }} />
+            <h3 className="ilk-serif" style={{
+              fontSize: 26, fontWeight: 700, color: C.cream,
+              margin: '0 0 12px', letterSpacing: '-0.025em',
+            }}>
+              Pourquoi pas de vérification auto ?
+            </h3>
+            <p style={{ fontSize: 15, color: C.inkSilent, margin: '0 0 24px', lineHeight: 1.65 }}>
+              Parce que <strong style={{ color: C.cream }}>la vraie confiance</strong> ne se mesure pas par un algorithme. Les marques préfèrent cliquer sur ton lien et voir tes vrais posts, tes vrais commentaires, ta vraie communauté.
+            </p>
+            <p style={{ fontSize: 14, color: C.inkLight, margin: 0, lineHeight: 1.6, fontStyle: 'italic' }}>
+              « Un créateur honnête vaut mieux qu'un score automatique. »
+            </p>
+          </div>
+        </section>
       </main>
 
       {editing && (
         <EditModal
           platform={editing}
-          data={links[editing.id] ?? EMPTY}
+          data={links[editing.id] ?? { url: '', followers: 0, lastUpdatedAt: null }}
+          saving={savingId === editing.id}
           onClose={() => setEditing(null)}
           onSave={saveLink}
           onRemove={removeLink}
-          busy={savingId === editing.id}
         />
       )}
     </div>
   );
 }
 
-// ── Platform card ──────────────────────────────────────────────────────
-function PlatformCard({ platform, data, onEdit, busy }: {
-  platform: PlatformDef; data: SocialLink; onEdit: () => void; busy: boolean;
+function PlatformCard({ platform, data, onEdit }: {
+  platform: PlatformDef;
+  data: SocialLink;
+  isSaving: boolean;
+  onEdit: () => void;
 }) {
-  const isFilled = data.url && data.followers > 0;
   const Icon = platform.icon === 'snap-custom' ? null : platform.icon;
+  const isFilled = !!data.url && data.followers > 0;
+  const lastUpdated = data.lastUpdatedAt
+    ? new Date(data.lastUpdatedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+    : null;
 
   return (
     <article style={{
-      background: M.cream,
-      border: `1.5px solid ${isFilled ? M.emerald + '40' : 'rgba(31,41,55,0.06)'}`,
-      borderRadius: 16, padding: 16,
-      transition: 'all 0.2s ease',
+      background: C.white,
+      border: `1.5px solid ${isFilled ? C.success + '40' : C.creamDeep}`,
+      borderRadius: 20,
+      padding: 18,
+      transition: 'all 0.25s ease',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isFilled ? 12 : 14 }}>
-        <div style={{
-          width: 38, height: 38, borderRadius: 11,
-          background: platform.gradient,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
-        }}>
-          {Icon ? <Icon size={17} color={M.cream} strokeWidth={2} /> : <SnapIcon size={18} color="#000" />}
-        </div>
-        <div style={{ flex: 1 }}>
-          <div className="m-display" style={{ fontSize: 14, fontWeight: 700, color: M.ink, lineHeight: 1 }}>
-            {platform.name}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 11,
+            background: platform.gradient,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+            boxShadow: `0 6px 14px -4px ${platform.color}40`,
+          }}>
+            {Icon ? (
+              <Icon size={18} color={C.white} fill={platform.id === 'facebook' ? C.white : 'none'} strokeWidth={2} />
+            ) : (
+              <SnapIcon size={20} color={C.snapchatText} />
+            )}
           </div>
-          {isFilled ? (
-            <span style={{ fontSize: 10, color: M.emeraldDark, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 3 }}>
-              <CheckCircle2 size={10} /> Renseigné
-            </span>
-          ) : (
-            <span style={{ fontSize: 10, color: M.inkLight, marginTop: 3 }}>Non renseigné</span>
-          )}
+          <div>
+            <div className="ilk-serif" style={{
+              fontSize: 17, fontWeight: 700, color: C.ink,
+              letterSpacing: '-0.02em', lineHeight: 1,
+            }}>
+              {platform.name}
+            </div>
+            {isFilled ? (
+              <div style={{ fontSize: 11, color: C.success, fontWeight: 600, marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <CheckCircle2 size={11} /> Renseigné
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: C.inkLight, marginTop: 4 }}>
+                Non renseigné
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {isFilled ? (
-        <>
+        <div className="ilk-fade-in">
           <div style={{
-            background: M.creamDeep, borderRadius: 10,
-            padding: 10, marginBottom: 8,
+            background: C.cream,
+            border: `1px solid ${C.creamDeep}`,
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 10,
           }}>
-            <a href={data.url} target="_blank" rel="noopener noreferrer" style={{
-              color: M.violetDeep, fontSize: 11, fontWeight: 600,
-              textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3,
-              wordBreak: 'break-all',
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="ilk-mono" style={{
+                  fontSize: 9, fontWeight: 700, color: C.inkLight,
+                  letterSpacing: '0.08em', marginBottom: 4,
+                }}>
+                  LIEN PUBLIC
+                </div>
+                <a
+                  href={data.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: 12, color: C.brand, fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {data.url.replace(/https?:\/\//, '')} <ExternalLink size={11} />
+                </a>
+              </div>
+            </div>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              paddingTop: 10, marginTop: 10,
+              borderTop: `1px dashed ${C.creamDeep}`,
             }}>
-              {data.url.replace(/https?:\/\//, '')} <ExternalLink size={10} />
-            </a>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8, paddingTop: 8, borderTop: `1px dashed rgba(31,41,55,0.08)` }}>
               <div>
-                <div className="m-mono" style={{ fontSize: 8, fontWeight: 700, color: M.inkLight, letterSpacing: '0.08em' }}>
+                <div className="ilk-mono" style={{
+                  fontSize: 9, fontWeight: 700, color: C.inkLight,
+                  letterSpacing: '0.08em', marginBottom: 2,
+                }}>
                   FOLLOWERS DÉCLARÉS
                 </div>
-                <div className="m-display m-mono" style={{ fontSize: 18, fontWeight: 800, color: M.ink, lineHeight: 1 }}>
-                  {formatK(data.followers)}
+                <div className="ilk-serif" style={{
+                  fontSize: 22, fontWeight: 700, color: C.ink,
+                  letterSpacing: '-0.02em', lineHeight: 1,
+                }}>
+                  <em style={{ fontStyle: 'italic' }}>{formatK(data.followers)}</em>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 10, color: C.inkLight, fontWeight: 500 }}>
+                  Mis à jour
+                </div>
+                <div style={{ fontSize: 10, color: C.inkSoft, fontWeight: 600 }}>
+                  {lastUpdated || "à l'instant"}
                 </div>
               </div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={onEdit} disabled={busy} className="tap-card" style={{
-              flex: 1, background: '#F1F3F6', color: M.ink,
-              border: 'none', padding: '8px 12px', borderRadius: 10,
-              fontSize: 12, fontWeight: 700, cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-            }}>
-              <Edit3 size={11} /> Modifier
+            <button
+              onClick={onEdit}
+              className="ilk-btn-cream"
+              style={{ flex: 1, justifyContent: 'center', padding: '9px 14px', fontSize: 12 }}
+            >
+              <Edit3 size={12} /> Modifier
             </button>
-            <a href={data.url} target="_blank" rel="noopener noreferrer" className="tap-card" style={{
-              padding: '8px 12px', borderRadius: 10,
-              background: '#F1F3F6', color: M.violetDeep,
-              fontSize: 12, fontWeight: 700, textDecoration: 'none',
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-            }}>
-              <Eye size={11} /> Visiter
+            <a
+              href={data.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ilk-btn-cream"
+              style={{
+                padding: '9px 14px', fontSize: 12,
+                color: C.brand,
+              }}
+            >
+              <Eye size={12} /> Visiter
             </a>
           </div>
-        </>
+        </div>
       ) : (
-        <button onClick={onEdit} disabled={busy} className="tap-card" style={{
-          width: '100%', background: M.creamDeep, color: M.ink,
-          border: `1.5px dashed ${M.inkLight}40`,
-          padding: '11px 16px', borderRadius: 10,
-          fontSize: 12, fontWeight: 600, cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        }}>
-          <Plus size={13} /> Ajouter mon lien {platform.name}
+        <button
+          onClick={onEdit}
+          type="button"
+          style={{
+            width: '100%',
+            background: C.cream,
+            color: C.ink2,
+            border: `1.5px dashed ${C.inkLight}40`,
+            padding: '12px 18px',
+            borderRadius: 12,
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            fontFamily: 'inherit',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+        >
+          <Plus size={14} /> Ajouter mon lien {platform.name}
         </button>
       )}
     </article>
   );
 }
 
-// ── Edit modal ─────────────────────────────────────────────────────────
-function EditModal({ platform, data, onClose, onSave, onRemove, busy }: {
-  platform: PlatformDef; data: SocialLink;
+function EditModal({ platform, data, saving, onClose, onSave, onRemove }: {
+  platform: PlatformDef;
+  data: SocialLink;
+  saving: boolean;
   onClose: () => void;
-  onSave: (id: string, payload: SocialLink) => void;
-  onRemove: (id: string) => void;
-  busy: boolean;
+  onSave: (id: string, payload: SocialLink) => void | Promise<void>;
+  onRemove: (id: string) => void | Promise<void>;
 }) {
-  const [url, setUrl] = useState(data.url);
-  const [followers, setFollowers] = useState(String(data.followers || ''));
-  const isValid = url.length > 5 && parseInt(followers, 10) > 0;
+  const [link, setLink] = useState(data.url || '');
+  const [followers, setFollowers] = useState(data.followers ? String(data.followers) : '');
   const Icon = platform.icon === 'snap-custom' ? null : platform.icon;
+  const followersNum = parseInt(followers, 10) || 0;
+  const isValid = link.length > 4 && followersNum > 0;
+  const fullLink = link.startsWith('http') ? link : `https://${platform.domainHint}${link}`;
+
+  const handleSave = () => {
+    if (!isValid) return;
+    onSave(platform.id, {
+      url: fullLink,
+      followers: followersNum,
+      lastUpdatedAt: new Date().toISOString(),
+    });
+  };
 
   return (
     <div onClick={onClose} role="dialog" aria-modal="true" style={{
-      position: 'fixed', inset: 0, background: 'rgba(10,8,20,0.65)',
-      backdropFilter: 'blur(6px)', zIndex: 100,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      position: 'fixed', inset: 0,
+      background: 'rgba(10, 8, 20, 0.65)',
+      backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 100, padding: 16,
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        background: M.cream, borderRadius: 20,
-        width: '100%', maxWidth: 460, overflow: 'hidden',
-        boxShadow: '0 30px 80px rgba(0,0,0,0.4)',
+      <div onClick={e => e.stopPropagation()} className="ilk-modal-in" style={{
+        background: C.white,
+        borderRadius: 24,
+        width: '100%', maxWidth: 460,
+        overflow: 'hidden',
+        boxShadow: '0 40px 80px rgba(0,0,0,0.4)',
       }}>
         <div style={{
           background: platform.gradient,
-          padding: '20px 22px', position: 'relative', overflow: 'hidden',
+          padding: '24px 24px',
+          position: 'relative', overflow: 'hidden',
         }}>
-          <button onClick={onClose} style={{
-            position: 'absolute', top: 12, right: 12,
-            background: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(20px)',
-            border: 'none', color: platform.id === 'snapchat' ? '#000' : M.cream,
-            width: 28, height: 28, borderRadius: '50%', cursor: 'pointer',
+          <button onClick={onClose} aria-label="Fermer" style={{
+            position: 'absolute', top: 14, right: 14,
+            background: 'rgba(255,255,255,0.2)',
+            backdropFilter: 'blur(20px)',
+            border: 'none',
+            color: platform.id === 'snapchat' ? C.snapchatText : C.white,
+            width: 32, height: 32, borderRadius: '50%',
+            cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <X size={14} />
+            <X size={15} />
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 2,
+          }}>
             <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(20px)',
+              width: 50, height: 50, borderRadius: 14,
+              background: 'rgba(255,255,255,0.2)',
+              backdropFilter: 'blur(20px)',
               border: '1.5px solid rgba(255,255,255,0.3)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              {Icon ? <Icon size={20} color={platform.id === 'snapchat' ? '#000' : M.cream} strokeWidth={2} /> : <SnapIcon size={22} color="#000" />}
+              {Icon ? (
+                <Icon size={22} color={platform.id === 'snapchat' ? C.snapchatText : C.white} strokeWidth={2} />
+              ) : (
+                <SnapIcon size={24} color={C.snapchatText} />
+              )}
             </div>
             <div>
-              <h2 className="m-display" style={{
-                fontSize: 18, fontWeight: 700,
-                color: platform.id === 'snapchat' ? '#000' : M.cream,
-                margin: 0, letterSpacing: '-0.02em',
-              }}>{platform.name}</h2>
-              <p style={{
-                fontSize: 11, margin: 0,
-                color: platform.id === 'snapchat' ? '#000a' : 'rgba(255,255,255,0.85)',
+              <h2 className="ilk-serif" style={{
+                fontSize: 22, fontWeight: 700,
+                color: platform.id === 'snapchat' ? C.snapchatText : C.white,
+                margin: '0 0 2px', letterSpacing: '-0.02em',
               }}>
-                Lien + followers déclarés
+                <em style={{ fontStyle: 'italic' }}>{platform.name}</em>
+              </h2>
+              <p style={{
+                fontSize: 12,
+                color: platform.id === 'snapchat' ? `${C.snapchatText}aa` : 'rgba(255,255,255,0.85)',
+                margin: 0, fontWeight: 500,
+              }}>
+                Ajoute ton lien public + tes followers
               </p>
             </div>
           </div>
         </div>
 
-        <div style={{ padding: 22 }}>
+        <div style={{ padding: 24 }}>
           <div style={{
-            background: M.violetSoft, border: `1px solid ${M.violet}30`,
-            borderRadius: 10, padding: 10, marginBottom: 16,
-            display: 'flex', alignItems: 'flex-start', gap: 8,
+            background: C.brandSoft,
+            border: `1px solid ${C.brand}25`,
+            borderRadius: 12, padding: 12,
+            marginBottom: 20,
+            display: 'flex', alignItems: 'flex-start', gap: 10,
           }}>
-            <Info size={14} color={M.violetDeep} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ fontSize: 11, color: M.violetDeep, lineHeight: 1.45 }}>
-              <strong>Honnêteté totale</strong> · les marques cliquent et vérifient direct.
+            <Info size={15} color={C.brand} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 12, color: C.brandDark, lineHeight: 1.5 }}>
+              <strong>Honnêteté totale</strong> · Les marques cliquent sur ton lien pour vérifier elles-mêmes. Sois exact dans tes chiffres.
             </div>
           </div>
 
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: M.ink, marginBottom: 6 }}>
-            Lien public *
-          </label>
-          <input value={url} onChange={e => setUrl(e.target.value)} placeholder={`https://${platform.domainHint}ton.handle`} style={{
-            width: '100%', background: M.cream, border: `1.5px solid ${url ? M.violet : 'rgba(31,41,55,0.1)'}`,
-            borderRadius: 10, padding: '10px 12px', fontSize: 13,
-            outline: 'none', marginBottom: 14, fontFamily: 'inherit',
-          }} />
+          <div style={{ marginBottom: 16 }}>
+            <label style={{
+              display: 'block', fontSize: 12, fontWeight: 700,
+              color: C.ink2, marginBottom: 6,
+            }}>
+              Lien public de ton profil *
+            </label>
+            <div style={{
+              display: 'flex', alignItems: 'stretch',
+              background: C.cream,
+              borderRadius: 12,
+              border: `1.5px solid ${link ? C.brand : C.creamDeep}`,
+              overflow: 'hidden',
+              transition: 'border 0.2s, box-shadow 0.2s',
+              boxShadow: link ? `0 0 0 4px ${C.brandSoft}` : 'none',
+            }}>
+              <div style={{
+                padding: '12px 12px',
+                color: C.inkSoft, fontSize: 12,
+                background: C.white,
+                borderRight: `1px solid ${C.creamDeep}`,
+                display: 'flex', alignItems: 'center',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+              }}>
+                {platform.domainHint}
+              </div>
+              <input
+                value={link}
+                onChange={e => setLink(e.target.value)}
+                placeholder="ton.handle"
+                style={{
+                  flex: 1, border: 'none', outline: 'none',
+                  background: 'transparent', padding: '12px 14px',
+                  fontSize: 13, color: C.ink, fontFamily: 'inherit',
+                  minWidth: 0,
+                }}
+              />
+              {link && (
+                <a
+                  href={fullLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    padding: '12px 14px',
+                    background: C.brand, color: C.white,
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    textDecoration: 'none',
+                    fontSize: 11, fontWeight: 700,
+                  }}
+                  title="Tester le lien"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              )}
+            </div>
+            <p style={{ fontSize: 11, color: C.inkLight, marginTop: 6, lineHeight: 1.4 }}>
+              Colle l'URL complète ou juste ton handle · Profil public obligatoire
+            </p>
+          </div>
 
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: M.ink, marginBottom: 6 }}>
-            Followers *
-          </label>
-          <input type="number" value={followers} onChange={e => setFollowers(e.target.value)} placeholder="Ex: 45000" style={{
-            width: '100%', background: M.cream, border: '1.5px solid rgba(31,41,55,0.1)',
-            borderRadius: 10, padding: '10px 12px', fontSize: 15, fontWeight: 700,
-            outline: 'none', fontFamily: "'JetBrains Mono', monospace",
-          }} />
+          <div style={{ marginBottom: 20 }}>
+            <label style={{
+              display: 'block', fontSize: 12, fontWeight: 700,
+              color: C.ink2, marginBottom: 6,
+            }}>
+              Nombre de followers *
+            </label>
+            <input
+              type="number"
+              value={followers}
+              onChange={e => setFollowers(e.target.value)}
+              placeholder="Ex: 45000"
+              className="ilk-input ilk-mono"
+              style={{ fontWeight: 700, fontSize: 16 }}
+            />
+            <p style={{ fontSize: 11, color: C.inkLight, marginTop: 6, lineHeight: 1.4 }}>
+              💡 Compte arrondi au millier · Tu pourras le mettre à jour à tout moment
+            </p>
+          </div>
+
+          {link && followers && (
+            <div className="ilk-fade-in" style={{
+              background: C.cream,
+              border: `1px dashed ${C.brand}40`,
+              borderRadius: 12, padding: 14,
+              marginBottom: 20,
+            }}>
+              <div className="ilk-mono" style={{
+                fontSize: 9, fontWeight: 700, color: C.brand,
+                letterSpacing: '0.08em', marginBottom: 8,
+              }}>
+                APERÇU SUR TON PROFIL ORLODE
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  background: platform.gradient,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  {Icon ? (
+                    <Icon size={16} color={platform.id === 'snapchat' ? C.snapchatText : C.white} strokeWidth={2} />
+                  ) : (
+                    <SnapIcon size={18} color={C.snapchatText} />
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+                    {platform.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.brand, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    Voir le profil <ExternalLink size={10} />
+                  </div>
+                </div>
+                <div className="ilk-serif" style={{
+                  fontSize: 22, fontWeight: 700, color: C.ink,
+                  letterSpacing: '-0.02em',
+                }}>
+                  <em style={{ fontStyle: 'italic' }}>{formatK(followersNum)}</em>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{
-          padding: '12px 22px', borderTop: '1px solid rgba(31,41,55,0.06)',
-          background: M.creamDeep,
+          padding: '14px 24px',
+          borderTop: `1px solid ${C.creamDeep}`,
+          background: C.cream,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         }}>
           {data.url ? (
-            <button onClick={() => onRemove(platform.id)} disabled={busy} style={{
-              background: 'transparent', border: 'none', color: '#DC2626',
-              fontSize: 12, fontWeight: 700, cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-            }}>
+            <button
+              onClick={() => onRemove(platform.id)}
+              disabled={saving}
+              className="ilk-btn-ghost"
+              style={{ color: C.danger }}
+            >
               <Trash2 size={12} /> Supprimer
             </button>
-          ) : <span />}
+          ) : (
+            <span style={{ fontSize: 11, color: C.inkSoft, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Lock size={11} /> Tu pourras modifier à tout moment
+            </span>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={onClose} style={{
-              background: M.cream, color: M.ink, border: '1px solid rgba(31,41,55,0.1)',
-              padding: '10px 16px', borderRadius: 100, fontSize: 12, fontWeight: 700,
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}>Annuler</button>
-            <button onClick={() => onSave(platform.id, { url, followers: parseInt(followers, 10), lastUpdatedAt: null })}
-              disabled={!isValid || busy} style={{
-                background: `linear-gradient(135deg, ${M.violet}, ${M.violetDeep})`,
-                color: M.cream, border: 'none',
-                padding: '10px 18px', borderRadius: 100,
-                fontSize: 12, fontWeight: 700,
-                cursor: !isValid || busy ? 'not-allowed' : 'pointer',
-                opacity: !isValid ? 0.4 : 1, fontFamily: 'inherit',
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-              }}>
-              {busy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Enregistrer
+            <button onClick={onClose} className="ilk-btn-cream">Annuler</button>
+            <button
+              onClick={handleSave}
+              disabled={!isValid || saving}
+              className="ilk-btn-primary"
+            >
+              {saving
+                ? <><Loader2 size={13} className="animate-spin" /> Enregistrement…</>
+                : <><Check size={13} /> Enregistrer</>}
             </button>
           </div>
         </div>

@@ -3,8 +3,8 @@
  * Dark green hero strip + sticky filter bar over cream + editorial card grid.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Loader2, Users, RefreshCw } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Loader2, Users, RefreshCw, CheckCircle2, Clock, X as XIcon } from 'lucide-react';
 import { listActiveTalents, type Talent } from '@/services/talents';
 import { useSEO } from '@/hooks/useSEO';
 import TalentVideoCard, { type CardTalent } from './TalentVideoCard';
@@ -83,6 +83,13 @@ export default function TalentsFeedPage() {
   const [talents, setTalents] = useState<CardTalent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('Tous');
+  const [params, setParams] = useSearchParams();
+  const [welcomeOpen, setWelcomeOpen] = useState(params.get('welcome') === '1');
+  const dismissWelcome = () => {
+    setWelcomeOpen(false);
+    params.delete('welcome');
+    setParams(params, { replace: true });
+  };
 
   const load = () => {
     setTalents(null);
@@ -198,6 +205,71 @@ export default function TalentsFeedPage() {
           </p>
         </div>
       </section>
+
+      {/* Welcome banner — shown after signup with ?welcome=1 */}
+      {welcomeOpen && (
+        <section style={{
+          background: C.cream,
+          padding: '24px 32px 0',
+        }}>
+          <div style={{ maxWidth: 1280, margin: '0 auto' }}>
+            <div style={{
+              background: `linear-gradient(135deg, ${C.brandSoft}, ${C.brandSoft})`,
+              border: `1.5px solid ${C.brand}40`,
+              borderRadius: 18,
+              padding: '20px 22px',
+              display: 'flex', alignItems: 'flex-start', gap: 14,
+              position: 'relative',
+            }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: `linear-gradient(135deg, ${C.brandMid}, ${C.brand})`,
+                color: C.white,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <CheckCircle2 size={22} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="tfd-serif" style={{
+                  fontSize: 18, fontWeight: 700, color: C.ink,
+                  letterSpacing: '-0.02em', marginBottom: 4,
+                }}>
+                  Profil créé · <em style={{ fontStyle: 'italic', color: C.brand }}>vérification sous 48h</em>
+                </div>
+                <p style={{
+                  fontSize: 13, color: C.ink3,
+                  margin: 0, lineHeight: 1.55,
+                }}>
+                  Ton profil est en revue par notre équipe. Il n'apparaît pas encore dans le feed ci-dessous —
+                  tu le verras dès qu'on l'aura validé. <strong>Tu recevras une notification WhatsApp dès que c'est en ligne.</strong>
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                  <Clock size={12} color={C.inkSoft} />
+                  <span className="tfd-mono" style={{
+                    fontSize: 11, color: C.inkSoft, fontWeight: 600,
+                    letterSpacing: '0.04em',
+                  }}>
+                    DÉLAI MOYEN · 12-48H
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={dismissWelcome}
+                type="button"
+                aria-label="Fermer"
+                style={{
+                  background: 'transparent', border: 'none',
+                  color: C.inkSoft, cursor: 'pointer', padding: 4,
+                  alignSelf: 'flex-start',
+                }}
+              >
+                <XIcon size={18} />
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Sticky filters */}
       <section style={{
