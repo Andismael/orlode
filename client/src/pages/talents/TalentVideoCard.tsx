@@ -19,6 +19,8 @@ export interface CardTalent {
   viewsCount?: number;
   contactsCount?: number;
   thumbnailUrl?: string;
+  /** Avatar photo uploaded during signup or via edit profile. Takes priority over thumbnailUrl + SVG silhouette. */
+  photoURL?: string;
   status?: string;
   /** [accentMain, accentDeep, gold] — 3-color radial gradient base. */
   portraitGradient?: [string, string, string];
@@ -102,10 +104,10 @@ export default function TalentVideoCard({
         opacity: 0.08, pointerEvents: 'none', mixBlendMode: 'overlay',
       }} />
 
-      {/* Real thumbnail if available, otherwise abstract SVG */}
-      {talent.thumbnailUrl ? (
+      {/* Avatar photo > video thumbnail > abstract SVG silhouette */}
+      {(talent.photoURL || talent.thumbnailUrl) ? (
         <img
-          src={talent.thumbnailUrl}
+          src={talent.photoURL || talent.thumbnailUrl}
           alt={talent.displayName}
           loading="lazy"
           decoding="async"
@@ -134,7 +136,7 @@ export default function TalentVideoCard({
       )}
 
       {/* Initial letter overlay (only when no thumbnail) */}
-      {!talent.thumbnailUrl && (
+      {!(talent.photoURL || talent.thumbnailUrl) && (
         <div style={{
           position: 'absolute',
           top: '38%', left: '50%',

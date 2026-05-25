@@ -35,6 +35,7 @@ export interface Influencer {
   displayName: string;
   handle?: string;            // @aissatou.styles
   verified?: boolean;
+  photoURL?: string;          // avatar uploaded in signup / edit profile
   bio?: string;
   city?: string;
   country?: string;

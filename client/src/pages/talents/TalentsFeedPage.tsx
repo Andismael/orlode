@@ -69,6 +69,7 @@ function toCardTalent(t: Talent): CardTalent {
     viewsCount: t.viewsCount,
     contactsCount: t.contactsCount,
     thumbnailUrl: t.thumbnailUrl,
+    photoURL: t.photoURL,
     status: t.status,
   };
 }

@@ -24,6 +24,7 @@ import {
 import { useSEO } from '@/hooks/useSEO';
 import { useAuthStore } from '@/store/authStore';
 import VideoUpload, { type VideoUploadValue } from '@/components/common/VideoUpload';
+import ImageUpload from '@/components/common/ImageUpload';
 
 const C = {
   brand: '#0F5C3F', brandDeep: '#0A4530', brandDarker: '#031A11',
@@ -139,6 +140,7 @@ interface FormData {
   whatsapp: string;
   languages: string[];
   availability: typeof AVAILABILITY[number]['id'] | '';
+  photoURL: string;
 }
 
 const initialData: FormData = {
@@ -147,6 +149,7 @@ const initialData: FormData = {
   skills: [], whatsapp: '',
   languages: ['Français'],
   availability: '',
+  photoURL: '',
 };
 
 export default function TalentsSignupPage() {
@@ -251,6 +254,7 @@ export default function TalentsSignupPage() {
         videoUrl: video.url.trim(),
         videoDuration: video.durationSec || 0,
         thumbnailUrl: '',
+        photoURL: data.photoURL || '',
         availability: data.availability,
         language: data.languages[0] ?? 'Français',
         languages: data.languages,
@@ -469,6 +473,21 @@ export default function TalentsSignupPage() {
                     <StepCard>
                       <StepHeader number="1" title="Qui es-tu ?" subtitle="Les infos de base pour que les entreprises te reconnaissent" />
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginLeft: 44 }}>
+                        <div style={{
+                          background: C.cream,
+                          border: `1px solid ${C.creamDeep}`,
+                          borderRadius: 16,
+                          padding: 16,
+                        }}>
+                          <ImageUpload
+                            userUid={user.uid}
+                            storagePrefix="talents"
+                            value={data.photoURL}
+                            onChange={url => setData(d => ({ ...d, photoURL: url }))}
+                            accentColor={C.brand}
+                            initial={data.firstName.charAt(0) || '?'}
+                          />
+                        </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="tsg-grid-1">
                           <Field label="Prénom *">
                             <input value={data.firstName} onChange={e => setData(d => ({ ...d, firstName: e.target.value }))} placeholder="Marc" className="tsg-input" />
@@ -972,29 +991,43 @@ function PreviewCard({ data }: { data: FormData }) {
         aspectRatio: '9/16',
         boxShadow: `0 30px 60px -20px ${C.brand}80`,
       }}>
-        <svg viewBox="0 0 200 320" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-          <defs>
-            <radialGradient id="tsg-prev" cx="50%" cy="35%">
-              <stop offset="0%" stopColor="white" stopOpacity="0.35" />
-              <stop offset="60%" stopColor="white" stopOpacity="0" />
-            </radialGradient>
-          </defs>
-          <rect width="200" height="320" fill="url(#tsg-prev)" />
-          <circle cx="100" cy="100" r="50" fill={C.goldLight} opacity="0.30" />
-          <ellipse cx="100" cy="115" rx="32" ry="36" fill={C.ink} opacity="0.5" />
-          <path d="M 40 320 Q 40 200, 100 175 Q 160 200, 160 320 Z" fill={C.ink} opacity="0.4" />
-        </svg>
+        {data.photoURL ? (
+          <img
+            src={data.photoURL}
+            alt={data.firstName}
+            style={{
+              position: 'absolute', inset: 0,
+              width: '100%', height: '100%', objectFit: 'cover',
+              mixBlendMode: 'luminosity', opacity: 0.9,
+            }}
+          />
+        ) : (
+          <svg viewBox="0 0 200 320" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+            <defs>
+              <radialGradient id="tsg-prev" cx="50%" cy="35%">
+                <stop offset="0%" stopColor="white" stopOpacity="0.35" />
+                <stop offset="60%" stopColor="white" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <rect width="200" height="320" fill="url(#tsg-prev)" />
+            <circle cx="100" cy="100" r="50" fill={C.goldLight} opacity="0.30" />
+            <ellipse cx="100" cy="115" rx="32" ry="36" fill={C.ink} opacity="0.5" />
+            <path d="M 40 320 Q 40 200, 100 175 Q 160 200, 160 320 Z" fill={C.ink} opacity="0.4" />
+          </svg>
+        )}
 
-        <div style={{
-          position: 'absolute',
-          top: '38%', left: '50%', transform: 'translate(-50%, -50%)',
-          fontFamily: 'Fraunces, serif',
-          fontSize: 140, fontWeight: 800,
-          color: C.white, opacity: 0.12,
-          fontStyle: 'italic',
-        }}>
-          {data.firstName.charAt(0).toUpperCase() || '?'}
-        </div>
+        {!data.photoURL && (
+          <div style={{
+            position: 'absolute',
+            top: '38%', left: '50%', transform: 'translate(-50%, -50%)',
+            fontFamily: 'Fraunces, serif',
+            fontSize: 140, fontWeight: 800,
+            color: C.white, opacity: 0.12,
+            fontStyle: 'italic',
+          }}>
+            {data.firstName.charAt(0).toUpperCase() || '?'}
+          </div>
+        )}
 
         <div style={{
           position: 'absolute', top: 12, left: 12,

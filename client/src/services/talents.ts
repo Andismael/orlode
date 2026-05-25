@@ -26,6 +26,7 @@ export interface Talent {
   videoUrl?: string;
   videoDuration?: number;
   thumbnailUrl?: string;
+  photoURL?: string;
   status?: 'pending_video' | 'pending_analysis' | 'active' | 'paused' | 'hired';
   language?: string;
   availability?: 'immediate' | '1month' | '3months' | 'open';

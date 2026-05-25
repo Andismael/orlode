@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useSEO } from '@/hooks/useSEO';
 import { useAuthStore } from '@/store/authStore';
+import ImageUpload from '@/components/common/ImageUpload';
 
 const C = {
   brand: '#6366F1', brandDeep: '#4F46E5', brandDark: '#3730A3',
@@ -110,6 +111,7 @@ interface FormData {
   whatsapp: string;
   languages: string[];
   responseTime: string;
+  photoURL: string;
 }
 
 const initialData: FormData = {
@@ -119,6 +121,7 @@ const initialData: FormData = {
   whatsapp: '',
   languages: ['Français'],
   responseTime: '< 24h',
+  photoURL: '',
 };
 
 export default function InfluencersSignupPage() {
@@ -210,6 +213,7 @@ export default function InfluencersSignupPage() {
         displayName: data.displayName.trim(),
         handle: handleNormalized,
         verified: false,
+        photoURL: data.photoURL || '',
         bio: data.bio.trim(),
         city: data.city.trim(),
         categories: data.categories,
@@ -429,6 +433,21 @@ export default function InfluencersSignupPage() {
                     <StepCard>
                       <StepHeader number="1" title="Ton identité créateur" subtitle="Comment les marques vont te reconnaître" />
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginLeft: 44 }}>
+                        <div style={{
+                          background: C.cream,
+                          border: `1px solid ${C.creamDeep}`,
+                          borderRadius: 16,
+                          padding: 16,
+                        }}>
+                          <ImageUpload
+                            userUid={user.uid}
+                            storagePrefix="influencers"
+                            value={data.photoURL}
+                            onChange={url => setData(d => ({ ...d, photoURL: url }))}
+                            accentColor={C.brand}
+                            initial={data.displayName.charAt(0) || '?'}
+                          />
+                        </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="isg-grid-1">
                           <Field label="Nom affiché *">
                             <input value={data.displayName} onChange={e => setData(d => ({ ...d, displayName: e.target.value }))} placeholder="Aïssatou Diallo" className="isg-input" />
@@ -880,29 +899,43 @@ function PreviewCard({ data, ig, tt, yt, total }: {
         aspectRatio: '9/16',
         boxShadow: `0 30px 60px -20px ${C.brand}80`,
       }}>
-        <svg viewBox="0 0 200 320" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-          <defs>
-            <radialGradient id="isg-prev" cx="50%" cy="35%">
-              <stop offset="0%" stopColor="white" stopOpacity="0.35" />
-              <stop offset="60%" stopColor="white" stopOpacity="0" />
-            </radialGradient>
-          </defs>
-          <rect width="200" height="320" fill="url(#isg-prev)" />
-          <circle cx="100" cy="100" r="50" fill={C.goldLight} opacity="0.30" />
-          <ellipse cx="100" cy="115" rx="32" ry="36" fill={C.ink} opacity="0.5" />
-          <path d="M 40 320 Q 40 200, 100 175 Q 160 200, 160 320 Z" fill={C.ink} opacity="0.4" />
-        </svg>
+        {data.photoURL ? (
+          <img
+            src={data.photoURL}
+            alt={data.displayName}
+            style={{
+              position: 'absolute', inset: 0,
+              width: '100%', height: '100%', objectFit: 'cover',
+              mixBlendMode: 'luminosity', opacity: 0.9,
+            }}
+          />
+        ) : (
+          <svg viewBox="0 0 200 320" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+            <defs>
+              <radialGradient id="isg-prev" cx="50%" cy="35%">
+                <stop offset="0%" stopColor="white" stopOpacity="0.35" />
+                <stop offset="60%" stopColor="white" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <rect width="200" height="320" fill="url(#isg-prev)" />
+            <circle cx="100" cy="100" r="50" fill={C.goldLight} opacity="0.30" />
+            <ellipse cx="100" cy="115" rx="32" ry="36" fill={C.ink} opacity="0.5" />
+            <path d="M 40 320 Q 40 200, 100 175 Q 160 200, 160 320 Z" fill={C.ink} opacity="0.4" />
+          </svg>
+        )}
 
-        <div style={{
-          position: 'absolute',
-          top: '38%', left: '50%', transform: 'translate(-50%, -50%)',
-          fontFamily: 'Fraunces, serif',
-          fontSize: 140, fontWeight: 800,
-          color: C.white, opacity: 0.12,
-          fontStyle: 'italic',
-        }}>
-          {initial}
-        </div>
+        {!data.photoURL && (
+          <div style={{
+            position: 'absolute',
+            top: '38%', left: '50%', transform: 'translate(-50%, -50%)',
+            fontFamily: 'Fraunces, serif',
+            fontSize: 140, fontWeight: 800,
+            color: C.white, opacity: 0.12,
+            fontStyle: 'italic',
+          }}>
+            {initial}
+          </div>
+        )}
 
         {/* Audience badges (top) */}
         <div style={{

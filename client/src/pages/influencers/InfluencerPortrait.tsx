@@ -15,6 +15,8 @@ export interface PortraitInfluencer {
   handle?: string;
   verified?: boolean;
   status?: string;
+  /** Avatar photo uploaded in signup or edit profile — replaces the SVG silhouette. */
+  photoURL?: string;
   /** [accentMain, accentDeep, gold] — 3-color radial gradient base. */
   portraitGradient?: [string, string, string];
 }
@@ -70,34 +72,49 @@ export default function InfluencerPortrait({
         opacity: 0.08, pointerEvents: 'none', mixBlendMode: 'overlay',
       }} />
 
-      <svg viewBox="0 0 200 250" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-        <defs>
-          <radialGradient id={`glow-${inf.id}`} cx="50%" cy="40%">
-            <stop offset="0%" stopColor="white" stopOpacity="0.4" />
-            <stop offset="60%" stopColor="white" stopOpacity="0" />
-          </radialGradient>
-        </defs>
-        <rect width="200" height="250" fill={`url(#glow-${inf.id})`} />
-        <circle cx="100" cy="75" r="42" fill={C_GOLD_LIGHT} opacity="0.35" />
-        <circle cx="100" cy="75" r="38" fill={C_GOLD} opacity="0.25" />
-        <ellipse cx="100" cy="85" rx="28" ry="32" fill={C_INK} opacity="0.55" />
-        <path d="M 50 250 Q 50 165, 100 145 Q 150 165, 150 250 Z" fill={C_INK} opacity="0.45" />
-        <line x1="20" y1="220" x2="180" y2="220" stroke="white" strokeWidth="0.5" opacity="0.3" />
-      </svg>
+      {inf.photoURL ? (
+        <img
+          src={inf.photoURL}
+          alt={inf.displayName}
+          loading="lazy"
+          decoding="async"
+          style={{
+            position: 'absolute', inset: 0,
+            width: '100%', height: '100%', objectFit: 'cover',
+            mixBlendMode: 'luminosity', opacity: 0.9,
+          }}
+        />
+      ) : (
+        <>
+          <svg viewBox="0 0 200 250" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+            <defs>
+              <radialGradient id={`glow-${inf.id}`} cx="50%" cy="40%">
+                <stop offset="0%" stopColor="white" stopOpacity="0.4" />
+                <stop offset="60%" stopColor="white" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <rect width="200" height="250" fill={`url(#glow-${inf.id})`} />
+            <circle cx="100" cy="75" r="42" fill={C_GOLD_LIGHT} opacity="0.35" />
+            <circle cx="100" cy="75" r="38" fill={C_GOLD} opacity="0.25" />
+            <ellipse cx="100" cy="85" rx="28" ry="32" fill={C_INK} opacity="0.55" />
+            <path d="M 50 250 Q 50 165, 100 145 Q 150 165, 150 250 Z" fill={C_INK} opacity="0.45" />
+            <line x1="20" y1="220" x2="180" y2="220" stroke="white" strokeWidth="0.5" opacity="0.3" />
+          </svg>
 
-      {/* Giant italic initial */}
-      <div style={{
-        position: 'absolute', top: '50%', left: '50%',
-        transform: 'translate(-50%, -50%)',
-        fontFamily: 'Fraunces, serif',
-        fontSize: size * 0.45,
-        fontWeight: 800,
-        color: C_WHITE,
-        opacity: 0.15,
-        fontStyle: 'italic',
-        letterSpacing: '-0.05em',
-        pointerEvents: 'none',
-      }}>{initial}</div>
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            fontFamily: 'Fraunces, serif',
+            fontSize: size * 0.45,
+            fontWeight: 800,
+            color: C_WHITE,
+            opacity: 0.15,
+            fontStyle: 'italic',
+            letterSpacing: '-0.05em',
+            pointerEvents: 'none',
+          }}>{initial}</div>
+        </>
+      )}
 
       {/* Bottom name overlay */}
       <div style={{
