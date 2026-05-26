@@ -4,14 +4,15 @@
  * then cream body with quote, skills, languages, and contact CTA.
  */
 import React, { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, MessageCircle, Bookmark, Quote, Loader2,
-  MapPin, Briefcase, Clock, Eye, Heart, Languages, Award,
+  MapPin, Briefcase, Clock, Eye, Heart, Languages, Award, X, Check, Send,
 } from 'lucide-react';
 import { getTalent, type Talent } from '@/services/talents';
 import { useSEO } from '@/hooks/useSEO';
 import TalentVideoCard, { type CardTalent } from './TalentVideoCard';
+import api from '@/services/api';
 
 const C = {
   brand: '#0F5C3F',
@@ -25,8 +26,10 @@ const C = {
   creamDeep: '#F0EBE3',
   ink: '#0A1410',
   ink2: '#1A2A22',
+  ink3: '#384C42',
   inkSoft: '#5C6B62',
   inkLight: '#94A39A',
+  success: '#10B981',
   whatsapp: '#25D366',
   white: '#FFFFFF',
 };
@@ -122,6 +125,7 @@ function availabilityLabel(a?: Talent['availability']): string {
 export default function TalentsProfilePage() {
   const { id } = useParams<{ id: string }>();
   const [talent, setTalent] = useState<Talent | null | undefined>(undefined);
+  const [contactOpen, setContactOpen] = useState(false);
 
   useSEO({
     title: talent ? `${talent.displayName} — Orlode Talents` : 'Profil — Orlode Talents',
@@ -294,11 +298,9 @@ export default function TalentsProfilePage() {
               )}
 
               <div className="tpr-fade tpr-d4" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <a href={`https://wa.me/?text=${encodeURIComponent(`Bonjour ${firstName}, je vous contacte depuis Orlode Talents au sujet d'une opportunité.`)}`}
-                   target="_blank" rel="noopener noreferrer"
-                   className="tpr-btn-wa">
+                <button type="button" onClick={() => setContactOpen(true)} className="tpr-btn-wa">
                   <MessageCircle size={15} fill={C.white} /> Contacter sur WhatsApp
-                </a>
+                </button>
                 <button type="button" className="tpr-btn-ghost" onClick={() => {
                   try { navigator.clipboard?.writeText(window.location.href); } catch {}
                 }}>
@@ -454,14 +456,171 @@ export default function TalentsProfilePage() {
             }}>
               Contact direct WhatsApp. Pas d'intermédiaire, pas de commission. Tu négocies. Tu signes.
             </p>
-            <a href={`https://wa.me/?text=${encodeURIComponent(`Bonjour ${firstName}, je vous contacte depuis Orlode Talents.`)}`}
-               target="_blank" rel="noopener noreferrer"
-               className="tpr-btn-wa" style={{ padding: '16px 28px', fontSize: 15 }}>
+            <button type="button" onClick={() => setContactOpen(true)} className="tpr-btn-wa" style={{ padding: '16px 28px', fontSize: 15 }}>
               <MessageCircle size={16} fill={C.white} /> Démarrer la conversation
-            </a>
+            </button>
           </div>
         </div>
       </section>
+
+      {contactOpen && (
+        <ContactModal talent={talent} onClose={() => setContactOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function ContactModal({ talent, onClose }: { talent: Talent; onClose: () => void }) {
+  const navigate = useNavigate();
+  const firstName = (talent.displayName ?? '').split(' ')[0] || 'candidat';
+  const [message, setMessage] = useState(
+    `Bonjour ${firstName}, on a vu ton profil sur Orlode Talents et ton parcours nous intéresse. Tu es disponible pour en discuter cette semaine ?`,
+  );
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+
+  const send = async () => {
+    if (sending || message.trim().length < 10) return;
+    setSending(true); setError(null);
+    try {
+      await api.post('/talents/contact', { talentId: talent.id, message: message.trim() });
+      setSent(true);
+      setTimeout(() => { onClose(); navigate('/talents/inbox'); }, 1200);
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string; status?: number };
+      if (e.status === 401) setError('Connecte-toi pour contacter un candidat.');
+      else setError(e.response?.data?.message ?? e.message ?? 'Erreur');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div onClick={onClose} role="dialog" aria-modal="true" style={{
+      position: 'fixed', inset: 0, background: 'rgba(10,20,16,0.7)',
+      backdropFilter: 'blur(8px)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: C.cream, borderRadius: 24,
+        width: '100%', maxWidth: 500, overflow: 'hidden',
+        boxShadow: '0 40px 100px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{
+          background: `linear-gradient(135deg, ${C.brandMid}, ${C.brandDeep})`,
+          padding: '22px 26px', color: C.cream,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div>
+            <div style={{ fontFamily: 'Fraunces, serif', fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em' }}>
+              Contacter {firstName}
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.85, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.05em' }}>
+              VIA WHATSAPP · ORLODE TALENTS
+            </div>
+          </div>
+          <button onClick={onClose} type="button" aria-label="Fermer" style={{
+            background: 'rgba(255,255,255,0.2)', border: 'none', color: C.cream,
+            width: 32, height: 32, borderRadius: '50%', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}><X size={15} /></button>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          {sent ? (
+            <div style={{ textAlign: 'center', padding: '20px 0 8px' }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%',
+                background: `linear-gradient(135deg, ${C.success}, #065F46)`,
+                color: C.white,
+                margin: '0 auto 16px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Check size={26} />
+              </div>
+              <div style={{ fontFamily: 'Fraunces, serif', fontSize: 20, fontWeight: 700, marginBottom: 6 }}>
+                Message envoyé !
+              </div>
+              <p style={{ fontSize: 13, color: C.ink3, margin: 0 }}>
+                Tu retrouveras la conversation dans ta boîte de réception.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div style={{
+                background: '#FEF3C7',
+                border: '1px solid #FCD34D40',
+                borderRadius: 12, padding: 12, marginBottom: 16,
+                fontSize: 12, color: '#92400E', lineHeight: 1.55,
+              }}>
+                <strong>Le message part via le numéro plateforme Orlode</strong> — {firstName} le reçoit directement sur son WhatsApp avec ta signature.
+              </div>
+              <label style={{
+                display: 'block', fontSize: 12, fontWeight: 700,
+                color: C.ink2, marginBottom: 6,
+              }}>
+                Ton message *
+              </label>
+              <textarea
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                rows={5}
+                maxLength={1000}
+                style={{
+                  width: '100%', background: C.white, color: C.ink,
+                  border: `1.5px solid ${C.creamDeep}`,
+                  borderRadius: 14, padding: '14px 18px',
+                  fontSize: 14, fontFamily: 'inherit', outline: 'none',
+                  resize: 'vertical', minHeight: 100,
+                }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: C.inkLight }}>
+                <span>Min 10 caractères · max 1000</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{message.length}/1000</span>
+              </div>
+
+              {error && (
+                <div style={{
+                  marginTop: 12,
+                  background: '#FEE2E2', border: '1px solid #FCA5A5',
+                  borderRadius: 10, padding: 10, fontSize: 12, color: '#991B1B',
+                }}>
+                  ⚠️ {error}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {!sent && (
+          <div style={{
+            padding: '14px 24px',
+            borderTop: `1px solid ${C.creamDeep}`,
+            background: C.white,
+            display: 'flex', justifyContent: 'flex-end', gap: 8,
+          }}>
+            <button onClick={onClose} type="button" style={{
+              background: C.creamDeep, color: C.ink2, border: 'none',
+              padding: '11px 20px', borderRadius: 100,
+              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}>
+              Annuler
+            </button>
+            <button
+              onClick={send}
+              disabled={sending || message.trim().length < 10}
+              type="button"
+              className="tpr-btn-wa"
+              style={{ padding: '11px 20px', fontSize: 13 }}>
+              {sending
+                ? <><Loader2 size={13} className="animate-spin" /> Envoi…</>
+                : <><Send size={13} /> Envoyer</>}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
