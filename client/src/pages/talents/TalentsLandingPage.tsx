@@ -14,6 +14,7 @@ import {
 import { listActiveTalents, type Talent } from '@/services/talents';
 import { useSEO } from '@/hooks/useSEO';
 import TalentVideoCard, { type CardTalent } from './TalentVideoCard';
+import MarketplaceUserMenu from '@/components/common/MarketplaceUserMenu';
 
 const C = {
   brand: '#0F5C3F',
@@ -208,11 +209,7 @@ export default function TalentsLandingPage() {
               padding: '10px 18px', borderRadius: 100,
               fontSize: 14, fontWeight: 600,
             }}>Feed</Link>
-            <Link to="/talents/inscription" className="tlnd-btn-cream" style={{
-              padding: '11px 20px', fontSize: 13,
-            }}>
-              Poster ma vidéo <ArrowRight size={14} />
-            </Link>
+            <MarketplaceUserMenu product="talents" variant="dark" brandColor={C.brand} brandDeepColor={C.brandDeep} />
           </nav>
         </div>
       </header>

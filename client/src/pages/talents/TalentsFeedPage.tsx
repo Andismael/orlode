@@ -8,6 +8,7 @@ import { Loader2, Users, RefreshCw, CheckCircle2, Clock, X as XIcon } from 'luci
 import { listActiveTalents, type Talent } from '@/services/talents';
 import { useSEO } from '@/hooks/useSEO';
 import TalentVideoCard, { type CardTalent } from './TalentVideoCard';
+import MarketplaceUserMenu from '@/components/common/MarketplaceUserMenu';
 
 const C = {
   brand: '#0F5C3F',
@@ -155,14 +156,7 @@ export default function TalentsFeedPage() {
             }}>
               <RefreshCw size={14} />
             </button>
-            <Link to="/talents/inscription" style={{
-              background: C.cream, color: C.ink,
-              textDecoration: 'none',
-              padding: '9px 16px', borderRadius: 100,
-              fontSize: 13, fontWeight: 600,
-            }}>
-              Poster ma vidéo
-            </Link>
+            <MarketplaceUserMenu product="talents" variant="dark" brandColor={C.brand} brandDeepColor={C.brandMid} />
           </div>
         </div>
       </header>

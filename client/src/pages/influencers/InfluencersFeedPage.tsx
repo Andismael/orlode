@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { listActiveInfluencers, type Influencer } from '@/services/influencers';
 import { useSEO } from '@/hooks/useSEO';
+import MarketplaceUserMenu from '@/components/common/MarketplaceUserMenu';
 import InfluencerPortrait, { type PortraitInfluencer } from './InfluencerPortrait';
 import api from '@/services/api';
 
@@ -98,6 +99,39 @@ export default function InfluencersFeedPage() {
   return (
     <div className="infld-root" style={{ background: C.cream, minHeight: '100vh' }}>
       <style>{STYLES}</style>
+
+      {/* Sticky top nav */}
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 60,
+        background: 'rgba(10, 8, 20, 0.7)',
+        backdropFilter: 'blur(24px) saturate(180%)',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        padding: '14px 32px',
+      }}>
+        <div style={{
+          maxWidth: 1280, margin: '0 auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <Link to="/influenceurs" style={{
+            textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 10,
+              background: `linear-gradient(135deg, ${C.brand}, ${C.brandDeep})`,
+              color: C.white, fontWeight: 800, fontSize: 15,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'Fraunces, serif',
+              boxShadow: `0 6px 16px -4px ${C.brand}80`,
+            }}>O</div>
+            <div className="infld-serif" style={{
+              fontSize: 15, fontWeight: 700, color: C.cream, lineHeight: 1,
+            }}>
+              Orlode <em style={{ fontStyle: 'italic', color: C.goldLight }}>Influenceurs</em>
+            </div>
+          </Link>
+          <MarketplaceUserMenu product="influencers" variant="dark" brandColor={C.brand} brandDeepColor={C.brandDeep} />
+        </div>
+      </header>
 
       {/* Hero dark */}
       <section style={{

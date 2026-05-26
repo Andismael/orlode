@@ -14,6 +14,7 @@ import {
   Camera, BadgeCheck, MapPin, Crown, Diamond, Flame,
 } from 'lucide-react';
 import { useSEO } from '@/hooks/useSEO';
+import MarketplaceUserMenu from '@/components/common/MarketplaceUserMenu';
 import { listActiveInfluencers, type Influencer } from '@/services/influencers';
 import InfluencerPortrait, { type PortraitInfluencer } from './InfluencerPortrait';
 
@@ -467,9 +468,7 @@ function Nav() {
           }}>Devenir créateur</Link>
         </nav>
 
-        <Link to="/influenceurs/feed" className="infl-btn-cream" style={{ padding: '11px 20px', fontSize: 13 }}>
-          Voir l'annuaire <ArrowRight size={14} />
-        </Link>
+        <MarketplaceUserMenu product="influencers" variant="dark" brandColor={C.brand} brandDeepColor={C.brandDeep} />
       </div>
     </header>
   );
