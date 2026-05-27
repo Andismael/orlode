@@ -52,7 +52,7 @@ const LV2_T: Record<string, Record<LV2Lang, string>> = {
   'hero.title.em':   { fr: 'IA',                        en: 'system',                       es: 'IA',                      pt: 'IA',                      de: 'system',           ar: 'بالذكاء' },
   'hero.title.l3':   { fr: "de l'entreprise",           en: 'for the modern',               es: 'para la empresa',         pt: 'para a empresa',          de: 'für moderne',      ar: 'للشركة' },
   'hero.title.l4':   { fr: 'moderne.',                  en: 'enterprise.',                  es: 'moderna.',                pt: 'moderna.',                de: 'Unternehmen.',     ar: 'الحديثة.' },
-  'hero.lead':       { fr: '30 agents IA spécialisés — vente, comms, RH, compta, sécurité — qui travaillent ensemble dans un workspace unifié. Connectés à tes canaux, ton équipe et tes données. Disponibles 24/7.', en: '30 specialized AI agents — sales, comms, HR, accounting, security — working together in a unified workspace. Connected to your channels, your team and your data. Available 24/7.', es: '30 agentes IA especializados que trabajan juntos en un workspace unificado. Conectados a tus canales, equipo y datos. Disponibles 24/7.', pt: '30 agentes IA especializados que trabalham juntos num workspace unificado. Conectados aos teus canais, equipa e dados. Disponíveis 24/7.', de: '30 spezialisierte KI-Agenten, die zusammen in einem einheitlichen Workspace arbeiten. Verbunden mit Ihren Kanälen, Ihrem Team und Ihren Daten. 24/7 verfügbar.', ar: '30 وكيل ذكاء اصطناعي متخصص يعملون معًا في مساحة عمل موحدة. متصلون بقنواتك وفريقك وبياناتك. متاحون 24/7.' },
+  'hero.lead':       { fr: '30 agents IA spécialisés — ventes, RH, compta, sécurité, support — qui travaillent ensemble sur tous tes canaux : WhatsApp, Telegram, email, voix, Slack, Teams. Pour ton équipe et tes clients. 24/7.', en: '30 specialized AI agents — sales, HR, accounting, security, support — working together across every channel: WhatsApp, Telegram, email, voice, Slack, Teams. For your team and your customers. 24/7.', es: '30 agentes IA especializados — ventas, RH, contabilidad, seguridad, soporte — que trabajan juntos en todos tus canales: WhatsApp, Telegram, email, voz, Slack, Teams. Para tu equipo y tus clientes. 24/7.', pt: '30 agentes IA especializados — vendas, RH, contabilidade, segurança, suporte — em todos os teus canais: WhatsApp, Telegram, email, voz, Slack, Teams. Para a tua equipa e os teus clientes. 24/7.', de: '30 spezialisierte KI-Agenten — Vertrieb, HR, Buchhaltung, Sicherheit, Support — über alle Kanäle: WhatsApp, Telegram, E-Mail, Voice, Slack, Teams. Für Team und Kunden. 24/7.', ar: '30 وكيل ذكاء اصطناعي متخصص — مبيعات، موارد بشرية، محاسبة، أمان، دعم — على جميع قنواتك: واتساب، تيليجرام، بريد، صوت، Slack، Teams. لفريقك وعملائك. 24/7.' },
   'hero.cta.primary':{ fr: 'Essayer gratuitement',  en: 'Try for free',         es: 'Probar gratis',           pt: 'Experimentar grátis',     de: 'Kostenlos testen',     ar: 'جرّب مجانًا' },
   'hero.cta.demo':   { fr: 'Voir la démo',          en: 'Watch the demo',       es: 'Ver demo',                pt: 'Ver demo',                de: 'Demo ansehen',         ar: 'مشاهدة العرض' },
   'hero.stat1.lbl':  { fr: 'Agents spécialisés',    en: 'Specialized agents',   es: 'Agentes especializados', pt: 'Agentes especializados',  de: 'Spezialisierte Agenten', ar: 'وكلاء متخصصون' },
@@ -1203,6 +1203,12 @@ export default function LandingV2Page() {
         `}</style>
       </section>
 
+      {/* ── CHANNELS ─────────────────────────────────────────────────────── */}
+      <ChannelsSection />
+
+      {/* ── ENTERPRISE / B2B ─────────────────────────────────────────────── */}
+      <EnterpriseSection />
+
       {/* ── PRICING ──────────────────────────────────────────────────────── */}
       <section id="pricing" style={{ padding: '100px 0', background: C.creamDeep }}>
         <div className="container">
@@ -1671,6 +1677,243 @@ function VerticalsMosaic() {
         .lv2-sat { transition: transform 0.3s ease, box-shadow 0.3s ease; }
       `}</style>
     </div>
+  );
+}
+
+// ── Channels section ──────────────────────────────────────────────────────
+function ChannelsSection() {
+  const channels = [
+    { emoji: '💚', name: 'WhatsApp Business',  desc: 'Cloud API officielle Meta',       color: '#25D366', dark: false },
+    { emoji: '✈️', name: 'Telegram Bot',       desc: 'API gratuite, illimitée',         color: '#26A5E4', dark: false },
+    { emoji: '📧', name: 'Email',              desc: 'Gmail · Outlook · Resend',        color: '#EA4335', dark: false },
+    { emoji: '📞', name: 'Voix (téléphone)',   desc: 'Azure Speech + Genkit',           color: '#7C3AED', dark: false },
+    { emoji: '💬', name: 'Web Chat',           desc: 'Widget JS embarquable',           color: '#0F5C3F', dark: false },
+    { emoji: '#️⃣', name: 'Slack',              desc: 'Bot + slash commands',            color: '#4A154B', dark: true  },
+    { emoji: '👥', name: 'Microsoft Teams',    desc: 'Bot Framework + Graph',           color: '#6264A7', dark: true  },
+    { emoji: '📱', name: 'SMS',                desc: 'Twilio · MTN · Orange',           color: '#F59E0B', dark: false },
+  ];
+
+  return (
+    <section style={{ padding: '100px 0', background: '#0A0F0D', color: '#FFFFFF', position: 'relative', overflow: 'hidden' }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'radial-gradient(ellipse at 30% 20%, rgba(15,92,63,0.35), transparent 55%), radial-gradient(ellipse at 75% 80%, rgba(124,58,237,0.25), transparent 55%)',
+        pointerEvents: 'none',
+      }} />
+      <div className="container" style={{ position: 'relative', zIndex: 2 }}>
+        <div style={{ textAlign: 'center', maxWidth: 720, margin: '0 auto 60px' }}>
+          <span className="pill" style={{
+            background: 'rgba(212,165,116,0.12)',
+            color: '#E8C9A0',
+            border: '1px solid rgba(212,165,116,0.4)',
+          }}>
+            <Globe size={12} /> Tous tes canaux · une seule IA
+          </span>
+          <h2 className="display h2" style={{ marginTop: 16, color: '#FAF7F2' }}>
+            Là où sont tes clients. <em style={{ color: '#E8C9A0' }}>Et ton équipe.</em>
+          </h2>
+          <p className="lead" style={{ marginTop: 12, color: 'rgba(250,247,242,0.75)' }}>
+            Pas que WhatsApp. Orlode parle chacun de tes canaux nativement — tu choisis lesquels activer, les agents s'adaptent automatiquement au ton et aux contraintes de chaque plateforme.
+          </p>
+        </div>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: 14,
+          maxWidth: 1080, margin: '0 auto',
+        }}>
+          {channels.map(ch => (
+            <div key={ch.name} style={{
+              background: 'rgba(255,255,255,0.04)',
+              backdropFilter: 'blur(14px)',
+              border: `1px solid ${ch.color}30`,
+              borderRadius: 16, padding: 18,
+              display: 'flex', alignItems: 'center', gap: 14,
+              transition: 'transform 0.2s ease, border-color 0.2s ease',
+            }} className="lv2-channel">
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: `linear-gradient(135deg, ${ch.color}, ${ch.color}cc)`,
+                color: ch.dark ? '#FFFFFF' : '#FFFFFF',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 22, flexShrink: 0,
+                boxShadow: `0 0 16px -2px ${ch.color}80`,
+              }}>
+                {ch.emoji}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{
+                  fontFamily: 'Fraunces, serif',
+                  fontSize: 15, fontWeight: 700,
+                  color: '#FAF7F2', letterSpacing: '-0.01em',
+                  lineHeight: 1.1, marginBottom: 4,
+                }}>
+                  {ch.name}
+                </div>
+                <div style={{
+                  fontSize: 11, color: 'rgba(250,247,242,0.65)',
+                  fontWeight: 500,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {ch.desc}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{
+          marginTop: 40, textAlign: 'center',
+          fontSize: 12, color: 'rgba(250,247,242,0.5)',
+          fontFamily: "'JetBrains Mono', monospace",
+          letterSpacing: '0.06em',
+        }}>
+          ↳ ÉQUIPES · CRM · COMPTA · CALENDARS · DRIVE · SUPPORT
+        </div>
+      </div>
+      <style>{`
+        .lv2-channel:hover { transform: translateY(-3px); }
+      `}</style>
+    </section>
+  );
+}
+
+// ── Enterprise / B2B section ──────────────────────────────────────────────
+function EnterpriseSection() {
+  const features = [
+    {
+      icon: BarChart3,
+      title: 'Sales Pipeline',
+      desc: 'CRM intégré · qualification leads · génération devis & factures · relances auto · forecast IA.',
+      stat: '30+',
+      statLabel: 'PME signent par mois',
+      color: '#0F5C3F',
+    },
+    {
+      icon: Users,
+      title: 'HR / Équipe',
+      desc: 'Congés · paie · onboarding · annuaire · présence · OKR. L\'agent RH t\'envoie le résumé hebdo.',
+      stat: '10h',
+      statLabel: 'Économisées / semaine',
+      color: '#7C3AED',
+    },
+    {
+      icon: BarChart3,
+      title: 'Comptabilité',
+      desc: 'OHADA · SAGE · SYSCOA. Bilans auto, TVA, relances impayés. Compta-bot répond à ta DAF.',
+      stat: '100%',
+      statLabel: 'Conformité OHADA',
+      color: '#F59E0B',
+    },
+    {
+      icon: Shield,
+      title: 'Sécurité & Compliance',
+      desc: 'Audit logs · RBAC · RGPD · DPO virtuel · phishing detect · access reviews · ISO-ready.',
+      stat: 'SOC2',
+      statLabel: 'Logs immutables',
+      color: '#DC2626',
+    },
+  ];
+
+  return (
+    <section style={{ padding: '100px 0', background: '#FAF7F2' }}>
+      <div className="container">
+        <div style={{ textAlign: 'center', maxWidth: 720, margin: '0 auto 60px' }}>
+          <span className="pill" style={{ background: '#EEF2FF', color: '#3730A3', border: '1px solid rgba(79,70,229,0.3)' }}>
+            <Sparkles size={12} /> Pour les équipes
+          </span>
+          <h2 className="display h2" style={{ marginTop: 16 }}>
+            Pas qu'un bot client. <em>Tout le back-office.</em>
+          </h2>
+          <p className="lead" style={{ marginTop: 12 }}>
+            10 personnes ou 10 000 — Orlode pilote sales, RH, compta, sécurité et IT depuis le même workspace. Les agents se parlent entre eux : un lead converti déclenche la facture, qui crée la ligne compta, qui notifie la DAF.
+          </p>
+        </div>
+
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16,
+          maxWidth: 1080, margin: '0 auto',
+        }}>
+          {features.map(f => {
+            const Icon = f.icon;
+            return (
+              <div key={f.title} style={{
+                background: '#FFFFFF',
+                border: '1px solid rgba(0,0,0,0.06)',
+                borderRadius: 20, padding: 24,
+                display: 'flex', flexDirection: 'column', gap: 14,
+                transition: 'transform 0.25s ease, box-shadow 0.25s ease',
+              }} className="lv2-ent-card">
+                <div style={{
+                  width: 44, height: 44, borderRadius: 12,
+                  background: `linear-gradient(135deg, ${f.color}20, ${f.color}08)`,
+                  border: `1px solid ${f.color}30`,
+                  color: f.color,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <Icon size={20} />
+                </div>
+                <div>
+                  <div style={{
+                    fontFamily: 'Fraunces, serif',
+                    fontSize: 22, fontWeight: 700, color: '#0A2A20',
+                    letterSpacing: '-0.02em', lineHeight: 1.1, marginBottom: 6,
+                  }}>
+                    {f.title}
+                  </div>
+                  <p style={{
+                    fontSize: 13, color: '#5A6B62',
+                    margin: 0, lineHeight: 1.55,
+                  }}>
+                    {f.desc}
+                  </p>
+                </div>
+                <div style={{
+                  marginTop: 'auto',
+                  paddingTop: 14,
+                  borderTop: '1px dashed rgba(0,0,0,0.08)',
+                  display: 'flex', alignItems: 'baseline', gap: 8,
+                }}>
+                  <div style={{
+                    fontFamily: 'Fraunces, serif',
+                    fontSize: 26, fontWeight: 700,
+                    color: f.color, letterSpacing: '-0.02em', lineHeight: 1,
+                  }}>
+                    {f.stat}
+                  </div>
+                  <div style={{
+                    fontSize: 11, color: '#94A39A',
+                    fontWeight: 600, letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                  }}>
+                    {f.statLabel}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ textAlign: 'center', marginTop: 40 }}>
+          <Link to="/agents/enterprise" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: '#0A2A20', color: '#FAF7F2',
+            padding: '14px 26px', borderRadius: 100,
+            textDecoration: 'none',
+            fontSize: 14, fontWeight: 700,
+            boxShadow: '0 14px 28px -10px rgba(10,42,32,0.4)',
+            transition: 'transform 0.2s ease',
+          }}>
+            Explorer le pack Enterprise <ArrowRight size={14} />
+          </Link>
+        </div>
+      </div>
+      <style>{`
+        .lv2-ent-card:hover { transform: translateY(-4px); box-shadow: 0 20px 40px -16px rgba(0,0,0,0.15); }
+      `}</style>
+    </section>
   );
 }
 
