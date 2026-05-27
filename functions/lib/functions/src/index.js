@@ -119,6 +119,7 @@ const talents_routes_1 = __importDefault(require("../../server/src/routes/talent
 const influencers_routes_1 = __importDefault(require("../../server/src/routes/influencers.routes"));
 const manifest_routes_1 = __importDefault(require("../../server/src/routes/manifest.routes"));
 const business_routes_1 = __importDefault(require("../../server/src/routes/business.routes"));
+const landing_routes_1 = __importDefault(require("../../server/src/routes/landing.routes"));
 // Genkit flows
 require("../../server/src/genkit");
 // Initialize Firebase
@@ -221,6 +222,7 @@ app.use('/api/talents', talents_routes_1.default);
 app.use('/api/influencers', influencers_routes_1.default);
 app.use('/api/manifest', manifest_routes_1.default);
 app.use('/api/business', business_routes_1.default);
+app.use('/api/landing', landing_routes_1.default);
 app.use(error_middleware_1.notFoundMiddleware);
 app.use(error_middleware_1.errorMiddleware);
 // Export as Firebase Cloud Function (2nd gen) — public access

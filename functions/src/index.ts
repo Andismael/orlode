@@ -83,6 +83,7 @@ import talentsRoutes from '../../server/src/routes/talents.routes';
 import influencersRoutes from '../../server/src/routes/influencers.routes';
 import manifestRoutes from '../../server/src/routes/manifest.routes';
 import businessRoutes from '../../server/src/routes/business.routes';
+import landingRoutes from '../../server/src/routes/landing.routes';
 
 // Genkit flows
 import '../../server/src/genkit';
@@ -195,6 +196,7 @@ app.use('/api/talents', talentsRoutes);
 app.use('/api/influencers', influencersRoutes);
 app.use('/api/manifest', manifestRoutes);
 app.use('/api/business', businessRoutes);
+app.use('/api/landing', landingRoutes);
 
 app.use(notFoundMiddleware);
 app.use(errorMiddleware);

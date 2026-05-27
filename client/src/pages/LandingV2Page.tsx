@@ -266,8 +266,43 @@ const IMG = {
 // Video URLs — configurable via env so the team can update without code change.
 // Default: YouTube placeholder ("dQw4w9WgXcQ" — replace with real demo when ready).
 // Set VITE_LANDING_DEMO_VIDEO_URL and VITE_LANDING_STORY_VIDEO_URL in .env to override.
+// At runtime, the CMS (/superadmin/landing) can ALSO override these via the
+// platform/landingPage Firestore doc (video1Url / video2Url fields).
 const VIDEO_DEMO_URL  = ((import.meta as any).env?.VITE_LANDING_DEMO_VIDEO_URL  as string | undefined) ?? '';
 const VIDEO_STORY_URL = ((import.meta as any).env?.VITE_LANDING_STORY_VIDEO_URL as string | undefined) ?? '';
+
+/**
+ * Resolve a translation key to the CMS-managed override value (if any).
+ * The editor at /superadmin/landing writes to platform/landingPage with the
+ * LandingContent shape (heroBadge / heroTitle / stats[] / etc.) — this fn
+ * maps each LV2_T key to its corresponding Firestore field so non-devs
+ * can edit the visible French copy without touching code.
+ *
+ * Returns undefined when no override is set → caller falls back to the
+ * static LV2_T translation.
+ */
+function cmsValue(cms: Record<string, unknown> | null | undefined, key: string): string | undefined {
+  if (!cms) return undefined;
+  const stats = (cms['stats'] as Array<{ value?: string; label?: string }> | undefined) ?? [];
+  const map: Record<string, unknown> = {
+    'hero.badge':       cms['heroBadge'],
+    'hero.title.l1':    cms['heroTitle'],
+    'hero.title.em':    cms['heroHighlight'],
+    'hero.lead':        cms['heroSubtitle'],
+    'hero.cta.primary': cms['heroCta1'],
+    'hero.cta.demo':    cms['heroCta2'],
+    'hero.stat1.lbl':   stats[0]?.label,
+    'hero.stat2.lbl':   stats[1]?.label,
+    'hero.stat3.lbl':   stats[2]?.label,
+    'video1.title':     cms['video1Label'],
+    'video2.title':     cms['video2Label'],
+    'cta.title':        cms['ctaTitle'],
+    'cta.lead':         cms['ctaSubtitle'],
+    'cta.primary':      cms['ctaButton'],
+  };
+  const v = map[key];
+  return (typeof v === 'string' && v.trim()) ? v : undefined;
+}
 
 // Convert YouTube / Vimeo URLs to embed format. Returns the original URL if
 // it's already an embed or an unsupported format.
@@ -580,7 +615,23 @@ function VideoCard({
 
 export default function LandingV2Page() {
   const { lang, setLang } = useLangStore();
-  const t = (key: string) => lv2T(key, lang as LV2Lang);
+  // SuperAdmin /superadmin/landing writes here; we fetch + override the static
+  // French translations with the CMS values so non-devs can tweak the page.
+  const [cms, setCms] = React.useState<Record<string, unknown> | null>(null);
+  React.useEffect(() => {
+    fetch('/api/landing')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setCms((j?.content as Record<string, unknown> | undefined) ?? {}))
+      .catch(() => setCms({}));
+  }, []);
+  // t() honors CMS overrides for French; other languages fall back to static.
+  const t = (key: string) => {
+    if (lang === 'fr') {
+      const v = cmsValue(cms, key);
+      if (v) return v;
+    }
+    return lv2T(key, lang as LV2Lang);
+  };
   const [mobileMenu, setMobileMenu] = React.useState(false);
 
   useEffect(() => {
@@ -773,7 +824,7 @@ export default function LandingV2Page() {
             </p>
           </div>
           <VideoCard
-            url={VIDEO_DEMO_URL}
+            url={(cms?.['video1Url'] as string | undefined) || VIDEO_DEMO_URL}
             title={t('video1.title')}
             subtitle={t('video1.lead')}
             posterFrom={C.violetDeep}
@@ -891,7 +942,7 @@ export default function LandingV2Page() {
               </div>
             </div>
             <VideoCard
-              url={VIDEO_STORY_URL}
+              url={(cms?.['video2Url'] as string | undefined) || VIDEO_STORY_URL}
               title={t('v2.title.video')}
               subtitle={t('v2.subtitle.video')}
               posterFrom="#D97706"

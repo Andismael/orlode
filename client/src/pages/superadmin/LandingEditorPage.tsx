@@ -242,8 +242,8 @@ export default function LandingEditorPage() {
 
       {/* Preview link */}
       <div className="text-center pt-4">
-        <a href="/landing" target="_blank" rel="noopener noreferrer"
-          className="text-sm text-blue-600 hover:underline">Voir la landing page →</a>
+        <a href="/" target="_blank" rel="noopener noreferrer"
+          className="text-sm text-blue-600 hover:underline">Voir la landing (V2) →</a>
       </div>
     </div>
   );
