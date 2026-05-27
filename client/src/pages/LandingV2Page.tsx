@@ -1406,36 +1406,35 @@ export default function LandingV2Page() {
             {[
               { title: t('foot.product'),   links: [
                 { l: t('nav.marketplace'),  to: '/marketplace' },
-                { l: t('nav.pricing'),      to: '/v2#pricing' },
-                { l: t('hero.cta.demo'),    to: '/v2#features' },
-                { l: 'Changelog',            to: '/changelog' },
+                { l: t('nav.pricing'),      to: '/#pricing' },
+                { l: 'Features',             to: '/#features' },
+                { l: 'FAQ',                  to: '/#faq' },
               ]},
               { title: t('foot.solutions'), links: [
                 { l: '🛍 Boutique',          to: '/agents/commerce' },
                 { l: '🍽 Restaurant',        to: '/agents/restaurant' },
                 { l: '🏨 Hôtel',             to: '/agents/hotel' },
-                { l: '🏢 Résidence',         to: '/agents/residence' },
                 { l: '💇 Salon',             to: '/agents/service' },
                 { l: '🩺 Cabinet',           to: '/agents/cabinet' },
                 { l: '🏠 Immobilier',        to: '/agents/realestate' },
+                { l: '🏢 Enterprise',        to: '/agents/enterprise' },
               ]},
-              { title: t('foot.resources'), links: [
-                { l: 'Documentation',        to: '/docs' },
-                { l: 'Help center',          to: '/help' },
-                { l: 'Blog',                 to: '/blog' },
-                { l: 'Status',               to: '/status' },
+              { title: 'Marketplaces',     links: [
+                { l: '🎬 Talents',           to: '/talents' },
+                { l: '📸 Influenceurs',      to: '/influenceurs' },
+                { l: t('nav.marketplace'),   to: '/marketplace' },
               ]},
               { title: t('foot.company'),   links: [
-                { l: 'About',                to: '/about' },
-                { l: 'Customers',            to: '/customers' },
-                { l: 'Careers',              to: '/careers' },
-                { l: 'Contact',              to: '/contact' },
+                { l: 'À propos',             to: '/about' },
+                { l: 'Contact',              to: '/#contact' },
+                { l: 'Devenir créateur',     to: '/influenceurs/inscription' },
+                { l: 'Devenir candidat',     to: '/talents/inscription' },
               ]},
               { title: t('foot.legal'),     links: [
-                { l: 'Terms',                to: '/legal/terms' },
-                { l: 'Privacy',              to: '/legal/privacy' },
-                { l: 'Cookies',              to: '/legal/cookies' },
-                { l: 'Security',             to: '/legal/security' },
+                { l: 'Conditions d\'utilisation', to: '/legal/terms' },
+                { l: 'Confidentialité',      to: '/legal/privacy' },
+                { l: 'Mentions légales',     to: '/legal/notice' },
+                { l: 'Suppression de données', to: '/data-deletion' },
               ]},
             ].map((col, i) => (
               <div key={i}>
