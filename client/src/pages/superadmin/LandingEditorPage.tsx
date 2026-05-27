@@ -35,21 +35,24 @@ interface LandingContent {
   ctaButton: string;
 }
 
+// Defaults mirror LandingV2Page.tsx's French strings — when the SuperAdmin
+// hasn't saved anything yet, the editor shows what's actually live on V2.
+// Each field maps to a translation key consumed by V2's t() override layer
+// (see cmsValue() in LandingV2Page.tsx).
 const EMPTY: LandingContent = {
-  heroBadge: '21 agents IA + marketplace d\'agents métier',
-  heroTitle: 'Votre entreprise mérite une',
-  heroHighlight: 'équipe IA complète.',
-  heroSubtitle: '21 agents intégrés + un marketplace d\'agents par industrie. L\'IA qui s\'adapte à VOTRE entreprise.',
-  heroCta1: 'Démarrer gratuitement',
+  heroBadge: 'Phase de lancement · Tarifs fondateurs',
+  heroTitle: 'Le système d\'exploitation',
+  heroHighlight: 'IA',
+  heroSubtitle: '30 agents IA spécialisés — vente, comms, RH, compta, sécurité — qui travaillent ensemble dans un workspace unifié. Connectés à tes canaux, ton équipe et tes données. Disponibles 24/7.',
+  heroCta1: 'Essayer gratuitement',
   heroCta2: 'Voir la démo',
-  heroNote: 'Pas de carte bancaire · Setup en 15 min · Plan Free disponible',
-  video1Url: '', video1Label: 'Démo Orlode AI — 3 min',
-  video2Url: '', video2Label: 'Témoignage client',
+  heroNote: '',
+  video1Url: '', video1Label: 'Vois Orlode en action.',
+  video2Url: '', video2Label: 'Construit en Afrique. Pour le monde.',
   stats: [
-    { value: '21', label: 'Agents intégrés' },
-    { value: '30+', label: 'Agents marketplace' },
-    { value: '160+', label: 'Skills activables' },
-    { value: '24/7', label: 'Toujours actif' },
+    { value: '30',    label: 'Agents spécialisés' },
+    { value: '20 $',  label: 'Par pack / mois' },
+    { value: '24/7',  label: 'Multi-canal' },
   ],
   testimonials: [
     { name: 'Aminata D.', role: 'DG, AfriDigital', text: 'Orlode a remplacé 5 outils qu\'on payait séparément.', avatar: 'A' },
@@ -57,16 +60,16 @@ const EMPTY: LandingContent = {
     { name: 'Fatou K.', role: 'RH, GreenTech', text: 'La gestion des congés automatisée nous fait gagner 10h/semaine.', avatar: 'F' },
   ],
   marketplaceAgents: [
-    { icon: '🏥', name: 'Clinique IA', desc: 'Gestion patients, RDV, dossiers', color: '#EF4444', industry: 'Santé' },
-    { icon: '🛒', name: 'E-Commerce IA', desc: 'Stock, commandes, analytics', color: '#F97316', industry: 'Commerce' },
-    { icon: '🏗', name: 'BTP Manager', desc: 'Chantiers, devis, planning', color: '#78716C', industry: 'Construction' },
-    { icon: '🌾', name: 'Agri Advisor', desc: 'Cultures, météo, diagnostics', color: '#16A34A', industry: 'Agriculture' },
-    { icon: '🚗', name: 'Auto Mechanic', desc: 'Diagnostic OBD, devis', color: '#3B82F6', industry: 'Automobile' },
-    { icon: '💇', name: 'Salon Beauty', desc: 'RDV, fidélité, soins', color: '#EC4899', industry: 'Beauté' },
+    { icon: '🛒', name: 'Boutique',   desc: 'Vente en ligne',          color: '#0F5C3F', industry: 'Commerce' },
+    { icon: '🍽️', name: 'Restaurant', desc: 'Menu + réservation',      color: '#C2410C', industry: 'Restauration' },
+    { icon: '🏨', name: 'Hôtel',      desc: 'Chambres + booking',      color: '#0369A1', industry: 'Hospitalité' },
+    { icon: '💼', name: 'PME',        desc: 'Tout-en-un IA',           color: '#4F46E5', industry: 'B2B' },
+    { icon: '💇', name: 'Salon',      desc: 'RDV beauté',              color: '#BE185D', industry: 'Beauté' },
+    { icon: '🩺', name: 'Cabinet',    desc: 'Santé · juridique',       color: '#0F766E', industry: 'Services' },
   ],
-  ctaTitle: 'Prêt à donner un cerveau IA à votre entreprise ?',
-  ctaSubtitle: '21 agents + marketplace. Setup en 15 minutes.',
-  ctaButton: 'Démarrer maintenant — c\'est gratuit',
+  ctaTitle: 'Prêt·e à orchestrer ton équipe IA ?',
+  ctaSubtitle: 'Installe ton premier pack en moins de 5 minutes. Pas de carte requise — tu démarres en plan gratuit.',
+  ctaButton: 'Commencer',
 };
 
 const INPUT = 'w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
@@ -117,13 +120,28 @@ export default function LandingEditorPage() {
           <h1 className="text-xl font-bold text-gray-900">Éditeur Landing Page</h1>
           <p className="text-sm text-gray-500">Modifiez le contenu de la page publique</p>
         </div>
-        <button onClick={save} disabled={saving}
-          className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-50"
-          style={{ background: saved ? '#16a34a' : '#0055FF' }}>
-          {saving ? <><Loader2 size={14} className="animate-spin" /> Sauvegarde...</>
-           : saved ? <><CheckCircle size={14} /> Sauvegardé !</>
-           : <><Save size={14} /> Sauvegarder</>}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm('Réinitialiser tous les champs aux valeurs par défaut de la home V2 ? Ton brouillon non sauvegardé sera perdu.')) {
+                setContent(EMPTY);
+              }
+            }}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            title="Remplace les champs par les valeurs par défaut de la home V2"
+          >
+            <Trash2 size={14} /> Reset V2
+          </button>
+          <button onClick={save} disabled={saving}
+            className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-50"
+            style={{ background: saved ? '#16a34a' : '#0055FF' }}>
+            {saving ? <><Loader2 size={14} className="animate-spin" /> Sauvegarde...</>
+             : saved ? <><CheckCircle size={14} /> Sauvegardé !</>
+             : <><Save size={14} /> Sauvegarder</>}
+          </button>
+        </div>
       </div>
 
       {/* ── HERO ──────────────────────────────────── */}
