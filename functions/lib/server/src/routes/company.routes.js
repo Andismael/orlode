@@ -81,6 +81,10 @@ router.patch('/', adminOnly_middleware_1.adminOnlyMiddleware, (0, asyncHandler_1
     // Whitelist of allowed fields
     const allowed = [
         'name', 'slogan', 'description', 'sector', 'size', 'website', 'logoUrl',
+        // PWA installable square logo (≥512×512 PNG/JPG) — used by the
+        // /api/manifest/:companyId endpoint as the icon for the installable
+        // app on a customer's home screen. Falls back to logoUrl if unset.
+        'pwaLogoUrl', 'primaryColor',
         'address', 'city', 'country', 'postalCode',
         'phone', 'whatsapp', 'email', 'supportEmail',
         'linkedin', 'twitter', 'facebook', 'instagram',

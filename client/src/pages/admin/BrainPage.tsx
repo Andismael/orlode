@@ -15,6 +15,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/services/api';
 import { toast } from '@/components/common/Toast';
 import { useAuthStore } from '@/store/authStore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { storage } from '@/services/firebase';
 import {
   Brain, Building2, FileText, Plug, Sparkles, ChevronDown, ChevronRight,
   CheckCircle2, AlertCircle, Loader2, Upload, Globe, X, Save, Sliders,
@@ -185,6 +187,10 @@ export default function BrainPage() {
         name: identity.name, website: identity.website, sector: identity.sector,
         address: identity.address, city: identity.city, country: identity.country,
         phone: identity.phone, email: identity.email, taxId: identity.taxId,
+        // PWA personalization — manifest at /api/manifest/:companyId reads
+        // pwaLogoUrl (preferred) → logoUrl → Orlode default, and primaryColor
+        // → theme_color.
+        logoUrl: identity.logoUrl, pwaLogoUrl: identity.pwaLogoUrl, primaryColor: identity.primaryColor,
         // businessType lives in settings so it's available wherever we read settings
         settings: {
           ...((company as any)?.settings ?? {}),
@@ -388,6 +394,20 @@ export default function BrainPage() {
                 <input className="input" value={identity.address ?? ''} onChange={e => setIdentity({ ...identity, address: e.target.value })} placeholder="Rue, quartier, ville" />
               </Field>
             </div>
+
+            {/* PWA personalization — logo + brand color used by the per-company
+                installable PWA (manifest.json). When a customer installs your
+                business from a public page (/clone, /shop, /menu…), iOS/Android
+                use these as the app icon + name on the home screen. */}
+            <PWAIdentitySection
+              companyId={(company as { id?: string } | null)?.id ?? user?.companyId ?? ''}
+              pwaLogoUrl={identity.pwaLogoUrl ?? identity.logoUrl ?? ''}
+              primaryColor={identity.primaryColor ?? '#0F5C3F'}
+              companyName={identity.name ?? ''}
+              onPWALogoChange={(url: string) => setIdentity({ ...identity, pwaLogoUrl: url })}
+              onColorChange={(color: string) => setIdentity({ ...identity, primaryColor: color })}
+            />
+
             <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
               <button onClick={saveIdentity} disabled={identitySaving} className="btn-emerald">
                 {identitySaving ? <><Loader2 size={14} className="spin" /> Sauvegarde…</> : <><Save size={14} /> Enregistrer</>}
@@ -863,6 +883,194 @@ function Field({ label, required, full, children }: { label: string; required?: 
         {required && <span style={{ color: C.red, marginLeft: 2 }}>*</span>}
       </div>
       {children}
+    </div>
+  );
+}
+
+// ── PWA Identity Section ─────────────────────────────────────────────────────
+// Lets the merchant upload a square logo + pick a brand color used by the
+// per-company installable PWA. Saves directly to Firebase Storage under
+// `companies/{companyId}/logo/pwa-{ts}.{ext}` and pushes the URL into the
+// identity state — the parent saveIdentity() then persists pwaLogoUrl +
+// primaryColor to Firestore.
+function PWAIdentitySection({
+  companyId, pwaLogoUrl, primaryColor, companyName,
+  onPWALogoChange, onColorChange,
+}: {
+  companyId: string;
+  pwaLogoUrl: string;
+  primaryColor: string;
+  companyName: string;
+  onPWALogoChange: (url: string) => void;
+  onColorChange: (color: string) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleFile = async (f: File | null | undefined) => {
+    if (!f || !companyId) return;
+    setError(null);
+    if (!f.type.startsWith('image/')) { setError('Format non supporté — JPG/PNG/WebP uniquement'); return; }
+    if (f.size > 3 * 1024 * 1024) { setError(`Max 3 Mo (le tien : ${(f.size / 1024 / 1024).toFixed(1)} Mo)`); return; }
+
+    setUploading(true); setProgress(0);
+    try {
+      const ext = (f.name.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+      const ref = storageRef(storage, `companies/${companyId}/logo/pwa-${Date.now()}.${ext}`);
+      const task = uploadBytesResumable(ref, f, { contentType: f.type });
+      task.on('state_changed',
+        snap => setProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+        err => { setError(err.message); setUploading(false); },
+        async () => {
+          const url = await getDownloadURL(task.snapshot.ref);
+          onPWALogoChange(url);
+          setUploading(false); setProgress(100);
+          toast.success('Logo PWA téléversé', "N'oublie pas d'enregistrer pour publier.");
+        },
+      );
+    } catch (e) {
+      setError((e as Error).message);
+      setUploading(false);
+    }
+  };
+
+  const initial = (companyName.charAt(0) || '?').toUpperCase();
+
+  return (
+    <div style={{
+      marginTop: 18,
+      background: C.creamDeep,
+      border: `1px solid rgba(10,42,32,0.08)`,
+      borderRadius: 14,
+      padding: 18,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <Camera size={14} color={C.cyanDeep} />
+        <div style={{ fontFamily: 'Fraunces, serif', fontSize: 17, fontWeight: 700, color: C.ink }}>
+          Identité de ton app installable (PWA)
+        </div>
+      </div>
+      <p style={{ fontSize: 12, color: C.inkSoft, margin: '0 0 16px', lineHeight: 1.55 }}>
+        Quand un client installe ton entreprise depuis ton lien public (clone, boutique, menu…), c'est <strong>ton logo</strong> et <strong>ta couleur</strong> qui apparaissent sur son écran d'accueil — pas Orlode.
+      </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div
+          onClick={() => !uploading && fileInputRef.current?.click()}
+          style={{
+            width: 96, height: 96, borderRadius: 20,
+            background: pwaLogoUrl
+              ? `url(${pwaLogoUrl}) center/cover`
+              : `linear-gradient(135deg, ${primaryColor}25, ${primaryColor}10)`,
+            border: `2px solid ${pwaLogoUrl ? primaryColor : `${primaryColor}40`}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: uploading ? 'wait' : 'pointer',
+            position: 'relative', overflow: 'hidden',
+            flexShrink: 0,
+            transition: 'all 0.2s ease',
+          }}
+        >
+          {uploading ? (
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'rgba(255,255,255,0.9)',
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 4,
+            }}>
+              <Loader2 size={22} className="spin" color={primaryColor} />
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, color: primaryColor }}>
+                {progress}%
+              </div>
+            </div>
+          ) : pwaLogoUrl ? null : (
+            <div style={{
+              fontFamily: 'Fraunces, serif',
+              fontSize: 44, fontWeight: 800,
+              color: primaryColor, fontStyle: 'italic', opacity: 0.55,
+            }}>
+              {initial}
+            </div>
+          )}
+          {!uploading && !pwaLogoUrl && (
+            <div style={{
+              position: 'absolute', bottom: 6, right: 6,
+              width: 28, height: 28, borderRadius: '50%',
+              background: primaryColor, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: `0 4px 10px -2px ${primaryColor}80`,
+            }}>
+              <Camera size={14} />
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={e => handleFile(e.target.files?.[0])}
+            style={{ display: 'none' }}
+          />
+        </div>
+
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, marginBottom: 6 }}>
+            Logo carré ≥ 512×512 px
+          </div>
+          <p style={{ fontSize: 11, color: C.inkSoft, margin: '0 0 10px', lineHeight: 1.5 }}>
+            JPG / PNG / WebP · max 3 Mo · format carré obligatoire (sinon il sera tronqué sur les écrans d'accueil iOS/Android). Idéal : 512×512 ou 1024×1024.
+          </p>
+          {pwaLogoUrl && (
+            <button
+              type="button"
+              onClick={() => { onPWALogoChange(''); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+              style={{
+                background: 'transparent', border: 'none',
+                color: C.red, fontSize: 11, fontWeight: 600,
+                cursor: 'pointer', padding: 0,
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}>
+              <Trash2 size={11} /> Retirer le logo PWA
+            </button>
+          )}
+          {error && (
+            <div style={{
+              marginTop: 8,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: C.redSoft, border: `1px solid ${C.red}40`,
+              borderRadius: 100, padding: '4px 10px',
+              fontSize: 11, fontWeight: 600, color: C.red,
+            }}>
+              <AlertCircle size={11} /> {error}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 14, alignItems: 'center' }}>
+        <input
+          type="color"
+          value={primaryColor}
+          onChange={e => onColorChange(e.target.value)}
+          style={{
+            width: 56, height: 40, borderRadius: 10,
+            border: '1px solid rgba(10,42,32,0.15)',
+            cursor: 'pointer', background: 'transparent', padding: 0,
+          }}
+          title="Couleur principale de ton app"
+        />
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+            Couleur principale ·{' '}
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: primaryColor, fontWeight: 700 }}>
+              {primaryColor.toUpperCase()}
+            </span>
+          </div>
+          <p style={{ fontSize: 11, color: C.inkSoft, margin: '4px 0 0', lineHeight: 1.5 }}>
+            Teinte de la barre du navigateur + accent du bouton "Installer" sur tes pages publiques.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
