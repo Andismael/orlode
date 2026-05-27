@@ -23,19 +23,19 @@ const router = Router();
 
 /** Public paths the install flow is allowed to deep-link to via ?from=. */
 const SAFE_START_PREFIXES = [
-  '/clone/', '/shop/', '/menu/', '/hotel/', '/salon/',
+  '/business/', '/clone/', '/shop/', '/menu/', '/hotel/', '/salon/',
   '/cabinet/', '/biens/', '/residence/', '/residences/',
   '/book/', '/my/',
 ];
 
 function sanitizeStartUrl(from: string | undefined, companyId: string): string {
-  if (!from || typeof from !== 'string') return `/clone/${companyId}`;
+  if (!from || typeof from !== 'string') return `/business/${companyId}`;
   // Strip query string + fragment so the manifest's start_url is canonical.
   const path = from.split('?')[0]!.split('#')[0]!;
-  if (!path.startsWith('/')) return `/clone/${companyId}`;
-  if (!SAFE_START_PREFIXES.some(p => path.startsWith(p))) return `/clone/${companyId}`;
+  if (!path.startsWith('/')) return `/business/${companyId}`;
+  if (!SAFE_START_PREFIXES.some(p => path.startsWith(p))) return `/business/${companyId}`;
   // Reasonable length cap to prevent abuse / oversized manifests.
-  if (path.length > 200) return `/clone/${companyId}`;
+  if (path.length > 200) return `/business/${companyId}`;
   return path;
 }
 

@@ -76,6 +76,7 @@ const PublicSalonPage = lazy(() => import('@/pages/public/PublicSalonPage'));
 const PublicHealthPage = lazy(() => import('@/pages/public/PublicHealthPage'));
 const PublicRealEstatePage = lazy(() => import('@/pages/public/PublicRealEstatePage'));
 const PublicResidencePage = lazy(() => import('@/pages/public/PublicResidencePage'));
+const BusinessHubPage = lazy(() => import('@/pages/public/BusinessHubPage'));
 const CloneChatPage = lazy(() => import('@/pages/public/CloneChatPage'));
 const CloneVoicePage = lazy(() => import('@/pages/public/CloneVoicePage'));
 const MyStatusPage = lazy(() => import('@/pages/public/MyStatusPage'));
@@ -383,6 +384,7 @@ export default function App() {
         <Route path="/" element={<RootRedirect />} />
 
         {/* ── Standalone public pages (no layout wrapper) ──────────── */}
+        <Route path="/business/:companyId" element={<BusinessHubPage />} />
         <Route path="/clone/:companyId" element={<CloneChatPage />} />
         <Route path="/clone/:companyId/voice" element={<CloneVoicePage />} />
         <Route path="/my/:token" element={<MyStatusPage />} />

@@ -23,22 +23,22 @@ const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 /** Public paths the install flow is allowed to deep-link to via ?from=. */
 const SAFE_START_PREFIXES = [
-    '/clone/', '/shop/', '/menu/', '/hotel/', '/salon/',
+    '/business/', '/clone/', '/shop/', '/menu/', '/hotel/', '/salon/',
     '/cabinet/', '/biens/', '/residence/', '/residences/',
     '/book/', '/my/',
 ];
 function sanitizeStartUrl(from, companyId) {
     if (!from || typeof from !== 'string')
-        return `/clone/${companyId}`;
+        return `/business/${companyId}`;
     // Strip query string + fragment so the manifest's start_url is canonical.
     const path = from.split('?')[0].split('#')[0];
     if (!path.startsWith('/'))
-        return `/clone/${companyId}`;
+        return `/business/${companyId}`;
     if (!SAFE_START_PREFIXES.some(p => path.startsWith(p)))
-        return `/clone/${companyId}`;
+        return `/business/${companyId}`;
     // Reasonable length cap to prevent abuse / oversized manifests.
     if (path.length > 200)
-        return `/clone/${companyId}`;
+        return `/business/${companyId}`;
     return path;
 }
 /** Truncate the company name to keep short_name installable across OSes. */

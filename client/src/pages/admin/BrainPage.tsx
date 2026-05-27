@@ -1148,7 +1148,7 @@ function InstallExplainerModal({
   companyId: string; companyName: string; pwaLogoUrl: string; primaryColor: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const publicUrl = `${window.location.origin}/clone/${companyId}`;
+  const publicUrl = `${window.location.origin}/business/${companyId}`;
   const initial = (companyName.charAt(0) || '?').toUpperCase();
 
   const launchInstall = () => {
