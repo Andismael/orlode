@@ -50,10 +50,11 @@ router.get('/:companyId', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     if (!companyId)
         throw new error_middleware_1.AppError('companyId required', 400);
     const db = (0, firebase_config_1.getFirestore)();
+    // Degrade gracefully — a public Hub link should always render something
+    // useful (at minimum the chat IA), even if the company doc was deleted
+    // or never created. Customers may still have the install on their phone.
     const companySnap = await db.collection('companies').doc(companyId).get();
-    if (!companySnap.exists)
-        throw new error_middleware_1.AppError('Company not found', 404);
-    const c = companySnap.data() ?? {};
+    const c = companySnap.exists ? (companySnap.data() ?? {}) : {};
     // ── Always-available services ──────────────────────────────────────────
     const services = [];
     // 1. Chat IA — every company has a clone

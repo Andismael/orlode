@@ -57,9 +57,11 @@ router.get('/:companyId', asyncHandler(async (req: Request, res: Response) => {
   if (!companyId) throw new AppError('companyId required', 400);
 
   const db = getFirestore();
+  // Degrade gracefully — a public Hub link should always render something
+  // useful (at minimum the chat IA), even if the company doc was deleted
+  // or never created. Customers may still have the install on their phone.
   const companySnap = await db.collection('companies').doc(companyId).get();
-  if (!companySnap.exists) throw new AppError('Company not found', 404);
-  const c = companySnap.data() ?? {};
+  const c = companySnap.exists ? (companySnap.data() ?? {}) : {};
 
   // ── Always-available services ──────────────────────────────────────────
   const services: Array<Record<string, unknown>> = [];
