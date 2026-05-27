@@ -22,6 +22,7 @@ import {
   CheckCircle2, AlertCircle, Loader2, Upload, Globe, X, Save, Sliders,
   ArrowRight, ArrowLeft, MessageCircle, Mail, Database, Link2, Trash2,
   Camera, BadgeCheck, Cpu, Clock, RefreshCw,
+  Download, Smartphone, Bell, Eye, Copy as CopyIcon, Share2, Zap,
 } from 'lucide-react';
 
 const C = {
@@ -1071,6 +1072,330 @@ function PWAIdentitySection({
           </p>
         </div>
       </div>
+
+      {/* Big "Install my app" CTA — opens a modal explaining why install is
+          important, then deep-links the merchant to their own public clone
+          page where the install banner fires. */}
+      <InstallMyAppCTA
+        companyId={companyId}
+        companyName={companyName}
+        pwaLogoUrl={pwaLogoUrl}
+        primaryColor={primaryColor}
+      />
     </div>
+  );
+}
+
+// ── "Télécharger mon entreprise" CTA + modal ─────────────────────────────────
+function InstallMyAppCTA({
+  companyId, companyName, pwaLogoUrl, primaryColor,
+}: {
+  companyId: string; companyName: string; pwaLogoUrl: string; primaryColor: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const disabled = !companyId || !companyName;
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        style={{
+          width: '100%',
+          marginTop: 18,
+          background: disabled
+            ? 'rgba(10,42,32,0.1)'
+            : `linear-gradient(135deg, ${primaryColor}, ${primaryColor}cc)`,
+          color: disabled ? C.inkLight : '#FFFFFF',
+          border: 'none',
+          padding: '16px 22px',
+          borderRadius: 14,
+          fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          boxShadow: disabled ? 'none' : `0 12px 28px -8px ${primaryColor}80`,
+          transition: 'all 0.2s ease',
+        }}
+      >
+        <Download size={16} />
+        Télécharger mon entreprise sur mon téléphone
+        <Smartphone size={16} />
+      </button>
+      {disabled && (
+        <p style={{ fontSize: 11, color: C.inkSoft, marginTop: 8, textAlign: 'center', fontStyle: 'italic' }}>
+          Renseigne au moins le <strong>nom</strong> de ton entreprise puis enregistre pour activer.
+        </p>
+      )}
+
+      {open && (
+        <InstallExplainerModal
+          onClose={() => setOpen(false)}
+          companyId={companyId}
+          companyName={companyName}
+          pwaLogoUrl={pwaLogoUrl}
+          primaryColor={primaryColor}
+        />
+      )}
+    </>
+  );
+}
+
+function InstallExplainerModal({
+  onClose, companyId, companyName, pwaLogoUrl, primaryColor,
+}: {
+  onClose: () => void;
+  companyId: string; companyName: string; pwaLogoUrl: string; primaryColor: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const publicUrl = `${window.location.origin}/clone/${companyId}`;
+  const initial = (companyName.charAt(0) || '?').toUpperCase();
+
+  const launchInstall = () => {
+    // Opens the merchant's own public clone page where the per-company
+    // manifest + install banner are already wired. On mobile, the banner
+    // appears within ~1.2s; on iOS the same banner offers the "Sur l'écran
+    // d'accueil" instructions modal.
+    window.open(publicUrl, '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(10,42,32,0.65)',
+        backdropFilter: 'blur(8px)',
+        zIndex: 9999,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+        animation: 'slideIn 0.2s ease',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#FFFFFF',
+          borderRadius: 24,
+          width: '100%', maxWidth: 520,
+          maxHeight: '92vh', overflowY: 'auto',
+          boxShadow: '0 40px 100px rgba(0,0,0,0.4)',
+        }}
+      >
+        {/* Gradient header w/ logo + name preview */}
+        <div style={{
+          background: `linear-gradient(135deg, ${primaryColor}, ${primaryColor}cc)`,
+          padding: '28px 26px 24px',
+          color: '#FFFFFF',
+          position: 'relative',
+        }}>
+          <button
+            onClick={onClose}
+            aria-label="Fermer"
+            type="button"
+            style={{
+              position: 'absolute', top: 14, right: 14,
+              background: 'rgba(255,255,255,0.2)', border: 'none',
+              color: '#FFFFFF',
+              width: 32, height: 32, borderRadius: '50%',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+            <X size={15} />
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 14,
+              background: pwaLogoUrl
+                ? `url(${pwaLogoUrl}) center/cover`
+                : 'rgba(255,255,255,0.25)',
+              border: '2px solid rgba(255,255,255,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'Fraunces, serif',
+              fontSize: 26, fontWeight: 800,
+              flexShrink: 0,
+            }}>
+              {!pwaLogoUrl && initial}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 10, fontWeight: 700, opacity: 0.85,
+                letterSpacing: '0.08em', marginBottom: 4,
+              }}>
+                APERÇU SUR L'ÉCRAN D'ACCUEIL
+              </div>
+              <div style={{
+                fontFamily: 'Fraunces, serif',
+                fontSize: 22, fontWeight: 800,
+                letterSpacing: '-0.02em',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {companyName || 'Ton entreprise'}
+              </div>
+            </div>
+          </div>
+
+          <h2 style={{
+            fontFamily: 'Fraunces, serif',
+            fontSize: 22, fontWeight: 700,
+            margin: 0, letterSpacing: '-0.02em', lineHeight: 1.2,
+          }}>
+            Installe {companyName || 'ton entreprise'} <em style={{ fontStyle: 'italic' }}>comme une vraie app</em>
+          </h2>
+        </div>
+
+        {/* Why benefits */}
+        <div style={{ padding: '22px 26px 0' }}>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 10, fontWeight: 700, color: C.inkLight,
+            letterSpacing: '0.08em', marginBottom: 14,
+            textTransform: 'uppercase',
+          }}>
+            Pourquoi c'est important
+          </div>
+
+          <ul style={{
+            listStyle: 'none', padding: 0, margin: 0,
+            display: 'flex', flexDirection: 'column', gap: 14,
+          }}>
+            <Benefit
+              icon={Smartphone}
+              color={primaryColor}
+              title="Sur l'écran d'accueil de tes clients"
+              desc="Tap = ouverture instantanée. Pas besoin de chercher dans WhatsApp, Google ou les favoris."
+            />
+            <Benefit
+              icon={Eye}
+              color={primaryColor}
+              title="Ton logo. Ton nom. Pas Orlode."
+              desc="L'app porte ton identité — comme une vraie app native installée depuis l'App Store."
+            />
+            <Benefit
+              icon={Zap}
+              color={primaryColor}
+              title="Zéro friction"
+              desc="Aucun téléchargement App Store, aucun compte à créer côté client. 1 tap et c'est installé."
+            />
+            <Benefit
+              icon={Share2}
+              color={primaryColor}
+              title="Partage facile"
+              desc="Tu envoies le lien sur WhatsApp / SMS / Instagram → chaque client installe ton app en 5 secondes."
+            />
+          </ul>
+
+          <div style={{
+            marginTop: 22,
+            background: C.creamDeep,
+            border: '1px solid rgba(10,42,32,0.08)',
+            borderRadius: 12, padding: 14,
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+          }}>
+            <BadgeCheck size={16} color={primaryColor} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 12, color: C.ink, lineHeight: 1.55 }}>
+              <strong>Le lien à partager</strong>
+              <div style={{
+                marginTop: 4,
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11, color: C.inkSoft,
+                wordBreak: 'break-all',
+              }}>
+                {publicUrl}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{
+          padding: '18px 26px 22px',
+          display: 'flex', gap: 10, flexWrap: 'wrap',
+        }}>
+          <button
+            onClick={copyLink}
+            type="button"
+            style={{
+              flex: '1 1 auto',
+              background: '#FFFFFF',
+              color: C.ink,
+              border: `1.5px solid rgba(10,42,32,0.12)`,
+              padding: '13px 18px', borderRadius: 100,
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              transition: 'all 0.15s ease',
+            }}>
+            {copied ? <><CheckCircle2 size={14} color={primaryColor} /> Copié !</> : <><CopyIcon size={14} /> Copier le lien</>}
+          </button>
+          <button
+            onClick={launchInstall}
+            type="button"
+            style={{
+              flex: '1 1 auto',
+              background: `linear-gradient(135deg, ${primaryColor}, ${primaryColor}cc)`,
+              color: '#FFFFFF', border: 'none',
+              padding: '13px 22px', borderRadius: 100,
+              fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              boxShadow: `0 10px 26px -8px ${primaryColor}80`,
+            }}>
+            <Download size={14} /> Installer maintenant
+          </button>
+        </div>
+
+        <p style={{
+          fontSize: 11, color: C.inkSoft,
+          margin: '0 26px 22px',
+          fontStyle: 'italic', textAlign: 'center',
+          lineHeight: 1.5,
+        }}>
+          "Installer maintenant" ouvre ta page publique dans un nouvel onglet. Sur ton téléphone, une bannière t'invitera à ajouter l'app à l'écran d'accueil.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Benefit({
+  icon: Icon, color, title, desc,
+}: {
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+  color: string; title: string; desc: string;
+}) {
+  return (
+    <li style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 11,
+        background: `linear-gradient(135deg, ${color}20, ${color}08)`,
+        border: `1px solid ${color}30`,
+        color, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Icon size={16} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#0A2A20', marginBottom: 3 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 12, color: '#5A6B62', lineHeight: 1.55 }}>
+          {desc}
+        </div>
+      </div>
+    </li>
   );
 }
