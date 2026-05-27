@@ -1404,85 +1404,207 @@ export default function LandingV2Page() {
   );
 }
 
-// ── Hero verticals mosaic ────────────────────────────────────────────────
-// Replaces the single hero photo with a 3×2 grid of Orlode's verticals
-// (Restaurant, Hôtel, Boutique, PME, Salon, Cabinet). Visually shows
-// "voilà ce qu'Orlode fait" instantly — every customer recognizes at least
-// one of these.
+// ── Hero verticals mosaic — artistic AI Core composition ──────────────────
+// A central glowing AI "face" with the 6 Orlode verticals (Boutique, Restaurant,
+// Hôtel, PME, Salon, Cabinet) in hexagonal orbit. Wireframe rings, beam lines
+// from each vertical into the AI core, particle aura, pulsing eyes. The whole
+// thing is pure SVG + CSS — no images, scales perfectly.
 function VerticalsMosaic() {
   const verticals = [
-    { emoji: '🛒', name: 'Boutique',   sub: 'Vente en ligne',     grad: 'linear-gradient(155deg, #0F5C3F, #063322)',  accent: '#7FCAA6' },
-    { emoji: '🍽️', name: 'Restaurant', sub: 'Menu + réservation', grad: 'linear-gradient(155deg, #C2410C, #7C2D12)',  accent: '#FED7AA' },
-    { emoji: '🏨', name: 'Hôtel',      sub: 'Chambres + booking', grad: 'linear-gradient(155deg, #0369A1, #075985)',  accent: '#BAE6FD' },
-    { emoji: '💼', name: 'PME',        sub: 'Tout-en-un IA',      grad: 'linear-gradient(155deg, #4F46E5, #3730A3)',  accent: '#A5B4FC' },
-    { emoji: '💇', name: 'Salon',      sub: 'RDV beauté',         grad: 'linear-gradient(155deg, #BE185D, #831843)',  accent: '#F9A8D4' },
-    { emoji: '🩺', name: 'Cabinet',    sub: 'Santé · juridique',  grad: 'linear-gradient(155deg, #0F766E, #134E4A)',  accent: '#5EEAD4' },
+    // Hexagon positions (clock-face): top, top-right, bottom-right, bottom, bottom-left, top-left
+    { emoji: '🛒', name: 'Boutique',   accent: '#7FCAA6', glow: '#10B981', pos: { top:  '6%',  left: '50%' }, angle: -90 },
+    { emoji: '🍽️', name: 'Restaurant', accent: '#FED7AA', glow: '#F97316', pos: { top: '24%', left: '92%' }, angle: -30 },
+    { emoji: '💇', name: 'Salon',      accent: '#F9A8D4', glow: '#EC4899', pos: { top: '72%', left: '92%' }, angle:  30 },
+    { emoji: '🏨', name: 'Hôtel',      accent: '#BAE6FD', glow: '#3B82F6', pos: { top: '90%', left: '50%' }, angle:  90 },
+    { emoji: '🩺', name: 'Cabinet',    accent: '#5EEAD4', glow: '#14B8A6', pos: { top: '72%', left:  '8%' }, angle: 150 },
+    { emoji: '💼', name: 'PME',        accent: '#A5B4FC', glow: '#6366F1', pos: { top: '24%', left:  '8%' }, angle: 210 },
   ];
 
   return (
     <div style={{
       width: '100%',
       aspectRatio: '1/1',
-      borderRadius: 24,
-      padding: 14,
-      background: 'linear-gradient(135deg, #0A0F0D, #1A2A22)',
-      boxShadow: '0 50px 100px -30px rgba(10,42,32,0.5)',
-      display: 'grid',
-      gridTemplateColumns: 'repeat(2, 1fr)',
-      gridTemplateRows: 'repeat(3, 1fr)',
-      gap: 10,
+      borderRadius: 28,
+      background: 'radial-gradient(circle at 50% 50%, #0E2920 0%, #050D0A 70%, #000 100%)',
+      boxShadow: '0 50px 100px -30px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.04)',
       position: 'relative',
       overflow: 'hidden',
     }}>
+      {/* Grain texture */}
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E")`,
-        opacity: 0.06, mixBlendMode: 'overlay', pointerEvents: 'none',
+        opacity: 0.08, mixBlendMode: 'overlay', pointerEvents: 'none',
       }} />
+
+      {/* Animated background wireframe */}
+      <svg viewBox="0 0 200 200" style={{
+        position: 'absolute', inset: 0, width: '100%', height: '100%',
+        pointerEvents: 'none',
+      }}>
+        {/* Dot grid suggesting depth */}
+        <defs>
+          <radialGradient id="lv2-core-glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"  stopColor="#34D399" stopOpacity="0.55" />
+            <stop offset="40%" stopColor="#10B981" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#000" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id="lv2-core-head" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"  stopColor="#A7F3D0" stopOpacity="1" />
+            <stop offset="40%" stopColor="#10B981" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="#064E3B" stopOpacity="0.4" />
+          </radialGradient>
+          <radialGradient id="lv2-eye-glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#ECFEFF" stopOpacity="1" />
+            <stop offset="100%" stopColor="#06B6D4" stopOpacity="0" />
+          </radialGradient>
+          <pattern id="lv2-grid" width="14" height="14" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.6" fill="rgba(255,255,255,0.06)" />
+          </pattern>
+        </defs>
+
+        {/* Dot grid background */}
+        <rect width="200" height="200" fill="url(#lv2-grid)" />
+
+        {/* Outer aura halo */}
+        <circle cx="100" cy="100" r="80" fill="url(#lv2-core-glow)" />
+
+        {/* Three concentric wireframe rings (rotating slowly) */}
+        <g style={{ transformOrigin: '100px 100px', animation: 'lv2-rotate 80s linear infinite' }}>
+          <circle cx="100" cy="100" r="55" fill="none" stroke="#34D399" strokeOpacity="0.18" strokeWidth="0.5" strokeDasharray="2,3" />
+        </g>
+        <g style={{ transformOrigin: '100px 100px', animation: 'lv2-rotate 60s linear infinite reverse' }}>
+          <circle cx="100" cy="100" r="45" fill="none" stroke="#7FCAA6" strokeOpacity="0.22" strokeWidth="0.5" />
+          <circle cx="100" cy="55" r="1.5" fill="#A7F3D0" />
+          <circle cx="55" cy="100" r="1.5" fill="#A7F3D0" />
+          <circle cx="145" cy="100" r="1.5" fill="#A7F3D0" />
+          <circle cx="100" cy="145" r="1.5" fill="#A7F3D0" />
+        </g>
+        <g style={{ transformOrigin: '100px 100px', animation: 'lv2-rotate 40s linear infinite' }}>
+          <circle cx="100" cy="100" r="35" fill="none" stroke="#A7F3D0" strokeOpacity="0.3" strokeWidth="0.6" strokeDasharray="0.8,3" />
+        </g>
+
+        {/* Beams from center to each vertical position (hexagon vertices) */}
+        {[-90, -30, 30, 90, 150, 210].map((deg, i) => {
+          const rad = (deg * Math.PI) / 180;
+          const x2 = 100 + Math.cos(rad) * 84;
+          const y2 = 100 + Math.sin(rad) * 84;
+          return (
+            <line
+              key={i}
+              x1="100" y1="100" x2={x2} y2={y2}
+              stroke="url(#lv2-core-glow)"
+              strokeWidth="0.7"
+              strokeOpacity="0.7"
+              style={{ animation: `lv2-pulse 3s ${i * 0.3}s ease-in-out infinite` }}
+            />
+          );
+        })}
+
+        {/* AI face core — abstract head silhouette */}
+        <g style={{ transformOrigin: '100px 100px', animation: 'lv2-core-pulse 4s ease-in-out infinite' }}>
+          {/* Head shape */}
+          <ellipse cx="100" cy="100" rx="22" ry="26" fill="url(#lv2-core-head)" />
+          {/* Brain lobes (subtle inner detail) */}
+          <path d="M 88 92 Q 100 80, 112 92 Q 100 96, 88 92 Z" fill="#064E3B" opacity="0.5" />
+          {/* Two glowing eye-slits */}
+          <ellipse cx="92"  cy="98" rx="3.5" ry="2" fill="url(#lv2-eye-glow)" />
+          <ellipse cx="108" cy="98" rx="3.5" ry="2" fill="url(#lv2-eye-glow)" />
+          {/* Mouth hint — thin horizontal */}
+          <line x1="94" y1="110" x2="106" y2="110" stroke="#A7F3D0" strokeWidth="0.8" strokeOpacity="0.6" strokeLinecap="round" />
+          {/* Status bar antenna on top */}
+          <line x1="100" y1="74" x2="100" y2="68" stroke="#34D399" strokeWidth="0.6" />
+          <circle cx="100" cy="66" r="1.4" fill="#A7F3D0" />
+        </g>
+      </svg>
+
+      {/* Vertical satellite cards in hexagonal orbit */}
       {verticals.map((v, i) => (
-        <div key={v.name} className="lv2-vert-tile" style={{
-          background: v.grad,
-          borderRadius: 16,
-          padding: 14,
+        <div key={v.name} className="lv2-sat" style={{
+          position: 'absolute',
+          top: v.pos.top, left: v.pos.left,
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(255,255,255,0.06)',
+          backdropFilter: 'blur(14px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(14px) saturate(160%)',
+          border: `1px solid ${v.glow}40`,
+          borderRadius: 14,
+          padding: '8px 14px 8px 10px',
           color: '#FFFFFF',
-          position: 'relative',
-          overflow: 'hidden',
-          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-          minHeight: 0,
-          animation: `lv2-tile-in 0.6s cubic-bezier(0.16,1,0.3,1) backwards`,
-          animationDelay: `${0.1 + i * 0.06}s`,
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          boxShadow: `0 8px 24px -6px ${v.glow}50, inset 0 0 0 1px rgba(255,255,255,0.04)`,
+          minWidth: 'fit-content', whiteSpace: 'nowrap',
+          animation: `lv2-sat-in 0.7s cubic-bezier(0.16,1,0.3,1) backwards, lv2-float 5s ease-in-out infinite`,
+          animationDelay: `${0.15 + i * 0.08}s, ${i * 0.4}s`,
+          zIndex: 2,
         }}>
           <div style={{
-            fontSize: 'clamp(28px, 3vw, 38px)', lineHeight: 1,
+            width: 28, height: 28, borderRadius: 8,
+            background: `linear-gradient(135deg, ${v.glow}, ${v.glow}cc)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 16,
+            boxShadow: `0 0 12px -2px ${v.glow}`,
           }}>
             {v.emoji}
           </div>
-          <div>
-            <div style={{
-              fontFamily: 'Fraunces, serif',
-              fontSize: 'clamp(16px, 2vw, 22px)', fontWeight: 700,
-              letterSpacing: '-0.02em', lineHeight: 1.05,
-            }}>
-              {v.name}
-            </div>
-            <div style={{
-              fontSize: 11, color: v.accent,
-              fontWeight: 600, letterSpacing: '0.02em',
-              marginTop: 4,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {v.sub}
-            </div>
+          <div style={{
+            fontFamily: 'Fraunces, serif',
+            fontSize: 13, fontWeight: 700,
+            letterSpacing: '-0.01em',
+          }}>
+            {v.name}
           </div>
         </div>
       ))}
+
+      {/* Floating "AI" status pill at top */}
+      <div style={{
+        position: 'absolute', top: 16, left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(0,0,0,0.35)',
+        backdropFilter: 'blur(14px)',
+        border: '1px solid rgba(167, 243, 208, 0.25)',
+        padding: '5px 12px', borderRadius: 100,
+        color: '#A7F3D0',
+        fontSize: 10, fontWeight: 700,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        fontFamily: "'JetBrains Mono', monospace",
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        zIndex: 3,
+      }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: '#34D399',
+          animation: 'lv2-blink 1.4s ease-in-out infinite',
+          boxShadow: '0 0 8px #34D399',
+        }} />
+        Orlode AI · Active
+      </div>
+
       <style>{`
-        @keyframes lv2-tile-in {
-          from { opacity: 0; transform: translateY(8px) scale(0.96); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
+        @keyframes lv2-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes lv2-core-pulse {
+          0%, 100% { transform: scale(1); filter: brightness(1); }
+          50%      { transform: scale(1.04); filter: brightness(1.15); }
         }
-        .lv2-vert-tile { transition: transform 0.3s ease; }
-        .lv2-vert-tile:hover { transform: translateY(-3px); }
+        @keyframes lv2-pulse {
+          0%, 100% { opacity: 0.25; }
+          50%      { opacity: 0.85; }
+        }
+        @keyframes lv2-sat-in {
+          from { opacity: 0; transform: translate(-50%, -30%) scale(0.7); }
+          to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+        @keyframes lv2-float {
+          0%, 100% { translate: 0 0; }
+          50%      { translate: 0 -6px; }
+        }
+        @keyframes lv2-blink {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.4; }
+        }
+        .lv2-sat { transition: transform 0.3s ease, box-shadow 0.3s ease; }
       `}</style>
     </div>
   );
