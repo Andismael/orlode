@@ -614,7 +614,8 @@ export default function LandingV2Page() {
           <div className="nav-links" style={{ display: 'flex', gap: 4 }}>
             <a href="#features" className="nav-link">{t('nav.products')}</a>
             <a href="#pricing" className="nav-link">{t('nav.pricing')}</a>
-            <a href="#testimonials" className="nav-link">{t('nav.testimonials')}</a>
+            <Link to="/talents" className="nav-link">Talents</Link>
+            <Link to="/influenceurs" className="nav-link">Influenceurs</Link>
             <Link to="/marketplace" className="nav-link">{t('nav.marketplace')}</Link>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -633,7 +634,7 @@ export default function LandingV2Page() {
               ))}
             </select>
             <Link to="/login" className="nav-link nav-links">{t('nav.login')}</Link>
-            <Link to="/signup" className="btn-primary nav-links" style={{ padding: '10px 18px', fontSize: 13 }}>
+            <Link to="/login" className="btn-primary nav-links" style={{ padding: '10px 18px', fontSize: 13 }}>
               {t('nav.cta')} <ArrowRight size={14} />
             </Link>
             {/* Mobile hamburger — only shown <=768px via .lv2-mobile-show */}
@@ -663,7 +664,8 @@ export default function LandingV2Page() {
           </div>
           <a onClick={() => setMobileMenu(false)} href="#features">{t('nav.products')}</a>
           <a onClick={() => setMobileMenu(false)} href="#pricing">{t('nav.pricing')}</a>
-          <a onClick={() => setMobileMenu(false)} href="#testimonials">{t('nav.testimonials')}</a>
+          <Link onClick={() => setMobileMenu(false)} to="/talents">Talents</Link>
+          <Link onClick={() => setMobileMenu(false)} to="/influenceurs">Influenceurs</Link>
           <Link onClick={() => setMobileMenu(false)} to="/marketplace">{t('nav.marketplace')}</Link>
           <Link onClick={() => setMobileMenu(false)} to="/login">{t('nav.login')}</Link>
           <div style={{ marginTop: 20 }}>
@@ -677,7 +679,7 @@ export default function LandingV2Page() {
               ))}
             </select>
           </div>
-          <Link onClick={() => setMobileMenu(false)} to="/signup" className="btn-primary" style={{ marginTop: 16, justifyContent: 'center', fontSize: 15 }}>
+          <Link onClick={() => setMobileMenu(false)} to="/login" className="btn-primary" style={{ marginTop: 16, justifyContent: 'center', fontSize: 15 }}>
             {t('nav.cta')} <ArrowRight size={16} />
           </Link>
         </div>
@@ -698,7 +700,7 @@ export default function LandingV2Page() {
                 {t('hero.lead')}
               </p>
               <div style={{ display: 'flex', gap: 12, marginTop: 32, flexWrap: 'wrap' }}>
-                <Link to="/signup" className="btn-primary">
+                <Link to="/login" className="btn-primary">
                   {t('hero.cta.primary')} <ArrowRight size={16} />
                 </Link>
                 <Link to="/marketplace" className="btn-secondary">
@@ -1029,6 +1031,130 @@ export default function LandingV2Page() {
         `}</style>
       </section>
 
+      {/* ── MARKETPLACES (Talents + Influenceurs) ───────────────────────── */}
+      <section style={{ padding: '100px 0', background: C.ink, color: C.cream, position: 'relative', overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: `radial-gradient(ellipse at 30% 20%, #0F5C3F40, transparent 55%), radial-gradient(ellipse at 75% 80%, #6366F140, transparent 55%)`,
+          pointerEvents: 'none',
+        }} />
+        <div className="container" style={{ position: 'relative', zIndex: 2 }}>
+          <div style={{ textAlign: 'center', maxWidth: 720, margin: '0 auto 60px' }}>
+            <span className="pill" style={{
+              background: 'rgba(212, 165, 116, 0.12)',
+              color: '#E8C9A0',
+              border: '1px solid #D4A57440',
+            }}>
+              <Sparkles size={12} /> Orlode Marketplaces · Global
+            </span>
+            <h2 className="display h2" style={{ marginTop: 16, color: C.cream }}>
+              Au-delà des agents IA. <em style={{ fontStyle: 'italic', color: '#E8C9A0' }}>Une marketplace humaine.</em>
+            </h2>
+            <p className="lead" style={{ color: 'rgba(255,255,255,0.78)', marginTop: 12 }}>
+              Recrute du talent en vidéo ou collabore avec des créateurs vérifiés. Sans intermédiaire, contact WhatsApp direct.
+            </p>
+          </div>
+
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20,
+            maxWidth: 1080, margin: '0 auto',
+          }} className="mp-grid">
+            {[
+              {
+                to: '/talents',
+                badge: 'GLOBAL · 20+ pays',
+                title: 'Orlode Talents',
+                em: 'Recrute en vidéo.',
+                desc: '1 minute pour montrer qui tu es. Les entreprises te trouvent par ce que tu sais vraiment faire — pas par ton CV.',
+                cta: 'Explorer le feed',
+                bullets: ['Vidéo brute 1 min', 'Contact WhatsApp direct', 'Pas de commission'],
+                grad: 'linear-gradient(155deg, #0F5C3F 0%, #063322 70%, #D4A574 100%)',
+                accent: '#7FCAA6',
+              },
+              {
+                to: '/influenceurs',
+                badge: 'GLOBAL · Bêta',
+                title: 'Orlode Influenceurs',
+                em: 'Marques ↔ créateurs.',
+                desc: 'Les marques cliquent sur tes liens publics, vérifient elles-mêmes ton audience. Tu négocies les briefs sans agence.',
+                cta: 'Voir l\'annuaire',
+                bullets: ['Profils vérifiés humainement', 'Briefs WhatsApp direct', '0 % de commission'],
+                grad: 'linear-gradient(155deg, #6366F1 0%, #4F46E5 70%, #D4A574 100%)',
+                accent: '#A5B4FC',
+              },
+            ].map(m => (
+              <Link key={m.to} to={m.to} style={{
+                display: 'block',
+                background: m.grad,
+                borderRadius: 24,
+                padding: 32,
+                color: C.cream,
+                textDecoration: 'none',
+                position: 'relative',
+                overflow: 'hidden',
+                boxShadow: '0 20px 50px -15px rgba(0,0,0,0.4)',
+                transition: 'transform 0.25s ease, box-shadow 0.25s ease',
+              }} className="mp-card">
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                  color: m.accent, marginBottom: 16,
+                  textTransform: 'uppercase',
+                }}>
+                  {m.badge}
+                </div>
+                <h3 className="display" style={{
+                  fontSize: 'clamp(28px, 3.5vw, 38px)', fontWeight: 800,
+                  letterSpacing: '-0.025em', lineHeight: 1.05,
+                  margin: '0 0 8px', color: C.cream,
+                }}>
+                  {m.title}
+                </h3>
+                <div className="display" style={{
+                  fontSize: 'clamp(20px, 2.5vw, 26px)', fontWeight: 600,
+                  fontStyle: 'italic', color: m.accent,
+                  margin: '0 0 18px',
+                }}>
+                  {m.em}
+                </div>
+                <p style={{
+                  fontSize: 15, color: 'rgba(255,255,255,0.85)',
+                  lineHeight: 1.6, margin: '0 0 22px',
+                }}>
+                  {m.desc}
+                </p>
+                <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 24px' }}>
+                  {m.bullets.map(b => (
+                    <li key={b} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      fontSize: 13, color: 'rgba(255,255,255,0.9)',
+                      padding: '6px 0',
+                    }}>
+                      <Check size={14} color={m.accent} />
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  background: 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  backdropFilter: 'blur(20px)',
+                  padding: '10px 18px', borderRadius: 100,
+                  fontSize: 14, fontWeight: 600, color: C.cream,
+                }}>
+                  {m.cta} <ArrowRight size={14} />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+        <style>{`
+          .lv2 .mp-card:hover { transform: translateY(-4px); box-shadow: 0 30px 60px -15px rgba(0,0,0,0.5); }
+          @media (max-width: 900px) { .lv2 .mp-grid { grid-template-columns: 1fr !important; } }
+        `}</style>
+      </section>
+
       {/* ── PRICING ──────────────────────────────────────────────────────── */}
       <section id="pricing" style={{ padding: '100px 0', background: C.creamDeep }}>
         <div className="container">
@@ -1154,7 +1280,7 @@ export default function LandingV2Page() {
                 {t('cta.lead')}
               </p>
               <div style={{ display: 'flex', gap: 12, marginTop: 28, flexWrap: 'wrap' }}>
-                <Link to="/signup" className="btn-primary" style={{ background: C.cream, color: C.ink }}>
+                <Link to="/login" className="btn-primary" style={{ background: C.cream, color: C.ink }}>
                   {t('cta.primary')} <ArrowRight size={16} />
                 </Link>
                 <Link to="/marketplace" className="btn-secondary" style={{ borderColor: 'rgba(255,250,240,0.3)', color: C.cream }}>
