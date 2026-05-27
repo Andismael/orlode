@@ -367,9 +367,11 @@ export default function App() {
     );
   }
 
-  /** "/" → Show the new About-style landing (BYOE positioning, $20/pack, DemoReel). */
+  /** "/" → LandingV2 (premium Notion/AT&T-style hero with verticals mosaic).
+   *  Kept /about → AboutPage and /v2 → LandingV2Page for the side-by-side
+   *  evaluation done earlier; the root just defaults to V2 now. */
   function RootRedirect() {
-    return <AboutPage />;
+    return <LandingV2Page />;
   }
 
   return (
