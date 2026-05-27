@@ -25,8 +25,9 @@ import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight, Check, Sparkles, Bot, MessageSquare, BarChart3,
-  Headphones, Shield, Users, Zap, Globe, Star, ChevronRight, PlayCircle,
+  Headphones, Shield, Users, Zap, Globe, Star, ChevronRight, ChevronDown, PlayCircle,
   Twitter, Linkedin, Youtube, Facebook, Instagram, Github, Menu, X as XIcon,
+  Mail,
 } from 'lucide-react';
 import { useLangStore, LANGUAGES, type LangCode } from '@/store/langStore';
 
@@ -668,6 +669,9 @@ export default function LandingV2Page() {
             <Link to="/talents" className="nav-link">Talents</Link>
             <Link to="/influenceurs" className="nav-link">Influenceurs</Link>
             <Link to="/marketplace" className="nav-link">{t('nav.marketplace')}</Link>
+            <a href="#faq" className="nav-link">FAQ</a>
+            <a href="#contact" className="nav-link">Contact</a>
+            <Link to="/about" className="nav-link">À propos</Link>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {/* Language picker — hidden on mobile (lives in the menu instead) */}
@@ -718,6 +722,9 @@ export default function LandingV2Page() {
           <Link onClick={() => setMobileMenu(false)} to="/talents">Talents</Link>
           <Link onClick={() => setMobileMenu(false)} to="/influenceurs">Influenceurs</Link>
           <Link onClick={() => setMobileMenu(false)} to="/marketplace">{t('nav.marketplace')}</Link>
+          <a onClick={() => setMobileMenu(false)} href="#faq">FAQ</a>
+          <a onClick={() => setMobileMenu(false)} href="#contact">Contact</a>
+          <Link onClick={() => setMobileMenu(false)} to="/about">À propos</Link>
           <Link onClick={() => setMobileMenu(false)} to="/login">{t('nav.login')}</Link>
           <div style={{ marginTop: 20 }}>
             <select
@@ -1303,6 +1310,12 @@ export default function LandingV2Page() {
         </div>
       </section>
 
+      {/* ── FAQ ──────────────────────────────────────────────────────────── */}
+      <FAQSection />
+
+      {/* ── CONTACT ─────────────────────────────────────────────────────── */}
+      <ContactSection />
+
       {/* ── BIG CTA ──────────────────────────────────────────────────────── */}
       <section style={{ padding: '0 0 100px' }}>
         <div className="container">
@@ -1658,5 +1671,218 @@ function VerticalsMosaic() {
         .lv2-sat { transition: transform 0.3s ease, box-shadow 0.3s ease; }
       `}</style>
     </div>
+  );
+}
+
+// ── FAQ section ───────────────────────────────────────────────────────────
+function FAQSection() {
+  const [openIdx, setOpenIdx] = React.useState<number | null>(0);
+  const faqs = [
+    {
+      q: 'Combien de temps pour démarrer ?',
+      a: 'En moins de 5 minutes. Tu crées un compte, choisis ton pack ($20/mois), connectes WhatsApp Business (ou utilise notre numéro plateforme), et tes agents IA sont actifs. Pas de carte bancaire pour le plan gratuit.',
+    },
+    {
+      q: 'Quelle différence avec ChatGPT ou un simple chatbot ?',
+      a: 'Orlode n\'est pas UN bot — c\'est une équipe de 30 agents spécialisés (ventes, comms, RH, compta, sécurité…) qui travaillent ensemble, connectés à TES données, TES canaux (WhatsApp, email, Telegram), et capables d\'exécuter des actions (envoyer un devis, créer un RDV, relancer un client) — pas juste répondre.',
+    },
+    {
+      q: 'Mes données sont-elles privées ?',
+      a: 'Chaque entreprise a son espace isolé en Firestore. Tes documents, conversations, et configurations IA ne sont JAMAIS partagés avec une autre entreprise. Hébergement Google Cloud (Europe / US selon ton choix). RGPD-ready.',
+    },
+    {
+      q: 'Puis-je connecter mes outils existants ?',
+      a: 'Oui — WhatsApp Business, Telegram, Gmail, Google Calendar, Google Drive, Slack, Stripe, PayPal, Wave, et plus. Le connecteur Drive permet d\'importer ton catalogue produits, contrats et procédures pour nourrir l\'IA.',
+    },
+    {
+      q: 'Que se passe-t-il si je dépasse mon quota ?',
+      a: 'Tu reçois une alerte avant. Tu peux soit augmenter ton pack soit ajouter ta propre clé OpenAI/Anthropic (BYOK) pour facturer tes consommations à ton compte AI Provider direct.',
+    },
+    {
+      q: 'Est-ce que ça marche en français / africain ?',
+      a: 'Oui — Orlode est nativement multilingue (50+ langues dont français, wolof, dioula, baoulé, lingala, swahili, arabe). Tes clients t\'écrivent dans leur langue, l\'agent répond dans la leur.',
+    },
+  ];
+
+  return (
+    <section id="faq" style={{ padding: '100px 0', background: '#FAFAFA' }}>
+      <div className="container">
+        <div style={{ textAlign: 'center', maxWidth: 680, margin: '0 auto 50px' }}>
+          <span className="pill" style={{ background: '#F0F0F0', color: '#333' }}>
+            <Sparkles size={12} /> FAQ
+          </span>
+          <h2 className="display h2" style={{ marginTop: 16 }}>
+            Les <em>questions</em> qu'on nous pose le plus
+          </h2>
+          <p className="lead" style={{ marginTop: 12 }}>
+            Tu n'as pas trouvé ta réponse ? Écris-nous via la section Contact ci-dessous.
+          </p>
+        </div>
+
+        <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {faqs.map((f, i) => {
+            const open = openIdx === i;
+            return (
+              <div key={i} style={{
+                background: '#FFFFFF',
+                border: '1px solid rgba(0,0,0,0.06)',
+                borderRadius: 14,
+                overflow: 'hidden',
+                transition: 'box-shadow 0.2s ease',
+                boxShadow: open ? '0 12px 30px -10px rgba(0,0,0,0.1)' : 'none',
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setOpenIdx(open ? null : i)}
+                  style={{
+                    width: '100%', textAlign: 'left',
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    padding: '18px 22px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 12, fontFamily: 'inherit',
+                  }}>
+                  <span style={{
+                    fontFamily: 'Fraunces, serif',
+                    fontSize: 16, fontWeight: 700,
+                    color: '#0A2A20', letterSpacing: '-0.01em',
+                  }}>
+                    {f.q}
+                  </span>
+                  <ChevronDown size={18} style={{
+                    color: '#5A6B62',
+                    transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.25s ease',
+                    flexShrink: 0,
+                  }} />
+                </button>
+                {open && (
+                  <div style={{
+                    padding: '0 22px 20px',
+                    fontSize: 14, color: '#5A6B62', lineHeight: 1.65,
+                  }}>
+                    {f.a}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Contact section ───────────────────────────────────────────────────────
+function ContactSection() {
+  return (
+    <section id="contact" style={{ padding: '100px 0', background: '#FFFFFF' }}>
+      <div className="container">
+        <div style={{
+          maxWidth: 960, margin: '0 auto',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 28,
+          alignItems: 'center',
+        }}>
+          <div>
+            <span className="pill" style={{ background: '#F0F0F0', color: '#333' }}>
+              <MessageSquare size={12} /> Contact
+            </span>
+            <h2 className="display h2" style={{ marginTop: 16 }}>
+              On répond <em>en moins de 24h</em>.
+            </h2>
+            <p className="lead" style={{ marginTop: 12 }}>
+              Démos sur mesure, intégrations spécifiques, ou question technique — écris-nous.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <a href="mailto:hello@orlode.com" style={{
+              background: '#FAFAFA',
+              border: '1px solid rgba(0,0,0,0.06)',
+              borderRadius: 14, padding: '16px 18px',
+              display: 'flex', alignItems: 'center', gap: 14,
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+            }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: '#0F5C3F', color: '#FFFFFF',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <Mail size={20} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: '#5A6B62', fontWeight: 600 }}>Email</div>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 14, color: '#0A2A20', fontWeight: 700,
+                  marginTop: 2,
+                }}>
+                  hello@orlode.com
+                </div>
+              </div>
+            </a>
+
+            <a href="https://wa.me/2250700000000?text=Bonjour%20Orlode%2C%20j%27ai%20une%20question." target="_blank" rel="noopener noreferrer" style={{
+              background: '#FAFAFA',
+              border: '1px solid rgba(0,0,0,0.06)',
+              borderRadius: 14, padding: '16px 18px',
+              display: 'flex', alignItems: 'center', gap: 14,
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+            }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: '#25D366', color: '#FFFFFF',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <MessageSquare size={20} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: '#5A6B62', fontWeight: 600 }}>WhatsApp Business</div>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 14, color: '#0A2A20', fontWeight: 700,
+                  marginTop: 2,
+                }}>
+                  Discute avec un humain
+                </div>
+              </div>
+            </a>
+
+            <Link to="/marketplace" style={{
+              background: 'linear-gradient(135deg, #0F5C3F, #063322)',
+              border: 'none', color: '#FFFFFF',
+              borderRadius: 14, padding: '16px 18px',
+              display: 'flex', alignItems: 'center', gap: 14,
+              textDecoration: 'none',
+              boxShadow: '0 12px 28px -8px rgba(15,92,63,0.5)',
+            }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: 'rgba(255,255,255,0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <Sparkles size={20} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', fontWeight: 600 }}>
+                  Pas de question ? Direct au marketplace
+                </div>
+                <div style={{
+                  fontFamily: 'Fraunces, serif',
+                  fontSize: 16, fontWeight: 700,
+                  marginTop: 2, letterSpacing: '-0.01em',
+                }}>
+                  Voir les agents disponibles →
+                </div>
+              </div>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
