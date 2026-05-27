@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { PublicTagline, PublicSocials, PublicContactBar } from '@/components/public/PublicBranding';
 import { PublicLangSwitcher } from '@/components/public/PublicLangSwitcher';
+import PerCompanyPWAHead from '@/components/common/PerCompanyPWAHead';
 
 const C = {
   purple:      '#7C3AED',
@@ -133,6 +134,15 @@ export default function PublicRealEstatePage() {
   return (
     <div style={{ background: '#1a0f2e', minHeight: '100vh', fontFamily: "'Inter', sans-serif", color: C.ink }}>
       <style>{STYLES}</style>
+
+      {data?.store && (
+        <PerCompanyPWAHead
+          companyId={data.store.id}
+          companyName={data.store.name}
+          logoUrl={data.store.logoUrl ?? undefined}
+          primaryColor={data.store.accentColor ?? undefined}
+        />
+      )}
 
       <div className="grain" style={{
         background: data?.store.coverImageUrl

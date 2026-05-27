@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { PublicTagline, PublicSocials, PublicContactBar } from '@/components/public/PublicBranding';
 import { PublicLangSwitcher } from '@/components/public/PublicLangSwitcher';
+import PerCompanyPWAHead from '@/components/common/PerCompanyPWAHead';
 
 const C = {
   pink:        '#EC4899',
@@ -148,6 +149,15 @@ export default function PublicSalonPage() {
   return (
     <div style={{ background: '#1a0824', minHeight: '100vh', fontFamily: "'Inter', sans-serif", color: C.ink }}>
       <style>{STYLES}</style>
+
+      {data?.store && (
+        <PerCompanyPWAHead
+          companyId={data.store.companyId || data.store.id}
+          companyName={data.store.name}
+          logoUrl={data.store.logoUrl ?? undefined}
+          primaryColor={data.store.accentColor ?? undefined}
+        />
+      )}
 
       <div className="grain" style={{
         background: data?.store.coverImageUrl

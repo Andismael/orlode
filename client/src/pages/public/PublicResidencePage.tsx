@@ -11,6 +11,7 @@ import {
 import PhotoCarousel from '@/components/store/PhotoCarousel';
 import { PublicTagline, PublicSocials, PublicContactBar } from '@/components/public/PublicBranding';
 import { PublicLangSwitcher } from '@/components/public/PublicLangSwitcher';
+import PerCompanyPWAHead from '@/components/common/PerCompanyPWAHead';
 
 const C = {
   rose: '#F43F5E', roseDeep: '#9F1239', cream: '#FFFAF0', creamDeep: '#F5EDD6',
@@ -110,6 +111,12 @@ export default function PublicResidencePage() {
 
   return (
     <div style={{ background: '#1a0a0e', minHeight: '100vh', fontFamily: "'Inter', sans-serif", color: C.ink }}>
+      <PerCompanyPWAHead
+        companyId={r.companyId || r.id}
+        companyName={r.name}
+        logoUrl={r.logoUrl ?? undefined}
+        primaryColor={accent}
+      />
       {/* Hero */}
       <div style={{
         position: 'relative',

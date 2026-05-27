@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { PublicTagline, PublicSocials, PublicContactBar } from '@/components/public/PublicBranding';
 import { PublicLangSwitcher } from '@/components/public/PublicLangSwitcher';
+import PerCompanyPWAHead from '@/components/common/PerCompanyPWAHead';
 
 const C = {
   blue:        '#0EA5E9',
@@ -150,6 +151,15 @@ export default function PublicHotelPage() {
   return (
     <div style={{ background: '#0A1628', minHeight: '100vh', fontFamily: "'Inter', sans-serif", color: C.ink }}>
       <style>{STYLES}</style>
+
+      {store && (
+        <PerCompanyPWAHead
+          companyId={store.id}
+          companyName={store.name}
+          logoUrl={store.logoUrl ?? undefined}
+          primaryColor={store.accentColor ?? undefined}
+        />
+      )}
 
       {/* Hero */}
       <div className="grain" style={{

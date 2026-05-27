@@ -18,6 +18,7 @@ import PhotoCarousel from '@/components/store/PhotoCarousel';
 import { PublicTagline, PublicSocials, PublicContactBar } from '@/components/public/PublicBranding';
 import { PublicLangSwitcher } from '@/components/public/PublicLangSwitcher';
 import { isStoreOpenNowClient } from '@/lib/restaurant/openingHours';
+import PerCompanyPWAHead from '@/components/common/PerCompanyPWAHead';
 
 const C = {
   orange:      '#F97316',
@@ -201,6 +202,15 @@ export default function PublicMenuPage() {
   return (
     <div style={{ background: '#1a0a05', minHeight: '100vh', fontFamily: "'Inter', sans-serif", color: C.ink }}>
       <style>{STYLES}</style>
+
+      {data?.store && (
+        <PerCompanyPWAHead
+          companyId={data.store.id}
+          companyName={data.store.name}
+          logoUrl={data.store.logoUrl ?? undefined}
+          primaryColor={data.store.accentColor ?? undefined}
+        />
+      )}
 
       {/* Hero */}
       <div className="grain" style={{

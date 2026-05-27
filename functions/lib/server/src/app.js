@@ -108,6 +108,7 @@ const cloneAnalytics_routes_1 = __importDefault(require("./routes/cloneAnalytics
 const myStatus_routes_1 = __importDefault(require("./routes/myStatus.routes"));
 const talents_routes_1 = __importDefault(require("./routes/talents.routes"));
 const influencers_routes_1 = __importDefault(require("./routes/influencers.routes"));
+const manifest_routes_1 = __importDefault(require("./routes/manifest.routes"));
 const azure_routes_1 = __importDefault(require("./routes/azure.routes"));
 const msOauth_routes_1 = __importDefault(require("./routes/msOauth.routes"));
 const datascientist_routes_1 = __importDefault(require("./routes/datascientist.routes"));
@@ -216,6 +217,7 @@ app.use('/api/clone-analytics', cloneAnalytics_routes_1.default);
 app.use('/api/my-status', myStatus_routes_1.default);
 app.use('/api/talents', talents_routes_1.default);
 app.use('/api/influencers', influencers_routes_1.default);
+app.use('/api/manifest', manifest_routes_1.default);
 app.use('/api/azure', azure_routes_1.default);
 app.use('/api/ms-oauth', msOauth_routes_1.default);
 app.use('/api/datascientist', datascientist_routes_1.default);

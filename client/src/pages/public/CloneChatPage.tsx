@@ -8,6 +8,7 @@ import { useParams } from 'react-router-dom';
 import { Send, Loader2, MessageSquare, X, Sparkles, Mic, MicOff, Volume2 } from 'lucide-react';
 import axios from 'axios';
 import { CloneAvatarLight, type AvatarState } from '@/components/clone/CloneAvatar';
+import PerCompanyPWAHead from '@/components/common/PerCompanyPWAHead';
 
 // Use raw axios for public pages — no auth interceptor
 const publicApi = axios.create({ baseURL: '/api', timeout: 30000, headers: { 'Content-Type': 'application/json' } });
@@ -267,6 +268,12 @@ export default function CloneChatPage() {
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-hidden" style={{ background: '#0d2520' }}>
+      <PerCompanyPWAHead
+        companyId={companyId!}
+        companyName={info.company || info.name}
+        logoUrl={info.logoUrl}
+        primaryColor={primary}
+      />
       {/* Cosmic background with company watermark */}
       <div className="absolute inset-0 pointer-events-none"
         style={{ background: 'linear-gradient(135deg, #2d5a3d 0%, #1f4530 30%, #15352a 60%, #0d2520 100%)' }} />

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { PublicTagline, PublicSocials, PublicContactBar } from '@/components/public/PublicBranding';
 import { PublicLangSwitcher } from '@/components/public/PublicLangSwitcher';
+import PerCompanyPWAHead from '@/components/common/PerCompanyPWAHead';
 
 const C = {
   greenDeep:   '#0A3D2E',    // premium dark green (matches Wemas hero)
@@ -329,6 +330,15 @@ export default function PublicShopPage() {
   return (
     <div style={{ background: C.greenDeep, minHeight: '100vh', fontFamily: "'Inter', sans-serif", color: C.ink }}>
       <style>{STYLES}</style>
+
+      {data?.store && (
+        <PerCompanyPWAHead
+          companyId={data.store.id}
+          companyName={data.store.name}
+          logoUrl={data.store.logoUrl ?? undefined}
+          primaryColor={data.store.accentColor ?? undefined}
+        />
+      )}
 
       {/* TOP NAV — premium dark-green ribbon */}
       <div style={{
