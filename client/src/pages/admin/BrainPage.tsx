@@ -186,8 +186,15 @@ export default function BrainPage() {
     try {
       const payload = {
         name: identity.name, website: identity.website, sector: identity.sector,
+        slogan: identity.slogan, description: identity.description, size: identity.size,
         address: identity.address, city: identity.city, country: identity.country,
-        phone: identity.phone, email: identity.email, taxId: identity.taxId,
+        postalCode: identity.postalCode,
+        phone: identity.phone, whatsapp: identity.whatsapp,
+        email: identity.email, taxId: identity.taxId,
+        // Social — also persisted from this single Brain form (absorbed
+        // from the legacy /admin CompanySettingsPage which is now a redirect).
+        linkedin: identity.linkedin, instagram: identity.instagram,
+        facebook: identity.facebook, twitter: identity.twitter,
         // PWA personalization — manifest at /api/manifest/:companyId reads
         // pwaLogoUrl (preferred) → logoUrl → Orlode default, and primaryColor
         // → theme_color.
@@ -388,11 +395,66 @@ export default function BrainPage() {
               <Field label="Téléphone">
                 <input className="input" value={identity.phone ?? ''} onChange={e => setIdentity({ ...identity, phone: e.target.value })} placeholder="+225 XX XX XX XX" />
               </Field>
+              <Field label="WhatsApp Business">
+                <input className="input" value={identity.whatsapp ?? ''} onChange={e => setIdentity({ ...identity, whatsapp: e.target.value })} placeholder="+225 XX XX XX XX" />
+              </Field>
               <Field label="Email">
                 <input className="input" type="email" value={identity.email ?? ''} onChange={e => setIdentity({ ...identity, email: e.target.value })} placeholder="contact@..." />
               </Field>
               <Field label="Adresse">
                 <input className="input" value={identity.address ?? ''} onChange={e => setIdentity({ ...identity, address: e.target.value })} placeholder="Rue, quartier, ville" />
+              </Field>
+              <Field label="Ville">
+                <input className="input" value={identity.city ?? ''} onChange={e => setIdentity({ ...identity, city: e.target.value })} placeholder="Abidjan" />
+              </Field>
+              <Field label="Code postal">
+                <input className="input" value={identity.postalCode ?? ''} onChange={e => setIdentity({ ...identity, postalCode: e.target.value })} placeholder="00225" />
+              </Field>
+              <Field label="Pays">
+                <input className="input" value={identity.country ?? ''} onChange={e => setIdentity({ ...identity, country: e.target.value })} placeholder="Côte d'Ivoire" />
+              </Field>
+              <Field label="Slogan (catchphrase courte)">
+                <input className="input" value={identity.slogan ?? ''} onChange={e => setIdentity({ ...identity, slogan: e.target.value })} placeholder='Ex: "L\'IA qui parle ta langue."' />
+              </Field>
+              <Field label="Taille de l'équipe">
+                <select className="input" value={identity.size ?? ''} onChange={e => setIdentity({ ...identity, size: e.target.value })}>
+                  <option value="">— Choisis —</option>
+                  <option value="1-10">1-10 personnes</option>
+                  <option value="11-50">11-50</option>
+                  <option value="51-200">51-200</option>
+                  <option value="201-500">201-500</option>
+                  <option value="500+">500+</option>
+                </select>
+              </Field>
+            </div>
+
+            {/* Description longue + réseaux sociaux — anciennement dans
+                /admin (CompanySettingsPage). On centralise ici. */}
+            <div style={{ marginTop: 18 }}>
+              <Field label="Description (paragraphe qui explique ce que tu fais)">
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={identity.description ?? ''}
+                  onChange={e => setIdentity({ ...identity, description: e.target.value })}
+                  placeholder="Cabinet d'avocats spécialisé en droit des affaires. Conseil aux PME et grandes entreprises…"
+                  style={{ resize: 'vertical', minHeight: 72, fontFamily: 'inherit' }}
+                />
+              </Field>
+            </div>
+
+            <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              <Field label="LinkedIn">
+                <input className="input" value={identity.linkedin ?? ''} onChange={e => setIdentity({ ...identity, linkedin: e.target.value })} placeholder="https://linkedin.com/company/…" />
+              </Field>
+              <Field label="Instagram">
+                <input className="input" value={identity.instagram ?? ''} onChange={e => setIdentity({ ...identity, instagram: e.target.value })} placeholder="https://instagram.com/…" />
+              </Field>
+              <Field label="Facebook">
+                <input className="input" value={identity.facebook ?? ''} onChange={e => setIdentity({ ...identity, facebook: e.target.value })} placeholder="https://facebook.com/…" />
+              </Field>
+              <Field label="X / Twitter">
+                <input className="input" value={identity.twitter ?? ''} onChange={e => setIdentity({ ...identity, twitter: e.target.value })} placeholder="https://x.com/…" />
               </Field>
             </div>
 

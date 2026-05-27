@@ -699,7 +699,9 @@ export default function App() {
         {/* ── Admin ──────────────────────────────────────────────────── */}
         <Route element={<AuthGuard requireCompany requireRole={['admin', 'manager']} />}>
           <Route element={<AdminLayout />}>
-            <Route path="admin" element={<CompanySettingsPage />} />
+            {/* Legacy CompanySettings page absorbed into BrainPage.
+                Redirect /admin → /admin/brain so old bookmarks still work. */}
+            <Route path="admin" element={<Navigate to="/admin/brain" replace />} />
             <Route path="admin/users" element={<UserManagementPage />} />
             <Route path="admin/users/invite" element={<InviteUserPage />} />
             <Route path="admin/roles" element={<RolesPermissionsPage />} />

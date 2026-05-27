@@ -360,7 +360,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
       <nav className="flex-1 px-3 py-3 overflow-y-auto no-scrollbar space-y-1">
         {/* Admin link */}
         {(user?.role === 'admin' || user?.role === 'manager') && (
-          <NavLink to="/admin" onClick={onCloseMobile}
+          <NavLink to="/admin/brain" onClick={onCloseMobile}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 ${isActive('/admin') ? '' : 'hover:bg-white/10'}`}
             style={isActive('/admin') ? { background: 'linear-gradient(135deg, #10B981, #0A4F3C)' } : {}}>
             <Shield size={18} className="flex-shrink-0 text-white" />
