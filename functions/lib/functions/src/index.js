@@ -115,6 +115,10 @@ const datascientist_routes_1 = __importDefault(require("../../server/src/routes/
 const messaging_routes_1 = __importDefault(require("../../server/src/routes/messaging.routes"));
 const telegram_routes_1 = __importDefault(require("../../server/src/routes/telegram.routes"));
 const socialAi_routes_1 = __importDefault(require("../../server/src/routes/socialAi.routes"));
+const talents_routes_1 = __importDefault(require("../../server/src/routes/talents.routes"));
+const influencers_routes_1 = __importDefault(require("../../server/src/routes/influencers.routes"));
+const manifest_routes_1 = __importDefault(require("../../server/src/routes/manifest.routes"));
+const business_routes_1 = __importDefault(require("../../server/src/routes/business.routes"));
 // Genkit flows
 require("../../server/src/genkit");
 // Initialize Firebase
@@ -213,6 +217,10 @@ app.use('/api/datascientist', datascientist_routes_1.default);
 app.use('/api/messaging', messaging_routes_1.default);
 app.use('/api/telegram', telegram_routes_1.default);
 app.use('/api/social-ai', socialAi_routes_1.default);
+app.use('/api/talents', talents_routes_1.default);
+app.use('/api/influencers', influencers_routes_1.default);
+app.use('/api/manifest', manifest_routes_1.default);
+app.use('/api/business', business_routes_1.default);
 app.use(error_middleware_1.notFoundMiddleware);
 app.use(error_middleware_1.errorMiddleware);
 // Export as Firebase Cloud Function (2nd gen) — public access

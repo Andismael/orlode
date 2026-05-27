@@ -722,19 +722,9 @@ export default function LandingV2Page() {
             </div>
             <div className="fade-in" style={{ animationDelay: '0.15s' }}>
               <div style={{ position: 'relative' }}>
-                <img
-                  src={IMG.hero}
-                  alt="Orlode — Orchestrate careers, create impact"
-                  style={{
-                    width: '100%',
-                    aspectRatio: '1/1',
-                    objectFit: 'cover',
-                    objectPosition: 'center',
-                    borderRadius: 24,
-                    background: '#0a0a0a',
-                    boxShadow: `0 50px 100px -30px ${C.ink}50`,
-                  }}
-                />
+                <VerticalsMosaic />
+                {/* Hidden fallback img kept for OG / accessibility */}
+                <img src={IMG.hero} alt="" style={{ display: 'none' }} />
                 {/* Floating badge bottom-left */}
                 <div className="lv2-hero-badge-bl" style={{ position: 'absolute', bottom: -20, left: -20, background: C.cream, borderRadius: 16, padding: '14px 18px', boxShadow: `0 20px 40px -10px ${C.ink}30`, border: `1px solid ${C.ink}08`, display: 'flex', alignItems: 'center', gap: 10, zIndex: 2 }}>
                   <div style={{ width: 36, height: 36, borderRadius: 10, background: `${C.emerald}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1410,6 +1400,90 @@ export default function LandingV2Page() {
           </div>
         </div>
       </footer>
+    </div>
+  );
+}
+
+// ── Hero verticals mosaic ────────────────────────────────────────────────
+// Replaces the single hero photo with a 3×2 grid of Orlode's verticals
+// (Restaurant, Hôtel, Boutique, PME, Salon, Cabinet). Visually shows
+// "voilà ce qu'Orlode fait" instantly — every customer recognizes at least
+// one of these.
+function VerticalsMosaic() {
+  const verticals = [
+    { emoji: '🛒', name: 'Boutique',   sub: 'Vente en ligne',     grad: 'linear-gradient(155deg, #0F5C3F, #063322)',  accent: '#7FCAA6' },
+    { emoji: '🍽️', name: 'Restaurant', sub: 'Menu + réservation', grad: 'linear-gradient(155deg, #C2410C, #7C2D12)',  accent: '#FED7AA' },
+    { emoji: '🏨', name: 'Hôtel',      sub: 'Chambres + booking', grad: 'linear-gradient(155deg, #0369A1, #075985)',  accent: '#BAE6FD' },
+    { emoji: '💼', name: 'PME',        sub: 'Tout-en-un IA',      grad: 'linear-gradient(155deg, #4F46E5, #3730A3)',  accent: '#A5B4FC' },
+    { emoji: '💇', name: 'Salon',      sub: 'RDV beauté',         grad: 'linear-gradient(155deg, #BE185D, #831843)',  accent: '#F9A8D4' },
+    { emoji: '🩺', name: 'Cabinet',    sub: 'Santé · juridique',  grad: 'linear-gradient(155deg, #0F766E, #134E4A)',  accent: '#5EEAD4' },
+  ];
+
+  return (
+    <div style={{
+      width: '100%',
+      aspectRatio: '1/1',
+      borderRadius: 24,
+      padding: 14,
+      background: 'linear-gradient(135deg, #0A0F0D, #1A2A22)',
+      boxShadow: '0 50px 100px -30px rgba(10,42,32,0.5)',
+      display: 'grid',
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gridTemplateRows: 'repeat(3, 1fr)',
+      gap: 10,
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E")`,
+        opacity: 0.06, mixBlendMode: 'overlay', pointerEvents: 'none',
+      }} />
+      {verticals.map((v, i) => (
+        <div key={v.name} className="lv2-vert-tile" style={{
+          background: v.grad,
+          borderRadius: 16,
+          padding: 14,
+          color: '#FFFFFF',
+          position: 'relative',
+          overflow: 'hidden',
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          minHeight: 0,
+          animation: `lv2-tile-in 0.6s cubic-bezier(0.16,1,0.3,1) backwards`,
+          animationDelay: `${0.1 + i * 0.06}s`,
+        }}>
+          <div style={{
+            fontSize: 'clamp(28px, 3vw, 38px)', lineHeight: 1,
+          }}>
+            {v.emoji}
+          </div>
+          <div>
+            <div style={{
+              fontFamily: 'Fraunces, serif',
+              fontSize: 'clamp(16px, 2vw, 22px)', fontWeight: 700,
+              letterSpacing: '-0.02em', lineHeight: 1.05,
+            }}>
+              {v.name}
+            </div>
+            <div style={{
+              fontSize: 11, color: v.accent,
+              fontWeight: 600, letterSpacing: '0.02em',
+              marginTop: 4,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {v.sub}
+            </div>
+          </div>
+        </div>
+      ))}
+      <style>{`
+        @keyframes lv2-tile-in {
+          from { opacity: 0; transform: translateY(8px) scale(0.96); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .lv2-vert-tile { transition: transform 0.3s ease; }
+        .lv2-vert-tile:hover { transform: translateY(-3px); }
+      `}</style>
     </div>
   );
 }
