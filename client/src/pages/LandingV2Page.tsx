@@ -949,7 +949,7 @@ export default function LandingV2Page() {
               <ul className="check">
                 <li><Check size={16} /> Pack PME — 4 agents — $20/mo</li>
                 <li><Check size={16} /> 7 packs verticaux WhatsApp (Boutique, Restaurant, Hôtel, Résidence, Salon, Cabinet, Immobilier) — $20/mo</li>
-                <li><Check size={16} /> Super Pack Enterprise — 10 agents — $45/mo (-25%)</li>
+                <li><Check size={16} /> Super Pack Enterprise — 10 agents — $50/mo (-17%)</li>
                 <li><Check size={16} /> Add-on à $5/mo</li>
               </ul>
               <Link to="/marketplace" className="btn-secondary" style={{ marginTop: 24 }}>
@@ -1328,21 +1328,21 @@ export default function LandingV2Page() {
               </Link>
             </div>
 
-            {/* Super Pack */}
+            {/* Super Pack — matches Stripe Pro plan ($49.99/mo, displayed $50) */}
             <div className="price-card">
               <div style={{ fontSize: 32 }}>👑</div>
               <h3 className="display h3" style={{ marginTop: 12 }}>Super Pack</h3>
               <p style={{ fontSize: 13, color: C.inkSoft, marginTop: 4 }}>10 agents · Tout-en-un</p>
               <div style={{ marginTop: 20 }}>
                 <span style={{ fontSize: 14, color: C.inkLight, textDecoration: 'line-through', marginRight: 6 }}>$60</span>
-                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$45</span>
+                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$50</span>
                 <span style={{ fontSize: 14, color: C.inkSoft, fontWeight: 500 }}> /mo</span>
               </div>
               <ul className="check">
                 <li><Check size={16} /> Tous les 10 agents flagship</li>
                 <li><Check size={16} /> Knowledge brain (RAG sur tous tes docs)</li>
                 <li><Check size={16} /> Workflows d'approbation</li>
-                <li><Check size={16} /> Économie -25% vs séparé</li>
+                <li><Check size={16} /> Économie ~17% vs 3 packs séparés</li>
               </ul>
               <Link to="/marketplace" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 24 }}>
                 Choisir <ChevronRight size={16} />
