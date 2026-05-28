@@ -49,8 +49,12 @@ exports.PLANS = {
         features: ['creator', 'marketplace_publish', 'referral'],
     },
     starter: {
-        name: 'Starter',
-        priceIdMonthly: process.env['STRIPE_STARTER_PRICE_ID'] ?? '', // $19.99/mois
+        // ↳ Public-facing name "Pack" (the $20/pack métier pivot, Avril 2026).
+        //   Internal key stays "starter" so the existing Stripe Price ID,
+        //   webhook events, and Firestore companies/{id}.plan == 'starter'
+        //   rows keep working without migration.
+        name: 'Pack',
+        priceIdMonthly: process.env['STRIPE_STARTER_PRICE_ID'] ?? '', // $19.99/mois (affiché 20$)
         priceIdYearly: process.env['STRIPE_STARTER_YEARLY_PRICE_ID'] ?? '', // $200/an
         priceMonthly: 19.99,
         priceYearly: 200,
@@ -66,7 +70,9 @@ exports.PLANS = {
         features: ['documents', 'qa', 'voice', 'comms'],
     },
     pro: {
-        name: 'Pro',
+        // ↳ Public-facing name "Super Pack". Internal key stays "pro" for
+        //   backwards-compat with Stripe / Firestore.
+        name: 'Super Pack',
         priceIdMonthly: process.env['STRIPE_PRO_PRICE_ID'] ?? process.env['STRIPE_BUSINESS_PRICE_ID'] ?? '', // $49.99/mois
         priceIdYearly: process.env['STRIPE_PRO_YEARLY_PRICE_ID'] ?? process.env['STRIPE_BUSINESS_YEARLY_PRICE_ID'] ?? '', // $470/an
         priceMonthly: 49.99,
