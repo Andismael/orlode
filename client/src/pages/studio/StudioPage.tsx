@@ -106,11 +106,13 @@ const STYLES = `
   .studio .card { background: rgba(255,250,240,.04); backdrop-filter: blur(20px); border: 1px solid rgba(255,250,240,.08); border-radius: 18px; padding: 18px; cursor: pointer; transition: all 0.25s ease; }
   .studio .card:hover { transform: translateY(-3px); background: rgba(255,250,240,.08); border-color: rgba(255,250,240,.18); }
   .studio .card.sel { background: ${N.cream}; color: ${N.ink}; border-color: ${N.cream}; transform: translateY(-3px); }
-  .studio .input { background: rgba(0,0,0,.32); border: 1.5px solid rgba(255,250,240,.22); border-radius: 12px; padding: 12px 14px; color: #FFFFFF; font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; outline: none; width: 100%; caret-color: ${N.yellow}; -webkit-text-fill-color: #FFFFFF; }
-  .studio .input:focus { border-color: ${N.yellow}; background: rgba(0,0,0,.4); box-shadow: 0 0 0 3px rgba(245,158,11,.2); }
-  .studio .input::placeholder { color: rgba(255,250,240,.45); font-weight: 500; }
+  /* Light-background inputs — clearer than the dark transparent variant for
+     users who reported flou/illegible text on the dark studio canvas. */
+  .studio .input { background: #FFFFFF; border: 1.5px solid rgba(0,0,0,.12); border-radius: 12px; padding: 12px 14px; color: ${N.ink}; font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; outline: none; width: 100%; caret-color: ${N.emeraldDeep}; -webkit-text-fill-color: ${N.ink}; box-shadow: 0 4px 14px -6px rgba(0,0,0,.2); }
+  .studio .input:focus { border-color: ${N.emerald}; box-shadow: 0 0 0 3px rgba(16,185,129,.22), 0 4px 14px -6px rgba(0,0,0,.25); }
+  .studio .input::placeholder { color: ${N.inkLight}; font-weight: 500; }
   /* Override browser autofill (Chrome/Edge) which else paints inputs yellow */
-  .studio .input:-webkit-autofill, .studio .input:-webkit-autofill:focus { -webkit-box-shadow: 0 0 0 1000px rgba(0,0,0,.32) inset; -webkit-text-fill-color: #FFFFFF; caret-color: ${N.yellow}; }
+  .studio .input:-webkit-autofill, .studio .input:-webkit-autofill:focus { -webkit-box-shadow: 0 0 0 1000px #FFFFFF inset, 0 4px 14px -6px rgba(0,0,0,.2); -webkit-text-fill-color: ${N.ink}; caret-color: ${N.emeraldDeep}; }
   .studio .btn-primary { background: ${N.cream}; color: ${N.ink}; border: none; padding: 13px 22px; border-radius: 12px; font-weight: 800; font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-family: inherit; transition: transform .15s; }
   .studio .btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
   .studio .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
