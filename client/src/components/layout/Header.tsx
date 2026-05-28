@@ -61,14 +61,10 @@ function LangSelector() {
   );
 }
 
-function DarkToggle() {
-  const { dark, toggle } = useThemeStore();
-  return (
-    <button onClick={toggle} className="p-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 hover:text-white" title={dark ? 'Mode clair' : 'Mode sombre'}>
-      {dark ? <Sun size={17} /> : <Moon size={17} />}
-    </button>
-  );
-}
+// Dark mode is parked (stand by) — see themeStore.ts. Hide the toggle
+// entirely so users don't try to click a no-op. Re-export an empty
+// component to avoid touching every Header callsite.
+function DarkToggle() { return null; }
 
 export default function Header({ onMenuClick }: HeaderProps) {
   const location = useLocation();

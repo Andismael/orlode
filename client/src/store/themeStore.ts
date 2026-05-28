@@ -10,27 +10,30 @@ interface ThemeState {
   setDark: (dark: boolean) => void;
 }
 
+// ⚠️ DARK MODE TEMPORARILY DISABLED (stand by) — user request 2026-05.
+// We don't yet ship a fully theme-aware UI: some pages have hard-coded
+// dark surfaces (Studio, marketing landings) and others don't tint cleanly,
+// so the global "dark" class produced inconsistent reads.
+//
+// To re-enable: revert this file to git HEAD before this commit and
+// re-show the Sun/Moon toggle in Header.tsx.
 export const useThemeStore = create<ThemeState>((set) => {
-  // Init from localStorage or system preference
-  const stored = localStorage.getItem('corpmind-theme');
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const initial = stored ? stored === 'dark' : prefersDark;
-
-  // Apply immediately
-  if (initial) document.documentElement.classList.add('dark');
+  // Force light mode regardless of localStorage / system preference.
+  // We still clean up any stale `dark` class that previous sessions added.
+  document.documentElement.classList.remove('dark');
+  try { localStorage.removeItem('corpmind-theme'); } catch { /* ignore */ }
 
   return {
-    dark: initial,
-    toggle: () => set((state) => {
-      const next = !state.dark;
-      localStorage.setItem('corpmind-theme', next ? 'dark' : 'light');
-      document.documentElement.classList.toggle('dark', next);
-      return { dark: next };
-    }),
-    setDark: (dark: boolean) => {
-      localStorage.setItem('corpmind-theme', dark ? 'dark' : 'light');
-      document.documentElement.classList.toggle('dark', dark);
-      set({ dark });
+    dark: false,
+    toggle: () => {
+      // No-op while dark mode is parked. Keeps button handlers safe even
+      // if some legacy code still calls toggle().
+      document.documentElement.classList.remove('dark');
+      set({ dark: false });
+    },
+    setDark: () => {
+      document.documentElement.classList.remove('dark');
+      set({ dark: false });
     },
   };
 });
