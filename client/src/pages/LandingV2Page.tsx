@@ -305,21 +305,56 @@ function cmsValue(cms: Record<string, unknown> | null | undefined, key: string):
   return (typeof v === 'string' && v.trim()) ? v : undefined;
 }
 
-// Convert YouTube / Vimeo URLs to embed format. Returns the original URL if
-// it's already an embed or an unsupported format.
+// Convert any YouTube / Vimeo URL to a robust embed URL.
+// Handles: youtu.be/, youtube.com/watch?v=, /embed/, /shorts/, /v/, /live/,
+// m.youtube.com, www, no-www, query strings, timestamps. Always returns a
+// youtube-nocookie.com embed (privacy-friendly, fewer ad-blocker rejections)
+// with all the params iOS Safari + Android Chrome need to autoplay reliably
+// after a user click: autoplay=1, mute=0, playsinline=1, rel=0, modestbranding.
 function toEmbedUrl(url: string): string {
-  if (!url) return '';
-  if (/\/embed\//.test(url) || /player\.vimeo\.com/.test(url)) return url;
-  // youtu.be/ID
-  const ytShort = url.match(/youtu\.be\/([\w-]+)/);
-  if (ytShort) return `https://www.youtube.com/embed/${ytShort[1]}?autoplay=1&rel=0`;
-  // youtube.com/watch?v=ID  OR  /shorts/ID
-  const yt = url.match(/youtube\.com\/(?:watch\?v=|shorts\/)([\w-]+)/);
-  if (yt) return `https://www.youtube.com/embed/${yt[1]}?autoplay=1&rel=0`;
-  // vimeo.com/ID
-  const vm = url.match(/vimeo\.com\/(\d+)/);
-  if (vm) return `https://player.vimeo.com/video/${vm[1]}?autoplay=1`;
-  return url;
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+
+  // YouTube — extract the 11-char video ID from any known URL shape.
+  const ytPatterns: RegExp[] = [
+    /(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com|youtube-nocookie\.com)\/(?:watch|live)\?v=([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com|youtube-nocookie\.com)\/(?:shorts|v|live)\/([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const p of ytPatterns) {
+    const m = trimmed.match(p);
+    if (m && m[1]) {
+      return `https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
+    }
+  }
+
+  // Vimeo — /video/ID or /ID (channels accepted too).
+  const vm = trimmed.match(/vimeo\.com\/(?:video\/|channels\/[\w-]+\/)?(\d+)/);
+  if (vm) return `https://player.vimeo.com/video/${vm[1]}?autoplay=1&playsinline=1`;
+
+  // Fallback — return as-is so MP4/HLS self-hosted URLs still work in an
+  // iframe (the browser will decide if it can render).
+  return trimmed;
+}
+
+/** Public "Watch on YouTube" URL (canonical) — fallback link beside the
+ *  embedded player in case embedding is disabled by the uploader. */
+function toCanonicalYouTubeUrl(url: string): string | null {
+  if (!url) return null;
+  const patterns = [
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube-nocookie\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/(?:watch|live)\?v=([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/(?:shorts|v|live)\/([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m && m[1]) return `https://www.youtube.com/watch?v=${m[1]}`;
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -555,13 +590,42 @@ function VideoCard({
       </svg>
 
       {playing && embedUrl ? (
-        <iframe
-          src={embedUrl}
-          title={title}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
-          allow="autoplay; fullscreen; picture-in-picture"
-          allowFullScreen
-        />
+        <>
+          <iframe
+            src={embedUrl}
+            title={title}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
+            allow="autoplay; fullscreen; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+          {/* Fallback link — appears below if the uploader has disabled embeds,
+              and is hidden behind the iframe otherwise. Always clickable on tap
+              targets below the player. */}
+          {(() => {
+            const canonical = toCanonicalYouTubeUrl(url);
+            if (!canonical) return null;
+            return (
+              <a
+                href={canonical}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  position: 'absolute', bottom: 10, right: 12, zIndex: 1,
+                  background: 'rgba(0,0,0,0.6)',
+                  color: '#fff', fontSize: 11, fontWeight: 600,
+                  padding: '4px 10px', borderRadius: 100,
+                  textDecoration: 'none',
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  backdropFilter: 'blur(8px)',
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                Voir sur YouTube ↗
+              </a>
+            );
+          })()}
+        </>
       ) : (
         <>
           {/* Title overlay top */}
