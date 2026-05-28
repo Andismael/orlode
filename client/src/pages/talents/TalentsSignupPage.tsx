@@ -271,7 +271,9 @@ export default function TalentsSignupPage() {
         savedAt: serverTimestamp(),
       });
 
-      navigate('/talents/feed?welcome=1');
+      // Land on /mon-profil so the candidate sees what they just created
+      // (status = "En attente de validation") instead of an empty public feed.
+      navigate('/talents/mon-profil?welcome=1');
     } catch (err) {
       setError((err as Error).message);
     } finally {

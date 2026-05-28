@@ -5,13 +5,13 @@
  * Editorial green design — single page, no step wizard (you're already in).
  */
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   collection, doc, getDocs, query, updateDoc, where, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/services/firebase';
 import {
-  ArrowLeft, Save, Loader2, MapPin, Sparkles, Shield, Plus, X, Check,
+  ArrowLeft, Save, Loader2, MapPin, Sparkles, Shield, Plus, X, Check, CheckCircle2,
   Code, Palette, Megaphone, Coffee, Briefcase, Video, Hammer, GraduationCap,
   MessageCircle, Eye, ExternalLink, Clock,
 } from 'lucide-react';
@@ -89,6 +89,13 @@ export default function TalentsMyProfilePage() {
   useSEO({ title: 'Mon profil — Orlode Talents', path: '/talents/mon-profil', noindex: true });
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const [params, setParams] = useSearchParams();
+  const [welcomeOpen, setWelcomeOpen] = useState(params.get('welcome') === '1');
+  const dismissWelcome = () => {
+    setWelcomeOpen(false);
+    params.delete('welcome');
+    setParams(params, { replace: true });
+  };
 
   const [profileId, setProfileId] = useState<string | null>(null);
   const [data, setData] = useState<FormData>({
@@ -280,6 +287,51 @@ export default function TalentsMyProfilePage() {
 
       <main style={{ padding: '40px 32px 120px' }}>
         <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Welcome banner — shown right after signup */}
+          {welcomeOpen && (
+            <div style={{
+              background: `linear-gradient(135deg, ${C.brandSoft}, #FFFFFF)`,
+              border: `1.5px solid ${C.brand}40`,
+              borderRadius: 18,
+              padding: '20px 22px',
+              display: 'flex', alignItems: 'flex-start', gap: 14,
+              position: 'relative',
+            }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: `linear-gradient(135deg, ${C.brandMid}, ${C.brand})`,
+                color: C.white,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <CheckCircle2 size={22} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="tmp-serif" style={{
+                  fontSize: 18, fontWeight: 700, color: C.ink,
+                  letterSpacing: '-0.02em', marginBottom: 4,
+                }}>
+                  Bienvenue · <em style={{ fontStyle: 'italic', color: C.brand }}>profil créé !</em>
+                </div>
+                <p style={{ fontSize: 13, color: C.ink3, margin: 0, lineHeight: 1.55 }}>
+                  Ton profil est <strong>en attente de validation</strong> par notre équipe (sous 48h). Pendant ce temps, vérifie tes infos ci-dessous, ajoute une photo et une vidéo. <strong>Tu recevras un WhatsApp dès que tu seras en ligne</strong> dans le feed public.
+                </p>
+              </div>
+              <button
+                onClick={dismissWelcome}
+                type="button"
+                aria-label="Fermer"
+                style={{
+                  background: 'transparent', border: 'none',
+                  color: C.inkSoft, cursor: 'pointer', padding: 4,
+                  alignSelf: 'flex-start',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
+
           {/* Status pill */}
           <div style={{
             display: 'inline-flex', alignSelf: 'flex-start',
