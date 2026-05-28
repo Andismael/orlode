@@ -113,7 +113,7 @@ const LV2_T: Record<string, Record<LV2Lang, string>> = {
   'pricing.title.l1':{ fr: 'Une',                    en: 'An',                   es: 'Un',                      pt: 'Uma',                     de: 'Ein',                  ar: 'فريق' },
   'pricing.title.em':{ fr: 'équipe IA',              en: 'AI team',              es: 'equipo IA',               pt: 'equipa IA',               de: 'KI-Team',              ar: 'ذكاء اصطناعي' },
   'pricing.title.l2':{ fr: 'à partir de',            en: 'starting at',          es: 'desde',                   pt: 'a partir de',             de: 'ab',                   ar: 'بدءًا من' },
-  'pricing.title.price': { fr: '$20/mois',           en: '$20/month',            es: '$20/mes',                 pt: '$20/mês',                 de: '$20/Monat',            ar: '20$/شهر' },
+  'pricing.title.price': { fr: '$19.99/mois',           en: '$19.99/month',            es: '$19.99/mes',                 pt: '$19.99/mês',                 de: '$19.99/Monat',            ar: '19.99$/شهر' },
   'pricing.lead':    { fr: 'Choisis ton pack. Bring Your Own Everything. Annule à tout moment.', en: 'Pick your pack. Bring Your Own Everything. Cancel anytime.', es: 'Elige tu pack. Bring Your Own Everything. Cancela cuando quieras.', pt: 'Escolhe o teu pack. Bring Your Own Everything. Cancela quando quiseres.', de: 'Wählen Sie Ihr Paket. Bring Your Own Everything. Jederzeit kündbar.', ar: 'اختر حزمتك. أحضر أدواتك معك. ألغِ في أي وقت.' },
   'pricing.choose':  { fr: 'Choisir',                en: 'Choose',               es: 'Elegir',                  pt: 'Escolher',                de: 'Wählen',               ar: 'اختر' },
   'pricing.recommended': { fr: 'RECOMMANDÉ',         en: 'RECOMMENDED',          es: 'RECOMENDADO',             pt: 'RECOMENDADO',             de: 'EMPFOHLEN',            ar: 'موصى به' },
@@ -832,7 +832,7 @@ export default function LandingV2Page() {
               <div style={{ display: 'flex', gap: 24, marginTop: 40, flexWrap: 'wrap' }}>
                 {[
                   { v: '30+', l: t('hero.stat1.lbl') },
-                  { v: '$20', l: t('hero.stat2.lbl') },
+                  { v: '$19.99', l: t('hero.stat2.lbl') },
                   { v: '24/7', l: t('hero.stat3.lbl') },
                 ].map((s, i) => (
                   <div key={i}>
@@ -947,9 +947,9 @@ export default function LandingV2Page() {
                 {t('f2.lead')}
               </p>
               <ul className="check">
-                <li><Check size={16} /> Pack PME — 4 agents — $20/mo</li>
-                <li><Check size={16} /> 7 packs verticaux WhatsApp (Boutique, Restaurant, Hôtel, Résidence, Salon, Cabinet, Immobilier) — $20/mo</li>
-                <li><Check size={16} /> Super Pack Enterprise — 10 agents — $50/mo (-17%)</li>
+                <li><Check size={16} /> Pack PME — 4 agents — $19.99/mo</li>
+                <li><Check size={16} /> 7 packs verticaux WhatsApp (Boutique, Restaurant, Hôtel, Résidence, Salon, Cabinet, Immobilier) — $19.99/mo</li>
+                <li><Check size={16} /> Super Pack Enterprise — 10 agents — $49.99/mo (-17%)</li>
                 <li><Check size={16} /> Add-on à $5/mo</li>
               </ul>
               <Link to="/marketplace" className="btn-secondary" style={{ marginTop: 24 }}>
@@ -1070,7 +1070,7 @@ export default function LandingV2Page() {
               <span style={{ fontSize: 11, color: C.inkSoft }}>inbox unifié dans chaque pack</span>
             </div>
             <p className="lead" style={{ marginTop: 12 }}>
-              Choisis ta verticale — interface dédiée, agents pré-configurés, <strong>$20/mo</strong> par pack.
+              Choisis ta verticale — interface dédiée, agents pré-configurés, <strong>$19.99/mo</strong> par pack.
               Tu peux activer plusieurs packs en parallèle (ex. boutique + restaurant pour un complexe hôtelier).
             </p>
           </div>
@@ -1096,7 +1096,7 @@ export default function LandingV2Page() {
                   {p.pitch}
                 </p>
                 <div className="vert-cta" style={{ color: p.deepColor }}>
-                  <span style={{ fontSize: 12, fontWeight: 700 }}>$20/mo</span>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>$19.99/mo</span>
                   <span className="vert-arrow"><ChevronRight size={16} /></span>
                 </div>
               </Link>
@@ -1293,7 +1293,7 @@ export default function LandingV2Page() {
               <h3 className="display h3" style={{ marginTop: 12 }}>Pack PME</h3>
               <p style={{ fontSize: 13, color: C.inkSoft, marginTop: 4 }}>Vente · Comms · Marketing · Support</p>
               <div style={{ marginTop: 20 }}>
-                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$20</span>
+                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$19.99</span>
                 <span style={{ fontSize: 14, color: C.inkSoft, fontWeight: 500 }}> /mo</span>
               </div>
               <ul className="check">
@@ -1314,7 +1314,7 @@ export default function LandingV2Page() {
               <h3 className="display h3" style={{ marginTop: 12 }}>Pack Entreprise</h3>
               <p style={{ fontSize: 13, color: C.inkSoft, marginTop: 4 }}>Sales · Compta · Support · Comms</p>
               <div style={{ marginTop: 20 }}>
-                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$20</span>
+                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$19.99</span>
                 <span style={{ fontSize: 14, color: C.inkSoft, fontWeight: 500 }}> /mo</span>
               </div>
               <ul className="check">
@@ -1328,14 +1328,14 @@ export default function LandingV2Page() {
               </Link>
             </div>
 
-            {/* Super Pack — matches Stripe Pro plan ($49.99/mo, displayed $50) */}
+            {/* Super Pack — matches Stripe Pro plan ($49.99/mo, displayed exactly) */}
             <div className="price-card">
               <div style={{ fontSize: 32 }}>👑</div>
               <h3 className="display h3" style={{ marginTop: 12 }}>Super Pack</h3>
               <p style={{ fontSize: 13, color: C.inkSoft, marginTop: 4 }}>10 agents · Tout-en-un</p>
               <div style={{ marginTop: 20 }}>
                 <span style={{ fontSize: 14, color: C.inkLight, textDecoration: 'line-through', marginRight: 6 }}>$60</span>
-                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$50</span>
+                <span style={{ fontFamily: 'Fraunces', fontSize: 48, fontWeight: 800, color: C.ink }}>$49.99</span>
                 <span style={{ fontSize: 14, color: C.inkSoft, fontWeight: 500 }}> /mo</span>
               </div>
               <ul className="check">
@@ -1986,7 +1986,7 @@ function FAQSection() {
   const faqs = [
     {
       q: 'Combien de temps pour démarrer ?',
-      a: 'En moins de 5 minutes. Tu crées un compte, choisis ton pack ($20/mois), connectes WhatsApp Business (ou utilise notre numéro plateforme), et tes agents IA sont actifs. Pas de carte bancaire pour le plan gratuit.',
+      a: 'En moins de 5 minutes. Tu crées un compte, choisis ton pack ($19.99/mois), connectes WhatsApp Business (ou utilise notre numéro plateforme), et tes agents IA sont actifs. Pas de carte bancaire pour le plan gratuit.',
     },
     {
       q: 'Quelle différence avec ChatGPT ou un simple chatbot ?',
