@@ -86,12 +86,28 @@ const STYLES = `
     display: inline-flex; align-items: center; gap: 6px;
     font-family: inherit;
   }
-  .input {
-    width: 100%; padding: 10px 14px; border-radius: 10px;
-    border: 1.5px solid rgba(10,42,32,0.1);
-    background: ${C.cream}; font-size: 14px; color: ${C.ink};
+  .input, .input:focus {
+    width: 100%; padding: 11px 14px; border-radius: 10px;
+    border: 1.5px solid rgba(10,42,32,0.18);
+    background: #FFFFFF;
+    color: ${C.ink};
+    -webkit-text-fill-color: ${C.ink};
+    caret-color: ${C.emeraldDeep};
+    font-size: 14px; font-weight: 500;
     font-family: inherit; outline: none;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    transition: border 0.15s ease, box-shadow 0.15s ease;
   }
+  .input::placeholder { color: ${C.inkLight}; font-weight: 400; }
+  .input:focus { border-color: ${C.emerald}; box-shadow: 0 0 0 3px rgba(16,185,129,.18), 0 1px 3px rgba(0,0,0,0.04); }
+  /* Override Chrome/Edge autofill — keeps white bg + dark text instead of the
+     yellow wash that hides everything the user typed. */
+  .input:-webkit-autofill, .input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px #FFFFFF inset, 0 1px 3px rgba(0,0,0,0.04);
+    -webkit-text-fill-color: ${C.ink};
+    caret-color: ${C.emeraldDeep};
+  }
+  textarea.input { resize: vertical; min-height: 72px; line-height: 1.5; }
   .label {
     display:flex; align-items:center; gap:6px;
     font-size: 11px; font-weight: 700; letter-spacing: '0.05em';
