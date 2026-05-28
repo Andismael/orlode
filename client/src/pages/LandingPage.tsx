@@ -84,13 +84,13 @@ const MARKETPLACE_AGENTS = [
   { icon: '🏦', name: 'Agent Assurance', desc: 'Polices, sinistres, risk scoring', color: '#1D4ED8', industry: 'Assurance' },
 ];
 
-// Pricing model April 2026: $20/pack métier · 30 jours gratuits sans CB.
+// Pricing model April 2026: $19.99/pack métier · 30 jours gratuits sans CB.
 // Old Starter/Pro/Premium tiers retired — packs are picked in onboarding wizard
 // or marketplace and contain 7 agents each (4 spécialisés + 3 core).
 const PLANS_M = [
   { name: 'Free', price: '$0', sub: '', desc: 'Pour tester la plateforme', features: ['1 agent Knowledge', '10 documents', '1 utilisateur', 'Aucun engagement'], cta: 'Essayer gratuitement', featured: false },
-  { name: 'Pack métier', price: '$20', sub: '/mois', desc: '🎁 30 jours gratuits sans CB', features: ['4 agents spécialisés (RH, Sales, Resto...)', '+ 3 agents core (Knowledge, Workflow, Wildcard)', 'Orchestrateur IA inclus', 'BYOE : ta clé OpenAI/Claude/Gemini', 'WhatsApp Business + signature électronique'], cta: 'Démarrer mon essai', featured: true },
-  { name: 'Super Pack', price: '$45', sub: '/mois', desc: '11 agents flagship · -25%', features: ['8 agents spécialisés (Sales, Marketing, Comms, Support, Compta, RH, Réception, Cyber)', '+ 3 agents core', 'Orchestrateur IA inclus', 'Knowledge brain unifié', 'Économise vs 3 packs séparés'], cta: 'Activer le Super Pack', featured: false },
+  { name: 'Pack métier', price: '$19.99', sub: '/mois', desc: '🎁 30 jours gratuits sans CB', features: ['4 agents spécialisés (RH, Sales, Resto...)', '+ 3 agents core (Knowledge, Workflow, Wildcard)', 'Orchestrateur IA inclus', 'BYOE : ta clé OpenAI/Claude/Gemini', 'WhatsApp Business + signature électronique'], cta: 'Démarrer mon essai', featured: true },
+  { name: 'Super Pack', price: '$49.99', sub: '/mois', desc: '11 agents flagship · -17%', features: ['8 agents spécialisés (Sales, Marketing, Comms, Support, Compta, RH, Réception, Cyber)', '+ 3 agents core', 'Orchestrateur IA inclus', 'Knowledge brain unifié', 'Économise vs 3 packs séparés'], cta: 'Activer le Super Pack', featured: false },
 ];
 
 const TESTIMONIALS = [

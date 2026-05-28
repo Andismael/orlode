@@ -118,7 +118,7 @@ function PackCard({ emoji, title, desc, color }: { emoji: string; title: string;
         <div className="text-5xl mb-5">{emoji}</div>
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-2xl font-black">{title}</h3>
-          <span className="rounded-full bg-white text-slate-950 px-3 py-1 text-sm font-black">$20</span>
+          <span className="rounded-full bg-white text-slate-950 px-3 py-1 text-sm font-black">$19.99</span>
         </div>
         <p className="text-white/60 mt-3 leading-relaxed">{desc}</p>
         <div className="mt-6 space-y-3 text-sm text-white/80">
@@ -139,8 +139,8 @@ function PackCard({ emoji, title, desc, color }: { emoji: string; title: string;
 
 export default function AboutPage() {
   useSEO({
-    title: 'Orlode — Bring Your Own AI · $20 per pack',
-    description: 'Your AI + Messaging system, powered by your infrastructure. Connect OpenAI, Claude or Gemini. No usage markup, no lock-in. $20 per business pack.',
+    title: 'Orlode — Bring Your Own AI · $19.99 per pack',
+    description: 'Your AI + Messaging system, powered by your infrastructure. Connect OpenAI, Claude or Gemini. No usage markup, no lock-in. $19.99 per business pack.',
     path: '/about',
   });
 
@@ -232,7 +232,7 @@ export default function AboutPage() {
           <motion.div initial={{ opacity: 0, y: 36 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
             <div className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-4 py-2 text-sm text-white/80 mb-7 backdrop-blur-xl">
               <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
-              {lp('20 $ par pack · Le client paie sa propre IA + WhatsApp', '$20 per pack · Client pays own AI + WhatsApp')}
+              {lp('19.99 $ par pack · Le client paie sa propre IA + WhatsApp', '$19.99 per pack · Client pays own AI + WhatsApp')}
             </div>
             <h1 className="text-6xl md:text-8xl font-black leading-[0.9] tracking-tight">
               {lp('Votre IA + système de messagerie.', 'Your AI + Messaging system.')}
@@ -546,7 +546,7 @@ export default function AboutPage() {
             <div className="relative z-10 grid md:grid-cols-[1.1fr_0.9fr] gap-10 items-center">
               <div>
                 <p className="font-black text-violet-600">{lp('Tarification simple', 'Simple pricing')}</p>
-                <h2 className="text-5xl md:text-6xl font-black mt-2 leading-tight">{lp('20 $ par pack.', '$20 per pack.')}</h2>
+                <h2 className="text-5xl md:text-6xl font-black mt-2 leading-tight">{lp('19.99 $ par pack.', '$19.99 per pack.')}</h2>
                 <p className="mt-5 text-slate-600 text-lg leading-relaxed">
                   {lp(
                     "Les clients apportent leur IA et leur WhatsApp. Orlode fournit la messagerie, le système d'agents et le cœur d'automatisation business.",
@@ -567,7 +567,7 @@ export default function AboutPage() {
               <div className="rounded-[2rem] bg-slate-950 text-white p-7 shadow-2xl">
                 <p className="text-white/50">{lp('À partir de', 'Starts at')}</p>
                 <div className="flex items-end gap-2 mt-2">
-                  <p className="text-7xl font-black">$20</p>
+                  <p className="text-7xl font-black">$19.99</p>
                   <p className="mb-3 text-white/50">/{lp('mois', 'mo')}</p>
                 </div>
                 <p className="text-white/60">{lp('par pack métier', 'per business pack')}</p>
