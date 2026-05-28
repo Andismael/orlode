@@ -14,6 +14,7 @@ export default function ByoeGateBanner() {
   // Read raw company doc fields not always present in type
   const c = company as unknown as {
     byoeEnabled?: boolean;
+    hostedByOrlode?: boolean;
     hostedException?: { expiresAt?: string; reason?: string };
   } | null;
 
@@ -23,6 +24,10 @@ export default function ByoeGateBanner() {
 
   if (!c) return null;
   if (dismissed) return null;
+
+  // SuperAdmin has granted permanent Orlode hosting → no BYOE needed, ever.
+  // Set via PATCH /api/superadmin/companies/:id/hosted-by-orlode.
+  if (c.hostedByOrlode === true) return null;
 
   const byoeOk = c.byoeEnabled === true;
   const ex = c.hostedException;
